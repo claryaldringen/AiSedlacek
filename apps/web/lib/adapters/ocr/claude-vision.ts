@@ -3,6 +3,16 @@ import type { IOcrEngine } from '@ai-sedlacek/shared';
 import type { OcrEngineResult, OcrOptions } from '@ai-sedlacek/shared';
 import { OCR_TRANSCRIPTION_PROMPT } from '@ai-sedlacek/shared';
 
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+function detectMediaType(buffer: Buffer): ImageMediaType {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+  if (buffer[0] === 0x52 && buffer[1] === 0x49) return 'image/webp';
+  if (buffer[0] === 0x47 && buffer[1] === 0x49) return 'image/gif';
+  return 'image/jpeg';
+}
+
 export class ClaudeVisionOcrEngine implements IOcrEngine {
   readonly name = 'claude_vision' as const;
   readonly role = 'recognizer' as const;
@@ -12,11 +22,11 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
   }
 
   async recognize(image: Buffer, options?: OcrOptions): Promise<OcrEngineResult> {
-    void options; // options reserved for future use (language hints, tier)
+    void options;
     const startTime = Date.now();
 
     const client = new Anthropic();
-    const imageBase64 = image.toString('base64');
+    const mediaType = detectMediaType(image);
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -29,8 +39,8 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: 'image/jpeg',
-                data: imageBase64,
+                media_type: mediaType,
+                data: image.toString('base64'),
               },
             },
             {
