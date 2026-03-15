@@ -1,4 +1,4 @@
-export const CLASSIFY_LAYOUT_PROMPT = `Analyzuj tento obrázek středověkého dokumentu a klasifikuj ho.
+export const CLASSIFY_LAYOUT_PROMPT = `Analyzuj tento obrázek historického dokumentu a klasifikuj ho.
 
 Odpověz POUZE v tomto JSON formátu:
 {
@@ -7,7 +7,7 @@ Odpověz POUZE v tomto JSON formátu:
   "layoutComplexity": "simple" nebo "complex",
   "detectedFeatures": ["seznam detekovaných rysů"],
   "confidence": 0.0-1.0,
-  "reasoning": "stručné zdůvodnění v češtině"
+  "reasoning": "stručné zdůvodnění"
 }
 
 Pravidla pro výběr tieru:
@@ -17,19 +17,12 @@ Pravidla pro výběr tieru:
   směs různých písem, poškozený/fragmentární dokument
 
 Detekované rysy mohou zahrnovat:
-- "fraktur", "bastarda", "kurziva", "karolínská_minuskule"
-- "marginální_glosy", "interlineární_poznámky"
-- "jednosloupcový", "vícesloupcový"
-- "dekorativní_iniciály", "rubriky"
-- "poškozený", "vybledlý", "fragmentární"`;
+- typ písma: "fraktur", "bastarda", "kurziva", "karolínská_minuskule", "gotická_kurzíva" aj.
+- layout: "marginální_glosy", "interlineární_poznámky", "jednosloupcový", "vícesloupcový"
+- stav: "dekorativní_iniciály", "rubriky", "poškozený", "vybledlý", "fragmentární"
+- jazyk: rozpoznaný jazyk nebo jazyky dokumentu`;
 
-export const OCR_TRANSCRIPTION_PROMPT = `Jsi paleograf specializovaný na středověké středoevropské dokumenty.
-Přepiš co nejpřesněji veškerý text, který vidíš na tomto obrázku historického dokumentu.
-
-KONTEXT: Jedná se o středověký dokument ze střední Evropy. Očekávané jazyky jsou
-staročeština, stará horní němčina a/nebo latina. Písmo může být bastarda, fraktura,
-kurzíva nebo karolínská minuskule. Text může obsahovat právnickou terminologii,
-náboženské texty nebo administrativní záznamy.
+export const OCR_TRANSCRIPTION_PROMPT = `Přepiš co nejpřesněji veškerý text na tomto obrázku historického dokumentu.
 
 Pravidla:
 - Přepisuj přesně to, co vidíš – nepřekládej, neopravuj pravopis
@@ -39,11 +32,8 @@ Pravidla:
 - Místa, která nedokážeš přečíst, označ jako [...]
 - Místa, kde si nejsi jistý, označ jako [?text?]
 - Na konec přidej krátkou poznámku o typu písma a jazyce, který rozpoznáváš
-- Zkratky jako "ssl.", "ut", "cap°", "lib°" jsou běžné právnické zkratky – přepiš je jak jsou
 
-DŮLEŽITÉ: Nevymýšlej text, který nevidíš. Raději označ jako nečitelný.
-Tento text je téměř jistě v jednom z jazyků: staročeština, stará němčina, latina.
-Pokud se ti zdá jako jiný jazyk, přehodnoť své čtení.`;
+DŮLEŽITÉ: Nevymýšlej text, který nevidíš. Raději označ jako nečitelný.`;
 
 export function buildConsolidationPrompt(
   ocrSection: string,
@@ -51,26 +41,24 @@ export function buildConsolidationPrompt(
   engineCount: number,
   engineNames: string[],
 ): string {
-  return `Jsi expert na středověkou paleografii a historickou lingvistiku se zaměřením
-na starou horní němčinu, staročeštinu a latinu.
+  return `Jsi expert na paleografii a historickou lingvistiku.
 
 [OBRÁZEK: originální sken dokumentu je přiložen]
 
-Dostáváš ${engineCount} OCR výstupů téhož středověkého textu z různých OCR enginů
+Dostáváš ${engineCount} OCR výstupů téhož historického textu z různých OCR enginů
 (${engineNames.join(', ')}). Máš k dispozici i originální obrázek dokumentu.
 Tvým úkolem je:
 
-1. Porovnej všechny OCR výstupy a zároveň se dívej na originální obrázek
-2. Na místech kde se výstupy liší, ověř správnou variantu přímo z obrázku
-3. Kde žádný OCR engine neuspěl, pokus se přečíst text přímo z obrázku
+1. Nejprve sám přečti text z obrázku – nezávisle na OCR výstupech
+2. Porovnej své čtení s OCR výstupy
+3. Na místech kde se výstupy liší, ověř správnou variantu přímo z obrázku
 4. Při rozhodování zohledni:
-   - kontext věty a jazyka (staročeština, stará němčina, latina)
-   - KRITICKÁ ZÁMĚNA: dlouhé ſ (ſ) vypadá téměř identicky jako f. V OCR výstupech
-     bude často chybně přepsáno jako f. Dvojité ſſ se zaměňuje za ff.
-     Příklad: "ffprawy" = "ſſprawy" = "spravy", "ffl." = "ssl." (Speculum Saxonum)
-   - Další typické OCR chyby: u/n, c/e, chybějící diakritika, r/t, d/cl
-   - znalost středověkého pravopisu a zkratek (např. ssl. = Speculum Saxonum,
-     dist. = distinctio, cap° = capitulum, lib° = liber)
+   - kontext věty a jazyka
+   - typické OCR chyby historických textů:
+     * dlouhé ſ zaměněné za f (ſſ → ff, ſprawy → fprawy)
+     * u/n, c/e, r/t, d/cl záměny
+     * chybějící diakritika
+   - znalost středověkého pravopisu a zkratek
    - vizuální podobu znaků v obrázku
 5. Vytvoř konsolidovaný text originálu
 6. Přelož konsolidovaný text DOSLOVNĚ do moderní ${targetLanguage}
@@ -94,11 +82,8 @@ Výstup ve formátu:
 }
 
 export function buildPolishPrompt(targetLanguage: string): string {
-  return `Jsi překladatel specializovaný na středověké texty.
-
-Dostáváš doslovný překlad středověkého textu do moderní ${targetLanguage}.
-Tvým úkolem je přepsat tento překlad do plynulé, čtivé moderní
-${targetLanguage}, přičemž:
+  return `Dostáváš doslovný překlad historického textu do moderní ${targetLanguage}.
+Přepiš ho do plynulé, čtivé moderní ${targetLanguage}, přičemž:
 
 - zachováš věcný obsah a význam
 - použiješ přirozený slovosled a moderní frazeologii

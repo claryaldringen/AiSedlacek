@@ -142,7 +142,7 @@ describe('OllamaLayoutClassifier', () => {
       expect(callArgs).toBeDefined();
       const body = JSON.parse(callArgs![1]?.body as string);
       // CLASSIFY_LAYOUT_PROMPT contains this distinctive text
-      expect(body.messages[0].content).toContain('středověkého dokumentu');
+      expect(body.messages[0].content).toContain('historického dokumentu');
     });
 
     it('parses JSON embedded in surrounding text', async () => {

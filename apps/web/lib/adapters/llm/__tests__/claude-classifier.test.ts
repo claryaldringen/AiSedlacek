@@ -143,7 +143,7 @@ describe('ClaudeLayoutClassifier', () => {
         (c: { type: string }) => c.type === 'text',
       ) as { type: string; text?: string } | undefined;
       // CLASSIFY_LAYOUT_PROMPT contains this distinctive Czech text
-      expect(textContent?.text).toContain('středověkého dokumentu');
+      expect(textContent?.text).toContain('historického dokumentu');
     });
 
     it('parses JSON embedded in surrounding text', async () => {

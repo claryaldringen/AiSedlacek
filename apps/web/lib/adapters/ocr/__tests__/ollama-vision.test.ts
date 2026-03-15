@@ -155,8 +155,8 @@ describe('OllamaVisionOcrEngine', () => {
       const callArgs = vi.mocked(fetch).mock.calls[0];
       expect(callArgs).toBeDefined();
       const body = JSON.parse(callArgs![1]?.body as string);
-      // OCR_TRANSCRIPTION_PROMPT contains this distinctive Czech text
-      expect(body.messages[0].content).toContain('paleograf');
+      // OCR_TRANSCRIPTION_PROMPT contains this distinctive text
+      expect(body.messages[0].content).toContain('Přepiš co nejpřesněji');
     });
   });
 });
