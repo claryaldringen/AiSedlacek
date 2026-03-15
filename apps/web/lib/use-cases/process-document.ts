@@ -39,32 +39,12 @@ export class ProcessDocument {
     ].join('. ');
     const ocrResults = await this.ensemble.run(imageBuffer, processedImage, { context: ocrContext });
 
-    // Step 4: Consolidate and translate (original image for multimodal)
-    let consolidatedText = '';
-    let literalTranslation = '';
-    let polishedTranslation = '';
-    let confidenceNotes: string[] = [];
-
-    try {
-      const consolidation = await this.translator.consolidateAndTranslate(
-        imageBuffer,
-        ocrResults,
-        targetLanguage,
-      );
-      consolidatedText = consolidation.consolidatedText;
-      literalTranslation = consolidation.literalTranslation;
-      confidenceNotes = consolidation.notes;
-
-      // Step 5: Polish translation
-      polishedTranslation = await this.translator.polish(
-        consolidation.literalTranslation,
-        targetLanguage,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Neznámá chyba';
-      console.error('[ProcessDocument] Konsolidace/překlad selhal:', message);
-      confidenceNotes = [`Konsolidace/překlad nedostupný: ${message}`];
-    }
+    // Step 4: Consolidation and translation are temporarily disabled
+    // TODO: Re-enable once OCR quality is sufficient
+    const consolidatedText = '';
+    const literalTranslation = '';
+    const polishedTranslation = '';
+    const confidenceNotes: string[] = ['Konsolidace a překlad dočasně vypnuty – probíhá ladění OCR'];
 
     // Step 6: Detect language from OCR results (use first recognizer engine output)
     const detectedLanguage = this.detectLanguage(ocrResults);
