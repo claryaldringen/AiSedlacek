@@ -48,7 +48,7 @@ describe('EnsembleOrchestrator', () => {
       const orchestrator = new EnsembleOrchestrator([engine]);
       const options: OcrOptions = { language: 'deu' };
 
-      await orchestrator.run(imageBuffer, options);
+      await orchestrator.run(imageBuffer, undefined, options);
 
       expect(engine.recognize).toHaveBeenCalledWith(imageBuffer, options);
     });

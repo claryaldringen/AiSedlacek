@@ -25,16 +25,17 @@ export class ProcessDocument {
     originalImageUrl: string,
     targetLanguage: string,
   ): Promise<ProcessingResult> {
-    // Step 1: Preprocess image
+    // Step 1: Preprocess image (for Tesseract – Claude Vision gets the original)
     const processedImage = await this.preprocessor.process(imageBuffer);
 
-    // Step 2: Classify layout
-    const classification = await this.classifier.classify(processedImage);
+    // Step 2: Classify layout (original image – Claude Vision works better with color)
+    const classification = await this.classifier.classify(imageBuffer);
 
     // Step 3: Run OCR ensemble
-    const ocrResults = await this.ensemble.run(processedImage);
+    // Claude Vision engines get original, Tesseract gets preprocessed
+    const ocrResults = await this.ensemble.run(imageBuffer, processedImage);
 
-    // Step 4: Consolidate and translate (graceful – partial result on failure)
+    // Step 4: Consolidate and translate (original image for multimodal)
     let consolidatedText = '';
     let literalTranslation = '';
     let polishedTranslation = '';
@@ -42,7 +43,7 @@ export class ProcessDocument {
 
     try {
       const consolidation = await this.translator.consolidateAndTranslate(
-        processedImage,
+        imageBuffer,
         ocrResults,
         targetLanguage,
       );

@@ -87,11 +87,8 @@ describe('ProcessDocument', () => {
     expect(translator.polish).toHaveBeenCalled();
   });
 
-  it('passes processed image (not original) to classifier and OCR', async () => {
-    const processedImage = Buffer.from('processed-image-bytes');
-    const preprocessor: IPreprocessor = {
-      process: vi.fn().mockResolvedValue(processedImage),
-    };
+  it('passes original image to classifier and Claude engines, preprocessed to Tesseract', async () => {
+    const preprocessor = makePreprocessor();
     const classifier = makeClassifier();
     const engine = makeOcrEngine();
     const translator = makeTranslator();
@@ -99,23 +96,21 @@ describe('ProcessDocument', () => {
     const useCase = new ProcessDocument(preprocessor, classifier, [engine], translator);
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
-    expect(classifier.classify).toHaveBeenCalledWith(processedImage);
-    expect(engine.recognize).toHaveBeenCalledWith(processedImage, undefined);
+    // Classifier gets original image (better for Claude Vision)
+    expect(classifier.classify).toHaveBeenCalledWith(imageBuffer);
+    // LLM engines get original image (not preprocessed)
+    expect(engine.recognize).toHaveBeenCalledWith(imageBuffer, undefined);
   });
 
-  it('passes OCR results and processed image to translator.consolidateAndTranslate', async () => {
-    const processedImage = Buffer.from('processed');
-    const preprocessor: IPreprocessor = {
-      process: vi.fn().mockResolvedValue(processedImage),
-    };
+  it('passes original image to translator.consolidateAndTranslate', async () => {
     const engine = makeOcrEngine();
     const translator = makeTranslator();
 
-    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [engine], translator);
+    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [engine], translator);
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
     expect(translator.consolidateAndTranslate).toHaveBeenCalledWith(
-      processedImage,
+      imageBuffer,
       [mockOcrResult],
       targetLanguage,
     );

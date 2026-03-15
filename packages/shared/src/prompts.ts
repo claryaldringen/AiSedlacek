@@ -23,8 +23,13 @@ Detekované rysy mohou zahrnovat:
 - "dekorativní_iniciály", "rubriky"
 - "poškozený", "vybledlý", "fragmentární"`;
 
-export const OCR_TRANSCRIPTION_PROMPT = `Jsi paleograf specializovaný na středověké dokumenty. Přepiš co nejpřesněji
-veškerý text, který vidíš na tomto obrázku historického dokumentu.
+export const OCR_TRANSCRIPTION_PROMPT = `Jsi paleograf specializovaný na středověké středoevropské dokumenty.
+Přepiš co nejpřesněji veškerý text, který vidíš na tomto obrázku historického dokumentu.
+
+KONTEXT: Jedná se o středověký dokument ze střední Evropy. Očekávané jazyky jsou
+staročeština, stará horní němčina a/nebo latina. Písmo může být bastarda, fraktura,
+kurzíva nebo karolínská minuskule. Text může obsahovat právnickou terminologii,
+náboženské texty nebo administrativní záznamy.
 
 Pravidla:
 - Přepisuj přesně to, co vidíš – nepřekládej, neopravuj pravopis
@@ -34,8 +39,11 @@ Pravidla:
 - Místa, která nedokážeš přečíst, označ jako [...]
 - Místa, kde si nejsi jistý, označ jako [?text?]
 - Na konec přidej krátkou poznámku o typu písma a jazyce, který rozpoznáváš
+- Zkratky jako "ssl.", "ut", "cap°", "lib°" jsou běžné právnické zkratky – přepiš je jak jsou
 
-DŮLEŽITÉ: Nevymýšlej text, který nevidíš. Raději označ jako nečitelný.`;
+DŮLEŽITÉ: Nevymýšlej text, který nevidíš. Raději označ jako nečitelný.
+Tento text je téměř jistě v jednom z jazyků: staročeština, stará němčina, latina.
+Pokud se ti zdá jako jiný jazyk, přehodnoť své čtení.`;
 
 export function buildConsolidationPrompt(
   ocrSection: string,

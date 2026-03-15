@@ -3,7 +3,7 @@ import type { IOcrEngine, OcrEngineResult, OcrOptions } from '@ai-sedlacek/share
 export class EnsembleOrchestrator {
   constructor(private readonly engines: IOcrEngine[]) {}
 
-  async run(image: Buffer, options?: OcrOptions): Promise<OcrEngineResult[]> {
+  async run(originalImage: Buffer, preprocessedImage?: Buffer, options?: OcrOptions): Promise<OcrEngineResult[]> {
     if (this.engines.length === 0) {
       throw new Error('No OCR engines configured');
     }
@@ -39,7 +39,10 @@ export class EnsembleOrchestrator {
         const startTime = Date.now();
         console.log(`[Ensemble] Starting engine "${engine.name}"`);
         try {
-          const result = await engine.recognize(image, options);
+          // Tesseract gets preprocessed image (better for OCR), LLM engines get original
+          const imageForEngine =
+            engine.name === 'tesseract' && preprocessedImage ? preprocessedImage : originalImage;
+          const result = await engine.recognize(imageForEngine, options);
           const elapsed = Date.now() - startTime;
           console.log(
             `[Ensemble] Engine "${engine.name}" finished in ${elapsed}ms, output length: ${result.text.length}`,
