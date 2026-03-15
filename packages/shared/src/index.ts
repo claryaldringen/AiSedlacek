@@ -11,17 +11,17 @@ export type {
   TranskribusConfig,
   KrakenConfig,
   OllamaConfig,
-} from './types.js';
+} from './types';
 
-export type { IOcrEngine } from './domain/ocr-engine.js';
-export type { ITranslator } from './domain/translator.js';
-export type { IPreprocessor } from './domain/preprocessor.js';
-export type { ILayoutClassifier } from './domain/classifier.js';
-export type { IStorageProvider, StorageResult } from './domain/storage.js';
+export type { IOcrEngine } from './domain/ocr-engine';
+export type { ITranslator } from './domain/translator';
+export type { IPreprocessor } from './domain/preprocessor';
+export type { ILayoutClassifier } from './domain/classifier';
+export type { IStorageProvider, StorageResult } from './domain/storage';
 
 export {
   CLASSIFY_LAYOUT_PROMPT,
   OCR_TRANSCRIPTION_PROMPT,
   buildConsolidationPrompt,
   buildPolishPrompt,
-} from './prompts.js';
+} from './prompts';

@@ -1,4 +1,4 @@
-import type { OcrEngineResult, OcrEngineName, OcrOptions } from '../types.js';
+import type { OcrEngineResult, OcrEngineName, OcrOptions } from '../types';
 
 export interface IOcrEngine {
   readonly name: OcrEngineName;

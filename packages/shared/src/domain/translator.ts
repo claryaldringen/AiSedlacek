@@ -1,4 +1,4 @@
-import type { OcrEngineResult, ConsolidationResult } from '../types.js';
+import type { OcrEngineResult, ConsolidationResult } from '../types';
 
 export interface ITranslator {
   consolidateAndTranslate(
