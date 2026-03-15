@@ -1,32 +1,37 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import fs from 'fs/promises';
 import { createPipeline } from '@/lib/infrastructure/container';
 import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+function sendEvent(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  event: string,
+  data: unknown,
+): void {
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
   let body: unknown;
 
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON v těle požadavku' }, { status: 400 });
+    return Response.json({ error: 'Neplatný JSON v těle požadavku' }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null || !('imageUrl' in body)) {
-    return NextResponse.json({ error: 'Chybí povinné pole "imageUrl"' }, { status: 400 });
+    return Response.json({ error: 'Chybí povinné pole "imageUrl"' }, { status: 400 });
   }
 
   const { imageUrl } = body as { imageUrl: string };
 
   if (typeof imageUrl !== 'string' || imageUrl.trim() === '') {
-    return NextResponse.json(
-      { error: 'Pole "imageUrl" musí být neprázdný řetězec' },
-      { status: 400 },
-    );
+    return Response.json({ error: 'Pole "imageUrl" musí být neprázdný řetězec' }, { status: 400 });
   }
 
-  // Resolve file path from API URL (/api/images/uuid-file.jpg → tmp/uploads/uuid-file.jpg)
   const filename = imageUrl.replace(/^\/api\/images\//, '');
   const imagePath = `tmp/uploads/${filename}`;
 
@@ -34,24 +39,77 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     imageBuffer = await fs.readFile(imagePath);
   } catch {
-    return NextResponse.json({ error: `Soubor nebyl nalezen: ${imagePath}` }, { status: 400 });
+    return Response.json({ error: `Soubor nebyl nalezen: ${imagePath}` }, { status: 400 });
   }
 
-  try {
-    // Save preprocessed image for UI preview
-    const preprocessor = new SharpPreprocessor();
-    const preprocessedBuffer = await preprocessor.process(imageBuffer);
-    const storage = new LocalStorageProvider();
-    const { url: preprocessedUrl } = await storage.upload(preprocessedBuffer, 'preprocessed.png');
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        // Step 1: Preprocessing
+        sendEvent(controller, encoder, 'progress', {
+          step: 'preprocessing',
+          message: 'Předzpracování obrázku…',
+          progress: 10,
+        });
 
-    const pipeline = createPipeline();
-    const result = await pipeline.execute(imageBuffer, imageUrl, 'češtiny');
-    result.preprocessedImage = preprocessedUrl;
+        const preprocessor = new SharpPreprocessor();
+        const preprocessedBuffer = await preprocessor.process(imageBuffer);
+        const storage = new LocalStorageProvider();
+        const { url: preprocessedUrl } = await storage.upload(
+          preprocessedBuffer,
+          'preprocessed.png',
+        );
 
-    return NextResponse.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Neznámá chyba pipeline';
-    console.error('[/api/process] Pipeline error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+        sendEvent(controller, encoder, 'progress', {
+          step: 'preprocessing_done',
+          message: 'Obrázek předzpracován',
+          progress: 20,
+          preprocessedImage: preprocessedUrl,
+        });
+
+        // Step 2: Classification
+        sendEvent(controller, encoder, 'progress', {
+          step: 'classification',
+          message: 'Klasifikace dokumentu…',
+          progress: 25,
+        });
+
+        // Step 3-4: Pipeline (classification + OCR)
+        const pipeline = createPipeline();
+
+        // Hook into pipeline progress via console output (pipeline logs steps)
+        sendEvent(controller, encoder, 'progress', {
+          step: 'ocr',
+          message: 'Spouštím OCR enginy (Claude Vision + Tesseract)…',
+          progress: 30,
+        });
+
+        const result = await pipeline.execute(imageBuffer, imageUrl, 'češtiny');
+        result.preprocessedImage = preprocessedUrl;
+
+        sendEvent(controller, encoder, 'progress', {
+          step: 'done',
+          message: 'Hotovo',
+          progress: 100,
+        });
+
+        sendEvent(controller, encoder, 'result', result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Neznámá chyba pipeline';
+        console.error('[/api/process] Pipeline error:', message);
+        sendEvent(controller, encoder, 'error', { error: message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 }

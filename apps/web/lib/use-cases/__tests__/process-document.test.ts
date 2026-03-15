@@ -6,7 +6,6 @@ import type {
   ITranslator,
   DocumentClassification,
   OcrEngineResult,
-  ConsolidationResult,
 } from '@ai-sedlacek/shared';
 import { ProcessDocument } from '../process-document.js';
 
@@ -26,12 +25,6 @@ const mockOcrResult: OcrEngineResult = {
   role: 'recognizer',
   text: 'Středověký přepsaný text',
   processingTimeMs: 100,
-};
-
-const mockConsolidation: ConsolidationResult = {
-  consolidatedText: 'Konsolidovaný text originálu',
-  literalTranslation: 'Doslovný překlad textu',
-  notes: ['Nejisté místo na řádku 2'],
 };
 
 function makePreprocessor(): IPreprocessor {
@@ -57,8 +50,8 @@ function makeOcrEngine(available = true): IOcrEngine {
 
 function makeTranslator(): ITranslator {
   return {
-    consolidateAndTranslate: vi.fn().mockResolvedValue(mockConsolidation),
-    polish: vi.fn().mockResolvedValue('Učesaný překlad textu'),
+    consolidateAndTranslate: vi.fn(),
+    polish: vi.fn(),
   };
 }
 
@@ -69,7 +62,7 @@ describe('ProcessDocument', () => {
   const imageUrl = '/tmp/uploads/test-image.jpg';
   const targetLanguage = 'češtiny';
 
-  it('runs the full pipeline in correct order', async () => {
+  it('runs preprocessing, classification and OCR', async () => {
     const preprocessor = makePreprocessor();
     const classifier = makeClassifier();
     const engine = makeOcrEngine();
@@ -78,63 +71,32 @@ describe('ProcessDocument', () => {
     const useCase = new ProcessDocument(preprocessor, classifier, [engine], translator);
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
-    // Verify order via call counts and that each was called
     expect(preprocessor.process).toHaveBeenCalledWith(imageBuffer);
     expect(classifier.classify).toHaveBeenCalled();
     expect(engine.isAvailable).toHaveBeenCalled();
     expect(engine.recognize).toHaveBeenCalled();
-    expect(translator.consolidateAndTranslate).toHaveBeenCalled();
-    expect(translator.polish).toHaveBeenCalled();
   });
 
-  it('passes original image to classifier and Claude engines, preprocessed to Tesseract', async () => {
-    const preprocessor = makePreprocessor();
+  it('passes original image to classifier', async () => {
     const classifier = makeClassifier();
-    const engine = makeOcrEngine();
-    const translator = makeTranslator();
-
-    const useCase = new ProcessDocument(preprocessor, classifier, [engine], translator);
+    const useCase = new ProcessDocument(makePreprocessor(), classifier, [makeOcrEngine()], makeTranslator());
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
-    // Classifier gets original image (better for Claude Vision)
     expect(classifier.classify).toHaveBeenCalledWith(imageBuffer);
-    // LLM engines get original image with classification context
-    expect(engine.recognize).toHaveBeenCalledWith(imageBuffer, expect.objectContaining({ context: expect.any(String) }));
   });
 
-  it('passes original image to translator.consolidateAndTranslate', async () => {
+  it('passes classification context to OCR engines', async () => {
     const engine = makeOcrEngine();
-    const translator = makeTranslator();
-
-    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [engine], translator);
+    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [engine], makeTranslator());
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
-    expect(translator.consolidateAndTranslate).toHaveBeenCalledWith(
+    expect(engine.recognize).toHaveBeenCalledWith(
       imageBuffer,
-      [mockOcrResult],
-      targetLanguage,
+      expect.objectContaining({ context: expect.any(String) }),
     );
   });
 
-  it('passes literal translation to translator.polish', async () => {
-    const preprocessor = makePreprocessor();
-    const translator = makeTranslator();
-
-    const useCase = new ProcessDocument(
-      preprocessor,
-      makeClassifier(),
-      [makeOcrEngine()],
-      translator,
-    );
-    await useCase.execute(imageBuffer, imageUrl, targetLanguage);
-
-    expect(translator.polish).toHaveBeenCalledWith(
-      mockConsolidation.literalTranslation,
-      targetLanguage,
-    );
-  });
-
-  it('returns a ProcessingResult with all required fields', async () => {
+  it('returns ProcessingResult with OCR results and empty translations (temporarily disabled)', async () => {
     const useCase = new ProcessDocument(
       makePreprocessor(),
       makeClassifier(),
@@ -148,11 +110,11 @@ describe('ProcessDocument', () => {
     expect(result.originalImage).toBe(imageUrl);
     expect(result.classification).toEqual(mockClassification);
     expect(result.ocrResults).toHaveLength(1);
-    expect(result.consolidatedText).toBe(mockConsolidation.consolidatedText);
-    expect(result.literalTranslation).toBe(mockConsolidation.literalTranslation);
-    expect(result.polishedTranslation).toBe('Učesaný překlad textu');
-    expect(result.confidenceNotes).toEqual(mockConsolidation.notes);
-    expect(typeof result.detectedLanguage).toBe('string');
+    // Translations temporarily disabled
+    expect(result.consolidatedText).toBe('');
+    expect(result.literalTranslation).toBe('');
+    expect(result.polishedTranslation).toBe('');
+    expect(result.confidenceNotes[0]).toContain('dočasně');
   });
 
   it('generates a unique id for each execution', async () => {
@@ -184,27 +146,5 @@ describe('ProcessDocument', () => {
     await expect(useCase.execute(imageBuffer, imageUrl, targetLanguage)).rejects.toThrow(
       'Preprocessing failed',
     );
-  });
-
-  it('returns partial result when translator fails', async () => {
-    const translator: ITranslator = {
-      consolidateAndTranslate: vi.fn().mockRejectedValue(new Error('LLM unavailable')),
-      polish: vi.fn(),
-    };
-
-    const useCase = new ProcessDocument(
-      makePreprocessor(),
-      makeClassifier(),
-      [makeOcrEngine()],
-      translator,
-    );
-
-    const result = await useCase.execute(imageBuffer, imageUrl, targetLanguage);
-
-    expect(result.ocrResults).toHaveLength(1);
-    expect(result.consolidatedText).toBe('');
-    expect(result.literalTranslation).toBe('');
-    expect(result.polishedTranslation).toBe('');
-    expect(result.confidenceNotes[0]).toContain('LLM unavailable');
   });
 });

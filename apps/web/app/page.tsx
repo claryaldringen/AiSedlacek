@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { ProcessingResult } from '@ai-sedlacek/shared';
 import { FileUpload } from '@/components/FileUpload';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
@@ -9,39 +9,73 @@ import { ResultViewer } from '@/components/ResultViewer';
 export default function HomePage(): React.JSX.Element {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState<string | undefined>(undefined);
+  const [progress, setProgress] = useState<number | undefined>(undefined);
   const [result, setResult] = useState<ProcessingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileUploaded = async (url: string): Promise<void> => {
+  const handleFileUploaded = useCallback(async (url: string): Promise<void> => {
     setIsProcessing(true);
-    setCurrentStep('Spouštím OCR pipeline…');
+    setCurrentStep('Spouštím pipeline…');
+    setProgress(5);
     setResult(null);
     setError(null);
 
     try {
-      setCurrentStep('Předzpracovávám obrázek…');
       const response = await fetch('/api/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: url }),
       });
 
-      const data = (await response.json()) as ProcessingResult | { error: string };
-
-      if (!response.ok) {
-        const errData = data as { error: string };
-        throw new Error(errData.error ?? 'Zpracování selhalo');
+      if (!response.ok || !response.body) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${response.status}`);
       }
 
-      setResult(data as ProcessingResult);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+
+        for (const eventStr of events) {
+          const eventMatch = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
+          if (!eventMatch) continue;
+
+          const eventType = eventMatch[1];
+          const dataStr = eventMatch[2];
+          if (!eventType || !dataStr) continue;
+
+          if (eventType === 'progress') {
+            const data = JSON.parse(dataStr) as { message: string; progress: number };
+            setCurrentStep(data.message);
+            setProgress(data.progress);
+          } else if (eventType === 'result') {
+            const data = JSON.parse(dataStr) as ProcessingResult;
+            setResult(data);
+          } else if (eventType === 'error') {
+            const data = JSON.parse(dataStr) as { error: string };
+            throw new Error(data.error);
+          }
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Neznámá chyba';
       setError(message);
     } finally {
       setIsProcessing(false);
       setCurrentStep(undefined);
+      setProgress(undefined);
     }
-  };
+  }, []);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
@@ -58,7 +92,7 @@ export default function HomePage(): React.JSX.Element {
         />
       </div>
 
-      <ProcessingStatus isProcessing={isProcessing} currentStep={currentStep} />
+      <ProcessingStatus isProcessing={isProcessing} currentStep={currentStep} progress={progress} />
 
       {error && (
         <div
