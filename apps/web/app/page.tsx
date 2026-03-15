@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import type { ProcessingResult } from '@ai-sedlacek/shared';
-import { FileUpload } from '@/components/FileUpload.js';
-import { ProcessingStatus } from '@/components/ProcessingStatus.js';
-import { ResultViewer } from '@/components/ResultViewer.js';
+import { FileUpload } from '@/components/FileUpload';
+import { ProcessingStatus } from '@/components/ProcessingStatus';
+import { ResultViewer } from '@/components/ResultViewer';
 
 export default function HomePage(): React.JSX.Element {
   const [isProcessing, setIsProcessing] = useState(false);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
-import { createPipeline } from '@/lib/infrastructure/container.js';
+import { createPipeline } from '@/lib/infrastructure/container';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: unknown;

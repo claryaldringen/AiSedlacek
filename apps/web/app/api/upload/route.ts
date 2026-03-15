@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage.js';
+import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const formData = await request.formData();

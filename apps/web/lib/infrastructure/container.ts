@@ -4,16 +4,16 @@
  */
 
 import type { OllamaConfig } from '@ai-sedlacek/shared';
-import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision.js';
-import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator.js';
-import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier.js';
-import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision.js';
-import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus.js';
-import { TesseractOcrEngine } from '@/lib/adapters/ocr/tesseract.js';
-import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator.js';
-import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier.js';
-import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp.js';
-import { ProcessDocument } from '@/lib/use-cases/process-document.js';
+import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision';
+import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator';
+import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier';
+import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision';
+import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus';
+import { TesseractOcrEngine } from '@/lib/adapters/ocr/tesseract';
+import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator';
+import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier';
+import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
+import { ProcessDocument } from '@/lib/use-cases/process-document';
 
 /**
  * Creates a fully wired ProcessDocument pipeline using configured providers.

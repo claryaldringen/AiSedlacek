@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import type { ProcessingResult } from '@ai-sedlacek/shared';
-import { TextColumn } from '@/components/TextColumn.js';
+import { TextColumn } from '@/components/TextColumn';
 
 interface ResultViewerProps {
   result: ProcessingResult;

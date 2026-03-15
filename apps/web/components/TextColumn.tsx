@@ -1,4 +1,4 @@
-import { ConfidenceHighlight } from '@/components/ConfidenceHighlight.js';
+import { ConfidenceHighlight } from '@/components/ConfidenceHighlight';
 
 interface TextColumnProps {
   title: string;
