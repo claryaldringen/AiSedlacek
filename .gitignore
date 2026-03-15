@@ -5,3 +5,4 @@ dist/
 .env.local
 tmp/
 *.tsbuildinfo
+coverage/

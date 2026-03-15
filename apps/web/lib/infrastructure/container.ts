@@ -9,6 +9,7 @@ import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator.js';
 import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier.js';
 import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision.js';
 import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus.js';
+import { TesseractOcrEngine } from '@/lib/adapters/ocr/tesseract.js';
 import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator.js';
 import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier.js';
 import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp.js';
@@ -32,7 +33,12 @@ export function createPipeline(): ProcessDocument {
     const translator = new OllamaTranslator(config);
     const classifier = new OllamaLayoutClassifier(config);
 
-    return new ProcessDocument(preprocessor, classifier, [engine], translator);
+    return new ProcessDocument(
+      preprocessor,
+      classifier,
+      [engine, new TesseractOcrEngine()],
+      translator,
+    );
   }
 
   // Claude production path: ensemble of ClaudeVision + Transkribus
@@ -44,7 +50,7 @@ export function createPipeline(): ProcessDocument {
   return new ProcessDocument(
     preprocessor,
     classifier,
-    [claudeEngine, transkribusEngine],
+    [claudeEngine, transkribusEngine, new TesseractOcrEngine()],
     translator,
   );
 }
