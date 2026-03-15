@@ -6,7 +6,7 @@ import type {
   ProcessingResult,
 } from '@ai-sedlacek/shared';
 import crypto from 'crypto';
-import { EnsembleOrchestrator } from './ensemble.js';
+import { EnsembleOrchestrator } from './ensemble';
 
 export class ProcessDocument {
   private readonly ensemble: EnsembleOrchestrator;
