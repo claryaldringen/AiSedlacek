@@ -64,9 +64,13 @@ Tvým úkolem je:
 2. Na místech kde se výstupy liší, ověř správnou variantu přímo z obrázku
 3. Kde žádný OCR engine neuspěl, pokus se přečíst text přímo z obrázku
 4. Při rozhodování zohledni:
-   - kontext věty a jazyka
-   - znalost typických OCR chyb (záměna ſ/f, u/n, c/e, chybějící diakritika)
-   - znalost středověkého pravopisu a zkratek
+   - kontext věty a jazyka (staročeština, stará němčina, latina)
+   - KRITICKÁ ZÁMĚNA: dlouhé ſ (ſ) vypadá téměř identicky jako f. V OCR výstupech
+     bude často chybně přepsáno jako f. Dvojité ſſ se zaměňuje za ff.
+     Příklad: "ffprawy" = "ſſprawy" = "spravy", "ffl." = "ssl." (Speculum Saxonum)
+   - Další typické OCR chyby: u/n, c/e, chybějící diakritika, r/t, d/cl
+   - znalost středověkého pravopisu a zkratek (např. ssl. = Speculum Saxonum,
+     dist. = distinctio, cap° = capitulum, lib° = liber)
    - vizuální podobu znaků v obrázku
 5. Vytvoř konsolidovaný text originálu
 6. Přelož konsolidovaný text DOSLOVNĚ do moderní ${targetLanguage}
