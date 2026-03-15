@@ -191,7 +191,7 @@ describe('ProcessDocument', () => {
     );
   });
 
-  it('propagates errors from translator', async () => {
+  it('returns partial result when translator fails', async () => {
     const translator: ITranslator = {
       consolidateAndTranslate: vi.fn().mockRejectedValue(new Error('LLM unavailable')),
       polish: vi.fn(),
@@ -204,8 +204,12 @@ describe('ProcessDocument', () => {
       translator,
     );
 
-    await expect(useCase.execute(imageBuffer, imageUrl, targetLanguage)).rejects.toThrow(
-      'LLM unavailable',
-    );
+    const result = await useCase.execute(imageBuffer, imageUrl, targetLanguage);
+
+    expect(result.ocrResults).toHaveLength(1);
+    expect(result.consolidatedText).toBe('');
+    expect(result.literalTranslation).toBe('');
+    expect(result.polishedTranslation).toBe('');
+    expect(result.confidenceNotes[0]).toContain('LLM unavailable');
   });
 });

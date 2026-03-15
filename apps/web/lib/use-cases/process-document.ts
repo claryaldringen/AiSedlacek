@@ -34,18 +34,32 @@ export class ProcessDocument {
     // Step 3: Run OCR ensemble
     const ocrResults = await this.ensemble.run(processedImage);
 
-    // Step 4: Consolidate and translate
-    const consolidation = await this.translator.consolidateAndTranslate(
-      processedImage,
-      ocrResults,
-      targetLanguage,
-    );
+    // Step 4: Consolidate and translate (graceful – partial result on failure)
+    let consolidatedText = '';
+    let literalTranslation = '';
+    let polishedTranslation = '';
+    let confidenceNotes: string[] = [];
 
-    // Step 5: Polish translation
-    const polishedTranslation = await this.translator.polish(
-      consolidation.literalTranslation,
-      targetLanguage,
-    );
+    try {
+      const consolidation = await this.translator.consolidateAndTranslate(
+        processedImage,
+        ocrResults,
+        targetLanguage,
+      );
+      consolidatedText = consolidation.consolidatedText;
+      literalTranslation = consolidation.literalTranslation;
+      confidenceNotes = consolidation.notes;
+
+      // Step 5: Polish translation
+      polishedTranslation = await this.translator.polish(
+        consolidation.literalTranslation,
+        targetLanguage,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Neznámá chyba';
+      console.error('[ProcessDocument] Konsolidace/překlad selhal:', message);
+      confidenceNotes = [`Konsolidace/překlad nedostupný: ${message}`];
+    }
 
     // Step 6: Detect language from OCR results (use first recognizer engine output)
     const detectedLanguage = this.detectLanguage(ocrResults);
@@ -55,11 +69,11 @@ export class ProcessDocument {
       originalImage: originalImageUrl,
       classification,
       ocrResults,
-      consolidatedText: consolidation.consolidatedText,
-      literalTranslation: consolidation.literalTranslation,
+      consolidatedText,
+      literalTranslation,
       polishedTranslation,
       detectedLanguage,
-      confidenceNotes: consolidation.notes,
+      confidenceNotes,
     };
   }
 
