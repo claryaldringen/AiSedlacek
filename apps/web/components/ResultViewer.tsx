@@ -67,13 +67,40 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
         )}
       </div>
 
-      {/* 4-column result grid */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <TextColumn title="Originál" text="" />
-        <TextColumn title="OCR přepis" text={ocrText} highlight />
-        <TextColumn title="Doslovný překlad" text={result.literalTranslation} highlight />
-        <TextColumn title="Učesaný překlad" text={result.polishedTranslation} />
+      {/* OCR results from each engine */}
+      <div>
+        <h2 className="mb-2 text-sm font-semibold text-stone-600">OCR výstupy</h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {ocrResults
+            .filter((r) => r.role === 'recognizer')
+            .map((r, i) => (
+              <TextColumn
+                key={i}
+                title={`${r.engine} ${r.confidence != null ? `(${Math.round(r.confidence * 100)}%)` : ''} – ${r.processingTimeMs}ms`}
+                text={r.text}
+                highlight
+              />
+            ))}
+        </div>
       </div>
+
+      {/* Translation results */}
+      {(result.consolidatedText || result.literalTranslation || result.polishedTranslation) && (
+        <div>
+          <h2 className="mb-2 text-sm font-semibold text-stone-600">Překlad</h2>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {result.consolidatedText && (
+              <TextColumn title="Konsolidovaný text" text={result.consolidatedText} highlight />
+            )}
+            {result.literalTranslation && (
+              <TextColumn title="Doslovný překlad" text={result.literalTranslation} highlight />
+            )}
+            {result.polishedTranslation && (
+              <TextColumn title="Učesaný překlad" text={result.polishedTranslation} />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Images: original + preprocessed side by side */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

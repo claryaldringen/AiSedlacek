@@ -54,20 +54,27 @@ describe('TesseractOcrEngine', () => {
   it('creates worker with configured language', async () => {
     const engine = new TesseractOcrEngine('deu_frak');
     await engine.recognize(Buffer.from('test'));
-    expect(createWorker).toHaveBeenCalledWith('deu_frak');
+    expect(createWorker).toHaveBeenCalledWith('deu_frak', undefined, undefined);
   });
 
   it('uses TESSERACT_LANG env var as default', async () => {
     vi.stubEnv('TESSERACT_LANG', 'lat');
     const engine = new TesseractOcrEngine();
     await engine.recognize(Buffer.from('test'));
-    expect(createWorker).toHaveBeenCalledWith('lat');
+    expect(createWorker).toHaveBeenCalledWith('lat', undefined, undefined);
   });
 
   it('falls back to deu+ces+lat when no config', async () => {
     const engine = new TesseractOcrEngine();
     await engine.recognize(Buffer.from('test'));
-    expect(createWorker).toHaveBeenCalledWith('deu+ces+lat');
+    expect(createWorker).toHaveBeenCalledWith('deu+ces+lat', undefined, undefined);
+  });
+
+  it('accepts TesseractConfig object', async () => {
+    const engine = new TesseractOcrEngine({ language: 'frk', label: 'Fraktur', psm: '6' as never });
+    await engine.recognize(Buffer.from('test'));
+    expect(createWorker).toHaveBeenCalledWith('frk', undefined, undefined);
+    expect(engine.label).toBe('Fraktur');
   });
 
   it('recognize returns OcrEngineResult with text and confidence', async () => {

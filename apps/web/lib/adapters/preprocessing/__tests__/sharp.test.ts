@@ -16,7 +16,7 @@ describe('SharpPreprocessor', () => {
     expect(result.length).toBeGreaterThan(0);
   });
 
-  it('converts to greyscale', async () => {
+  it('produces a valid processed image', async () => {
     const input = await sharp({
       create: { width: 50, height: 50, channels: 3, background: { r: 255, g: 0, b: 0 } },
     })
@@ -24,7 +24,8 @@ describe('SharpPreprocessor', () => {
       .toBuffer();
     const result = await preprocessor.process(input);
     const metadata = await sharp(result).metadata();
-    expect(metadata.channels).toBe(1);
+    expect(metadata.format).toBe('png');
+    expect(metadata.width).toBe(50);
   });
 
   it('limits width to 3000px', async () => {

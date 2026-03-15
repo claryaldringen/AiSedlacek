@@ -4,10 +4,9 @@ import sharp from 'sharp';
 export class SharpPreprocessor implements IPreprocessor {
   async process(image: Buffer): Promise<Buffer> {
     return sharp(image)
-      .toColourspace('b-w')
+      .greyscale()
       .normalize()
-      .sharpen({ sigma: 1.5 })
-      .threshold(128)
+      .sharpen({ sigma: 1.0 })
       .resize({ width: 3000, withoutEnlargement: true })
       .png()
       .toBuffer();

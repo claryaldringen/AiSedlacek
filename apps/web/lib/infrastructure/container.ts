@@ -9,7 +9,7 @@ import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator';
 import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier';
 import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision';
 import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus';
-import { TesseractOcrEngine } from '@/lib/adapters/ocr/tesseract';
+import { createTesseractEngines } from '@/lib/adapters/ocr/tesseract';
 import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator';
 import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier';
 import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
@@ -36,7 +36,7 @@ export function createPipeline(): ProcessDocument {
     return new ProcessDocument(
       preprocessor,
       classifier,
-      [engine, new TesseractOcrEngine()],
+      [engine, ...createTesseractEngines()],
       translator,
     );
   }
@@ -50,7 +50,7 @@ export function createPipeline(): ProcessDocument {
   return new ProcessDocument(
     preprocessor,
     classifier,
-    [claudeEngine, transkribusEngine, new TesseractOcrEngine()],
+    [claudeEngine, transkribusEngine, ...createTesseractEngines()],
     translator,
   );
 }
