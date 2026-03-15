@@ -29,7 +29,7 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
     const mediaType = detectMediaType(image);
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-opus-4-20250514',
       max_tokens: 4096,
       messages: [
         {
