@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { IOcrEngine, OcrEngineResult, OcrOptions } from '@ai-sedlacek/shared';
 import { EnsembleOrchestrator } from '../ensemble.js';
 
@@ -95,7 +95,7 @@ describe('EnsembleOrchestrator', () => {
       const results = await orchestrator.run(imageBuffer);
 
       expect(results).toHaveLength(1);
-      expect(results[0].engine).toBe('ollama_vision');
+      expect(results[0]?.engine).toBe('ollama_vision');
     });
 
     it('does not throw when one engine fails out of multiple', async () => {
@@ -137,8 +137,8 @@ describe('EnsembleOrchestrator', () => {
 
       const results = await orchestrator.run(imageBuffer);
 
-      expect(typeof results[0].processingTimeMs).toBe('number');
-      expect(results[0].processingTimeMs).toBeGreaterThanOrEqual(0);
+      expect(typeof results[0]?.processingTimeMs).toBe('number');
+      expect(results[0]?.processingTimeMs).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -151,7 +151,7 @@ describe('EnsembleOrchestrator', () => {
       const results = await orchestrator.run(imageBuffer);
 
       expect(results).toHaveLength(1);
-      expect(results[0].text).toBe('středověký text');
+      expect(results[0]?.text).toBe('středověký text');
     });
   });
 });

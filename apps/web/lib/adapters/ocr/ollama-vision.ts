@@ -22,7 +22,8 @@ export class OllamaVisionOcrEngine implements IOcrEngine {
     }
   }
 
-  async recognize(image: Buffer, _options?: OcrOptions): Promise<OcrEngineResult> {
+  async recognize(image: Buffer, options?: OcrOptions): Promise<OcrEngineResult> {
+    void options; // options reserved for future use (language hints, tier)
     const startTime = Date.now();
 
     const imageBase64 = image.toString('base64');
@@ -52,7 +53,9 @@ export class OllamaVisionOcrEngine implements IOcrEngine {
     const data = (await response.json()) as { message: { content: string } };
     const text = data.message.content;
 
-    const uncertainMarkers = [...text.matchAll(/\[\?(.+?)\?\]/g)].map((m) => m[1]);
+    const uncertainMarkers = [...text.matchAll(/\[\?(.+?)\?\]/g)]
+      .map((m) => m[1])
+      .filter((s): s is string => s !== undefined);
 
     return {
       engine: this.name,

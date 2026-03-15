@@ -80,7 +80,8 @@ describe('OllamaVisionOcrEngine', () => {
       );
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.model).toBe('llama3.2-vision');
       expect(body.stream).toBe(false);
       expect(body.messages).toHaveLength(1);
@@ -149,7 +150,8 @@ describe('OllamaVisionOcrEngine', () => {
       await engine.recognize(Buffer.from('img'));
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       // OCR_TRANSCRIPTION_PROMPT contains this distinctive Czech text
       expect(body.messages[0].content).toContain('paleograf');
     });

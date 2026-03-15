@@ -56,7 +56,8 @@ describe('OllamaTranslator', () => {
       );
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.messages[0].images).toBeDefined();
       expect(body.messages[0].images[0]).toBe(image.toString('base64'));
     });
@@ -77,7 +78,8 @@ describe('OllamaTranslator', () => {
       );
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       // Vision model is used for multimodal consolidation
       expect(body.model).toBe('llama3.2-vision');
     });
@@ -99,7 +101,8 @@ describe('OllamaTranslator', () => {
       await translator.consolidateAndTranslate(Buffer.from('img'), ocrResults, 'čeština');
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.messages[0].content).toContain('První engine výstup');
       expect(body.messages[0].content).toContain('Druhý engine výstup');
     });
@@ -182,7 +185,8 @@ Text překladu.
       await translator.polish('Doslovný překlad textu', 'čeština');
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.messages[0].images).toBeUndefined();
     });
 
@@ -202,7 +206,8 @@ Text překladu.
       await translator.polish('Doslovný překlad textu', 'čeština');
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.model).toBe('qwen2.5');
     });
 
@@ -234,7 +239,8 @@ Text překladu.
       await translator.polish(literalTranslation, 'čeština');
 
       const callArgs = vi.mocked(fetch).mock.calls[0];
-      const body = JSON.parse(callArgs[1]?.body as string);
+      expect(callArgs).toBeDefined();
+      const body = JSON.parse(callArgs![1]?.body as string);
       expect(body.messages[0].content).toContain(literalTranslation);
     });
 

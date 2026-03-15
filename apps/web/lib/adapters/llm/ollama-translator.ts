@@ -72,9 +72,9 @@ export class OllamaTranslator implements ITranslator {
     );
     const notesMatch = text.match(/---POZNÁMKY---\s*([\s\S]*?)$/);
 
-    const consolidatedText = consolidatedMatch ? consolidatedMatch[1].trim() : text;
-    const literalTranslation = literalMatch ? literalMatch[1].trim() : '';
-    const notesRaw = notesMatch ? notesMatch[1].trim() : '';
+    const consolidatedText = (consolidatedMatch?.[1] ?? text).trim();
+    const literalTranslation = (literalMatch?.[1] ?? '').trim();
+    const notesRaw = (notesMatch?.[1] ?? '').trim();
 
     const notes = notesRaw
       .split('\n')
