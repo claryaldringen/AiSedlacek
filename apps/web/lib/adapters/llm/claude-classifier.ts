@@ -19,7 +19,7 @@ export class ClaudeLayoutClassifier implements ILayoutClassifier {
       const imageBase64 = image.toString('base64');
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         messages: [
           {

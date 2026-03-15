@@ -35,7 +35,7 @@ export class ClaudeTranslator implements ITranslator {
     const mediaType = detectMediaType(image);
 
     const response = await client.messages.create({
-      model: 'claude-opus-4-20250514',
+      model: 'claude-opus-4-6',
       max_tokens: 8192,
       messages: [
         {
@@ -70,7 +70,7 @@ export class ClaudeTranslator implements ITranslator {
     const client = new Anthropic();
 
     const response = await client.messages.create({
-      model: 'claude-opus-4-20250514',
+      model: 'claude-opus-4-6',
       max_tokens: 4096,
       messages: [
         {
