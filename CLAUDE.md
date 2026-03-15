@@ -21,8 +21,9 @@ Primární jazyky zdrojových textů: **stará horní němčina**, **staročešt
 - **OCR Tier 2 (podmíněný):** Kraken v Docker kontejneru – segmentace pro složité layouty
 - **Preprocessing obrázků:** Sharp (na VPS worker)
 - **Analýza layoutu:** Claude Vision API (klasifikace dokumentu → výběr OCR tieru)
-- **LLM:** Claude API přes Anthropic TypeScript SDK (Vision OCR, klasifikace, konsolidace, překlady)
-- **Úložiště souborů:** Vercel Blob (nahrání obrázků) nebo S3-kompatibilní storage na VPS
+- **LLM (produkce):** Claude API přes Anthropic TypeScript SDK (Vision OCR, klasifikace, konsolidace, překlady)
+- **LLM (dev):** Ollama (llama3.2-vision:11b pro vision úlohy, qwen2.5:14b pro textové úlohy)
+- **Úložiště souborů:** Vercel Blob (produkce) nebo lokální filesystem (dev)
 - **Kontejnerizace:** Docker + docker-compose na VPS (Kraken + OCR worker)
 - **Komunikace frontend ↔ backend:** REST API + Server-Sent Events (SSE) pro streaming průběhu
 
@@ -283,20 +284,25 @@ a v prohlížeči (Tesseract.js). VPS složka existuje, ale aktivuje se až s Ti
 │       ├── lib/
 │       │   ├── adapters/               # Clean Architecture – implementace rozhraní
 │       │   │   ├── ocr/
-│       │   │   │   ├── transkribus.ts  # TranskribusOcrEngine (server-side)
-│       │   │   │   ├── claude-vision.ts # ClaudeVisionOcrEngine (server-side)
-│       │   │   │   └── tesseract.ts    # TesseractOcrEngine (klient-side wrapper)
+│       │   │   │   ├── transkribus.ts  # TranskribusOcrEngine (produkce)
+│       │   │   │   ├── claude-vision.ts # ClaudeVisionOcrEngine (produkce)
+│       │   │   │   ├── ollama-vision.ts # OllamaVisionOcrEngine (dev)
+│       │   │   │   └── tesseract.ts    # TesseractOcrEngine (obojí)
 │       │   │   ├── llm/
-│       │   │   │   ├── claude-translator.ts  # ClaudeTranslator
-│       │   │   │   └── claude-classifier.ts  # ClaudeLayoutClassifier
+│       │   │   │   ├── claude-translator.ts  # ClaudeTranslator (produkce)
+│       │   │   │   ├── claude-classifier.ts  # ClaudeLayoutClassifier (produkce)
+│       │   │   │   ├── ollama-translator.ts  # OllamaTranslator (dev)
+│       │   │   │   └── ollama-classifier.ts  # OllamaLayoutClassifier (dev)
+│       │   │   ├── storage/
+│       │   │   │   ├── vercel-blob.ts  # Vercel Blob storage (produkce)
+│       │   │   │   └── local-storage.ts # Lokální filesystem (dev)
 │       │   │   └── preprocessing/
 │       │   │       └── sharp.ts        # SharpPreprocessor
 │       │   ├── use-cases/              # Clean Architecture – orchestrace
 │       │   │   ├── process-document.ts # Hlavní pipeline use case
 │       │   │   └── ensemble.ts         # EnsembleOrchestrator (spouští IOcrEngine[])
 │       │   ├── infrastructure/         # DI, config, Vercel-specifické
-│       │   │   ├── container.ts        # Composition root (registrace adapterů)
-│       │   │   ├── vercel-blob.ts      # Vercel Blob client
+│       │   │   ├── container.ts        # Composition root (registrace adapterů dle LLM_PROVIDER)
 │       │   │   └── tier-router.ts      # Tier 1 lokálně vs Tier 2 → VPS
 │       │   └── client/                 # Klient-side helpers
 │       │       └── tesseract-worker.ts # Web Worker wrapper pro Tesseract.js
@@ -370,7 +376,7 @@ interface ProcessingResult {
 }
 
 interface OcrEngineResult {
-  engine: 'transkribus' | 'tesseract' | 'kraken' | 'claude_vision';
+  engine: 'transkribus' | 'tesseract' | 'kraken' | 'claude_vision' | 'ollama_vision';
   role: 'recognizer' | 'segmenter';  // Kraken může sloužit jen jako segmentátor
   text: string;
   lines?: SegmentedLine[];           // Výstup segmentace (Kraken Tier 2)
@@ -406,6 +412,13 @@ interface KrakenConfig {
   baseUrl: string;             // URL Docker služby (default: http://localhost:5001)
   device: 'cpu' | 'cuda';     // GPU akcelerace
 }
+
+interface OllamaConfig {
+  baseUrl: string;           // default: http://localhost:11434
+  visionModel: string;       // default: llama3.2-vision:11b
+  textModel: string;         // default: qwen2.5:14b
+  timeoutMs: number;         // default: 120000 (2 min, vision modely jsou pomalé)
+}
 ```
 
 ---
@@ -421,20 +434,31 @@ interface KrakenConfig {
 ## Proměnné prostředí
 
 ```env
-# === apps/web (.env.local) – Vercel ===
+# === apps/web (.env.local) ===
 
-# Transkribus
-TRANSKRIBUS_EMAIL=
-TRANSKRIBUS_PASSWORD=
-TRANSKRIBUS_MODEL_ID=
+# --- Přepínání providerů ---
+# LLM_PROVIDER=ollama                   # dev (default pokud ANTHROPIC_API_KEY chybí)
+# LLM_PROVIDER=claude                   # produkce
+# STORAGE_PROVIDER=local                # dev (default pokud BLOB_READ_WRITE_TOKEN chybí)
+# STORAGE_PROVIDER=vercel-blob          # produkce
 
-# Anthropic (Claude Vision OCR + konsolidace + překlad)
-ANTHROPIC_API_KEY=
+# --- Ollama (dev) ---
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_VISION_MODEL=llama3.2-vision:11b
+OLLAMA_TEXT_MODEL=qwen2.5:14b
 
-# Vercel Blob (nahrávání obrázků)
-BLOB_READ_WRITE_TOKEN=                 # Vercel Blob token
+# --- Claude API (produkce) ---
+# ANTHROPIC_API_KEY=
 
-# Volitelné
+# --- Transkribus (produkce) ---
+# TRANSKRIBUS_EMAIL=
+# TRANSKRIBUS_PASSWORD=
+# TRANSKRIBUS_MODEL_ID=
+
+# --- Vercel Blob (produkce) ---
+# BLOB_READ_WRITE_TOKEN=
+
+# --- Volitelné ---
 TESSERACT_LANG=deu_frak+ces+lat        # pro klient-side info
 MAX_FILE_SIZE_MB=20
 
@@ -444,6 +468,17 @@ MAX_FILE_SIZE_MB=20
 # KRAKEN_API_URL=http://kraken:5001    # interní Docker síť
 # KRAKEN_DEVICE=cpu                    # nebo "cuda"
 ```
+
+### Logika výběru provideru
+
+Rozhodování probíhá jednou při startu aplikace v `container.ts`:
+
+1. Pokud `LLM_PROVIDER` je explicitně nastavena → použij ji
+2. Pokud `LLM_PROVIDER` není nastavena a `ANTHROPIC_API_KEY` existuje → `claude`
+3. Pokud `LLM_PROVIDER` není nastavena a `ANTHROPIC_API_KEY` neexistuje → `ollama`
+4. Pokud `LLM_PROVIDER=claude` ale `ANTHROPIC_API_KEY` chybí → chyba při startu (fail fast)
+
+Analogická logika pro `STORAGE_PROVIDER` / `BLOB_READ_WRITE_TOKEN`.
 
 ---
 
@@ -508,8 +543,10 @@ Use Cases           │ ProcessDocument, Consolidate,   │ Závisí pouze na Do
 Adapters            │ TranskribusOcrEngine,           │ Implementuje Domain rozhraní.
                     │ TesseractOcrEngine,             │ Každý adapter = 1 soubor,
                     │ ClaudeVisionOcrEngine,          │ žádné křížové závislosti
-                    │ KrakenSegmenter,                │ mezi adaptery.
-                    │ ClaudeTranslator,               │
+                    │ OllamaVisionOcrEngine,          │ mezi adaptery.
+                    │ KrakenSegmenter,                │ DI kontejner vybírá sadu
+                    │ ClaudeTranslator,               │ adapterů dle LLM_PROVIDER.
+                    │ OllamaTranslator,               │
                     │ SharpPreprocessor               │
 ────────────────────┼────────────────────────────────┼─────────────────────────────
 Infrastructure      │ Express server, Next.js routes, │ DI kontejner (tsyringe nebo
@@ -605,8 +642,8 @@ npx turbo test
 
 ### Fáze 1 – Kompletní Tier 1 na Vercelu
 
-Cíl: Plně funkční tříenginový ensemble na Vercelu. Uživatel nahraje obrázek,
-dostane přepis a překlad. Žádný VPS potřeba.
+Cíl: Plně funkční pipeline na Vercelu. Uživatel nahraje obrázek,
+dostane přepis a překlad. Dev režim s Ollama, produkce s Claude API.
 
 ```
 Krok 1.1: Scaffolding
@@ -617,61 +654,75 @@ Krok 1.1: Scaffolding
 - Tailwind CSS, základní layout
 - Konfigurace: tsconfig (strict: true), ESLint (clean architecture pravidla),
   Prettier, Vitest
+- DI kontejner s logikou výběru provideru (LLM_PROVIDER, STORAGE_PROVIDER)
 - Validace: npx turbo typecheck && npx turbo lint && npx turbo format:check
 
 Krok 1.2: Nahrávání obrázků
 - Komponenta FileUpload.tsx (drag & drop, preview, validace formátu/velikosti)
-- Vercel Blob integrace pro upload (obejití 4.5 MB limitu)
+- Lokální file storage adapter pro dev (tmp/uploads/)
 - Podpora JPEG, PNG, TIFF, PDF (první stránka)
 - IPreprocessor adapter: SharpPreprocessor (binarizace, kontrast, resize)
 
-Krok 1.3: Claude Vision OCR (první adapter)
-- Adapter: ClaudeVisionOcrEngine implementující IOcrEngine
-- API route /api/ocr/claude-vision (volá adapter)
-- Sonnet model pro OCR
-- Test: nahrát testovací obrázek středověkého textu, ověřit výstup
-- Mock test: ověřit správné volání Anthropic SDK bez reálného API
+Krok 1.3: Ollama Vision OCR (první adapter)
+- Adapter: OllamaVisionOcrEngine implementující IOcrEngine
+- Ollama REST API (/api/chat s images)
+- isAvailable() přes GET /api/tags s 2s timeoutem
+- llama3.2-vision:11b model
+- Předpoklad: ollama pull llama3.2-vision:11b
+- Test: nahrát testovací obrázek, ověřit výstup
 
-Krok 1.4: Transkribus integrace (druhý adapter)
-- Adapter: TranskribusOcrEngine implementující IOcrEngine
-- Autentizace (token refresh)
-- Asynchronní polling (process → status → výsledek)
-- Test: stejný obrázek, porovnat s Claude Vision výstupem
-
-Krok 1.5: Tesseract.js v prohlížeči (třetí adapter)
+Krok 1.4: Tesseract.js v prohlížeči (druhý adapter)
 - Adapter: TesseractOcrEngine implementující IOcrEngine
 - Worker v prohlížeči (Web Worker pro neblokování UI)
 - Načtení modelů deu_frak+ces+lat
 - Indikátor stahování modelů při prvním použití
 - Test: stejný obrázek
 
-Krok 1.6: Ensemble orchestrátor
+Krok 1.5: Ensemble orchestrátor
 - EnsembleOrchestrator: přijímá IOcrEngine[], spouští paralelně,
   sbírá výsledky, měří časy a náklady
 - Graceful degradation: pokud engine selže, pokračuj s ostatními (min. 1)
+- V dev režimu 2 enginy (Ollama Vision + Tesseract), při API testování 1 engine
 - Logování: který engine kolik stál a jak dlouho trval
 
-Krok 1.7: Konsolidace + překlad
-- Adapter: ClaudeTranslator implementující ITranslator
-- Multimodální konsolidace: obrázek + N OCR výstupů → Opus
+Krok 1.6: Minimální zobrazení výsledků
+- Zobrazení surového OCR výstupu z jednotlivých enginů
+- Vizuální feedback loop pro ověření pipeline ještě před konsolidací
+
+Krok 1.7: Ollama konsolidace + překlad
+- Adapter: OllamaTranslator implementující ITranslator
+- Multimodální konsolidace: obrázek + N OCR výstupů → llama3.2-vision:11b
+- Učesaný překlad → qwen2.5:14b (čistě textová úloha)
 - Parsování strukturovaného výstupu (konsolidovaný text / doslovný překlad / poznámky)
-- Učesaný překlad jako druhé volání
 - Test: celá pipeline end-to-end (s mockovanými OCR výstupy)
 
-Krok 1.8: Zobrazení výsledků
+Krok 1.8: Plné zobrazení výsledků
 - ResultViewer.tsx: 4 sloupce (originál | OCR | doslovný | učesaný)
 - ConfidenceHighlight.tsx: zvýraznění {?} míst
 - ProcessingStatus.tsx: kroková indikace průběhu (který engine doběhl)
 - Responzivní layout (na mobilu sloupce pod sebou)
 
 Krok 1.9: Klasifikace a TierSelector
-- Adapter: ClaudeLayoutClassifier implementující ILayoutClassifier
+- Adapter: OllamaLayoutClassifier implementující ILayoutClassifier
 - TierSelector.tsx: zobrazení doporučeného tieru + manuální přepínač
 - V Fázi 1 Tier 2 zobrazí info "vyžaduje VPS worker" a zůstane na Tier 1
 
-Krok 1.10: Polish a deployment
+Krok 1.10: Claude adaptery (produkční)
+- ClaudeVisionOcrEngine implementující IOcrEngine (Sonnet)
+- ClaudeTranslator implementující ITranslator (Opus)
+- ClaudeLayoutClassifier implementující ILayoutClassifier (Sonnet)
+- Mock testy: ověřit správné volání Anthropic SDK bez reálného API
+
+Krok 1.11: Transkribus adapter (produkční)
+- Adapter: TranskribusOcrEngine implementující IOcrEngine
+- Autentizace (token refresh)
+- Asynchronní polling (process → status → výsledek)
+- Mock test (žádný API klíč k dispozici)
+
+Krok 1.12: Polish, error handling, deployment
 - Error handling: graceful degradation na N-1 enginů
 - Loading states pro každý engine zvlášť
+- Vercel Blob storage adapter (produkční)
 - Vercel deployment, ověření na reálných datech z test-data/
 - README.md s instrukcemi pro lokální vývoj
 ```
