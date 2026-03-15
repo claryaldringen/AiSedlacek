@@ -125,7 +125,12 @@ describe('ProcessDocument', () => {
     const preprocessor = makePreprocessor();
     const translator = makeTranslator();
 
-    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [makeOcrEngine()], translator);
+    const useCase = new ProcessDocument(
+      preprocessor,
+      makeClassifier(),
+      [makeOcrEngine()],
+      translator,
+    );
     await useCase.execute(imageBuffer, imageUrl, targetLanguage);
 
     expect(translator.polish).toHaveBeenCalledWith(

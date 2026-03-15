@@ -158,7 +158,9 @@ export function FileUpload({ onFileUploaded }: FileUploadProps): React.JSX.Eleme
               Přetáhněte soubor sem nebo{' '}
               <span className="font-medium text-stone-800 underline">vyberte ze zařízení</span>
             </p>
-            <p className="mt-2 text-sm text-stone-400">JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB</p>
+            <p className="mt-2 text-sm text-stone-400">
+              JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB
+            </p>
           </>
         )}
       </div>

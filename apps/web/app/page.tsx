@@ -47,9 +47,7 @@ export default function HomePage(): React.JSX.Element {
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold text-stone-900">Čtečka starých textů</h1>
-        <p className="text-stone-600">
-          Nahrajte obrázek středověkého dokumentu pro OCR a překlad.
-        </p>
+        <p className="text-stone-600">Nahrajte obrázek středověkého dokumentu pro OCR a překlad.</p>
       </div>
 
       <div className="mx-auto max-w-2xl">

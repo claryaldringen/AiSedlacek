@@ -41,7 +41,12 @@ export function createPipeline(): ProcessDocument {
   const translator = new ClaudeTranslator();
   const classifier = new ClaudeLayoutClassifier();
 
-  return new ProcessDocument(preprocessor, classifier, [claudeEngine, transkribusEngine], translator);
+  return new ProcessDocument(
+    preprocessor,
+    classifier,
+    [claudeEngine, transkribusEngine],
+    translator,
+  );
 }
 
 /**

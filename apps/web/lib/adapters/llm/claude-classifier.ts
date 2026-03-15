@@ -55,9 +55,7 @@ export class ClaudeLayoutClassifier implements ILayoutClassifier {
   private parseClassification(content: string): DocumentClassification {
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.warn(
-        '[ClaudeLayoutClassifier] No JSON found in response, falling back to tier1',
-      );
+      console.warn('[ClaudeLayoutClassifier] No JSON found in response, falling back to tier1');
       return FALLBACK_CLASSIFICATION;
     }
 
@@ -71,9 +69,7 @@ export class ClaudeLayoutClassifier implements ILayoutClassifier {
         ? parsed.detectedFeatures.filter((f): f is string => typeof f === 'string')
         : [];
       const confidence =
-        typeof parsed.confidence === 'number'
-          ? Math.max(0, Math.min(1, parsed.confidence))
-          : 0.5;
+        typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.5;
       const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
 
       return { tier, scriptType, layoutComplexity, detectedFeatures, confidence, reasoning };

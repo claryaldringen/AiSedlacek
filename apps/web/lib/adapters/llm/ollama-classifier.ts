@@ -38,9 +38,7 @@ export class OllamaLayoutClassifier implements ILayoutClassifier {
     });
 
     if (!response.ok) {
-      console.warn(
-        `[OllamaLayoutClassifier] API error ${response.status}, falling back to tier1`,
-      );
+      console.warn(`[OllamaLayoutClassifier] API error ${response.status}, falling back to tier1`);
       return FALLBACK_CLASSIFICATION;
     }
 
@@ -67,9 +65,7 @@ export class OllamaLayoutClassifier implements ILayoutClassifier {
         ? parsed.detectedFeatures.filter((f): f is string => typeof f === 'string')
         : [];
       const confidence =
-        typeof parsed.confidence === 'number'
-          ? Math.max(0, Math.min(1, parsed.confidence))
-          : 0.5;
+        typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0.5;
       const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
 
       return { tier, scriptType, layoutComplexity, detectedFeatures, confidence, reasoning };

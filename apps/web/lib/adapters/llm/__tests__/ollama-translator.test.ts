@@ -38,10 +38,9 @@ describe('OllamaTranslator', () => {
   describe('consolidateAndTranslate()', () => {
     it('sends image and OCR results to Ollama', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: consolidationResponse } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: consolidationResponse } }), {
+          status: 200,
+        }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -64,10 +63,9 @@ describe('OllamaTranslator', () => {
 
     it('uses vision model for multimodal consolidation', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: consolidationResponse } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: consolidationResponse } }), {
+          status: 200,
+        }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -86,10 +84,9 @@ describe('OllamaTranslator', () => {
 
     it('includes OCR results in the prompt', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: consolidationResponse } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: consolidationResponse } }), {
+          status: 200,
+        }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -109,10 +106,9 @@ describe('OllamaTranslator', () => {
 
     it('parses consolidation response sections correctly', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: consolidationResponse } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: consolidationResponse } }), {
+          status: 200,
+        }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -140,10 +136,7 @@ Text překladu.
 - Řádek 3 poškozený`;
 
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: responseWithNotes } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: responseWithNotes } }), { status: 200 }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -175,10 +168,9 @@ Text překladu.
   describe('polish()', () => {
     it('sends text-only request without images', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: 'Polished translation text' } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: 'Polished translation text' } }), {
+          status: 200,
+        }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -192,10 +184,7 @@ Text překladu.
 
     it('uses text model (not vision model) for polish', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: 'Polished text' } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: 'Polished text' } }), { status: 200 }),
       );
 
       const configWithTextModel: OllamaConfig = {
@@ -214,10 +203,7 @@ Text překladu.
     it('returns the raw response text', async () => {
       const polishedText = 'Krásně učesaný moderní překlad.';
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: polishedText } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: polishedText } }), { status: 200 }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -228,10 +214,7 @@ Text překladu.
 
     it('includes the literal translation in the prompt', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: 'Result' } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: 'Result' } }), { status: 200 }),
       );
 
       const translator = new OllamaTranslator(defaultConfig);
@@ -245,9 +228,7 @@ Text překladu.
     });
 
     it('throws on API error', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(
-        new Response('Bad Gateway', { status: 502 }),
-      );
+      vi.mocked(fetch).mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }));
 
       const translator = new OllamaTranslator(defaultConfig);
       await expect(translator.polish('text', 'čeština')).rejects.toThrow();

@@ -69,7 +69,9 @@ export class TranskribusOcrEngine implements IOcrEngine {
     });
 
     if (!response.ok) {
-      throw new Error(`Transkribus authentication failed: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Transkribus authentication failed: ${response.status} ${response.statusText}`,
+      );
     }
 
     const data = (await response.json()) as TokenResponse;
@@ -101,7 +103,9 @@ export class TranskribusOcrEngine implements IOcrEngine {
     });
 
     if (!response.ok) {
-      throw new Error(`Transkribus job submission failed: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Transkribus job submission failed: ${response.status} ${response.statusText}`,
+      );
     }
 
     const data = (await response.json()) as ProcessResponse;
@@ -117,7 +121,9 @@ export class TranskribusOcrEngine implements IOcrEngine {
       });
 
       if (!response.ok) {
-        throw new Error(`Transkribus status check failed: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Transkribus status check failed: ${response.status} ${response.statusText}`,
+        );
       }
 
       const data = (await response.json()) as ProcessStatusResponse;

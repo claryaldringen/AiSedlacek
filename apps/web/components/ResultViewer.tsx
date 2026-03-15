@@ -43,7 +43,8 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
             {SCRIPT_LABEL[classification.scriptType] ?? classification.scriptType}
           </span>
           <span className="rounded-full bg-stone-200 px-2 py-0.5 text-stone-700">
-            Layout: {COMPLEXITY_LABEL[classification.layoutComplexity] ?? classification.layoutComplexity}
+            Layout:{' '}
+            {COMPLEXITY_LABEL[classification.layoutComplexity] ?? classification.layoutComplexity}
           </span>
           <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800">
             Spolehlivost: {Math.round(classification.confidence * 100)} %
@@ -94,7 +95,9 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
       {/* Confidence notes */}
       {confidenceNotes.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-amber-800">Poznámky o nejistých místech</h3>
+          <h3 className="mb-2 text-sm font-semibold text-amber-800">
+            Poznámky o nejistých místech
+          </h3>
           <ul className="list-inside list-disc space-y-1">
             {confidenceNotes.map((note, index) => (
               <li key={index} className="text-sm text-amber-700">

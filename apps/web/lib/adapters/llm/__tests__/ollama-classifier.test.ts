@@ -29,10 +29,9 @@ describe('OllamaLayoutClassifier', () => {
   describe('classify()', () => {
     it('parses valid classification JSON from response', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: validClassificationJson } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: validClassificationJson } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -57,10 +56,7 @@ describe('OllamaLayoutClassifier', () => {
       });
 
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: tier2Json } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: tier2Json } }), { status: 200 }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -73,10 +69,9 @@ describe('OllamaLayoutClassifier', () => {
 
     it('falls back to tier1 on invalid/non-JSON response', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: 'Toto není JSON odpověď.' } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: 'Toto není JSON odpověď.' } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -88,10 +83,9 @@ describe('OllamaLayoutClassifier', () => {
 
     it('falls back to tier1 on malformed JSON in response', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: '{ broken json {{{' } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: '{ broken json {{{' } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -114,10 +108,9 @@ describe('OllamaLayoutClassifier', () => {
 
     it('sends image as base64 to Ollama API', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: validClassificationJson } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: validClassificationJson } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -137,10 +130,9 @@ describe('OllamaLayoutClassifier', () => {
 
     it('includes CLASSIFY_LAYOUT_PROMPT in the request', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: validClassificationJson } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: validClassificationJson } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);
@@ -157,10 +149,9 @@ describe('OllamaLayoutClassifier', () => {
       const responseWithSurroundingText = `Zde je klasifikace dokumentu:\n${validClassificationJson}\nHotovo.`;
 
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ message: { content: responseWithSurroundingText } }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ message: { content: responseWithSurroundingText } }), {
+          status: 200,
+        }),
       );
 
       const classifier = new OllamaLayoutClassifier(defaultConfig);

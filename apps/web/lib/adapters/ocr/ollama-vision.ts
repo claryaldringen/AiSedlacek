@@ -45,9 +45,7 @@ export class OllamaVisionOcrEngine implements IOcrEngine {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Ollama API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as { message: { content: string } };

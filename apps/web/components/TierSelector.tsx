@@ -10,7 +10,9 @@ export function TierSelector({ classification }: TierSelectorProps): React.JSX.E
   if (!classification) {
     return (
       <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-        <p className="text-sm text-stone-500">Klasifikace tieru bude dostupná po zpracování dokumentu.</p>
+        <p className="text-sm text-stone-500">
+          Klasifikace tieru bude dostupná po zpracování dokumentu.
+        </p>
       </div>
     );
   }
@@ -25,9 +27,7 @@ export function TierSelector({ classification }: TierSelectorProps): React.JSX.E
       <div className="mb-3 flex items-center gap-2">
         <span
           className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${
-            isTier2
-              ? 'bg-amber-100 text-amber-800'
-              : 'bg-green-100 text-green-800'
+            isTier2 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
           }`}
         >
           {isTier2 ? 'Tier 2 – složitý layout' : 'Tier 1 – standardní'}
@@ -42,9 +42,7 @@ export function TierSelector({ classification }: TierSelectorProps): React.JSX.E
       {/* Tier 2 VPS warning */}
       {isTier2 && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
-          <span className="text-xs font-medium text-amber-700">
-            Tier 2 vyžaduje VPS worker
-          </span>
+          <span className="text-xs font-medium text-amber-700">Tier 2 vyžaduje VPS worker</span>
         </div>
       )}
 
