@@ -8,7 +8,7 @@ export class TesseractOcrEngine implements IOcrEngine {
   private readonly language: string;
 
   constructor(language?: string) {
-    this.language = language ?? process.env['TESSERACT_LANG'] ?? 'deu_frak+ces+lat';
+    this.language = language ?? process.env['TESSERACT_LANG'] ?? 'deu+ces+lat';
   }
 
   async isAvailable(): Promise<boolean> {
