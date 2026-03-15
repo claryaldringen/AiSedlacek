@@ -31,9 +31,13 @@ export class ProcessDocument {
     // Step 2: Classify layout (original image – Claude Vision works better with color)
     const classification = await this.classifier.classify(imageBuffer);
 
-    // Step 3: Run OCR ensemble
-    // Claude Vision engines get original, Tesseract gets preprocessed
-    const ocrResults = await this.ensemble.run(imageBuffer, processedImage);
+    // Step 3: Run OCR ensemble with classification context
+    const ocrContext = [
+      classification.reasoning,
+      `Detected features: ${classification.detectedFeatures.join(', ')}`,
+      `Script: ${classification.scriptType}, Layout: ${classification.layoutComplexity}`,
+    ].join('. ');
+    const ocrResults = await this.ensemble.run(imageBuffer, processedImage, { context: ocrContext });
 
     // Step 4: Consolidate and translate (original image for multimodal)
     let consolidatedText = '';

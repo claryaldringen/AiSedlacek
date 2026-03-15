@@ -64,6 +64,8 @@ export interface ConsolidationResult {
 export interface OcrOptions {
   language?: string;
   tier?: OcrTier;
+  /** Additional context from classification to help OCR (e.g. detected language, script type) */
+  context?: string;
 }
 
 export interface TranskribusConfig {

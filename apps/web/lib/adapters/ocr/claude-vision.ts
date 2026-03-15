@@ -22,11 +22,16 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
   }
 
   async recognize(image: Buffer, options?: OcrOptions): Promise<OcrEngineResult> {
-    void options;
     const startTime = Date.now();
 
     const client = new Anthropic();
     const mediaType = detectMediaType(image);
+
+    // Build prompt with classification context if available
+    let prompt = OCR_TRANSCRIPTION_PROMPT;
+    if (options?.context) {
+      prompt = `KONTEXT DOKUMENTU (z předchozí klasifikace): ${options.context}\n\n${prompt}`;
+    }
 
     const response = await client.messages.create({
       model: 'claude-opus-4-20250514',
@@ -45,7 +50,7 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
             },
             {
               type: 'text',
-              text: OCR_TRANSCRIPTION_PROMPT,
+              text: prompt,
             },
           ],
         },

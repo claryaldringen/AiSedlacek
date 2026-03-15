@@ -98,8 +98,8 @@ describe('ProcessDocument', () => {
 
     // Classifier gets original image (better for Claude Vision)
     expect(classifier.classify).toHaveBeenCalledWith(imageBuffer);
-    // LLM engines get original image (not preprocessed)
-    expect(engine.recognize).toHaveBeenCalledWith(imageBuffer, undefined);
+    // LLM engines get original image with classification context
+    expect(engine.recognize).toHaveBeenCalledWith(imageBuffer, expect.objectContaining({ context: expect.any(String) }));
   });
 
   it('passes original image to translator.consolidateAndTranslate', async () => {
