@@ -6,3 +6,4 @@ dist/
 tmp/
 *.tsbuildinfo
 coverage/
+*.traineddata
