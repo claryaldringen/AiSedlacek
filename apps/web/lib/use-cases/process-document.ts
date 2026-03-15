@@ -28,16 +28,18 @@ export class ProcessDocument {
     // Step 1: Preprocess image (for Tesseract – Claude Vision gets the original)
     const processedImage = await this.preprocessor.process(imageBuffer);
 
-    // Step 2: Classify layout (original image – Claude Vision works better with color)
-    const classification = await this.classifier.classify(imageBuffer);
+    // Step 2: Classification temporarily skipped – context was too generic to help OCR
+    const classification = {
+      tier: 'tier1' as const,
+      scriptType: 'manuscript' as const,
+      layoutComplexity: 'simple' as const,
+      detectedFeatures: [] as string[],
+      confidence: 0,
+      reasoning: 'Klasifikace přeskočena',
+    };
 
-    // Step 3: Run OCR ensemble with classification context
-    const ocrContext = [
-      classification.reasoning,
-      `Detected features: ${classification.detectedFeatures.join(', ')}`,
-      `Script: ${classification.scriptType}, Layout: ${classification.layoutComplexity}`,
-    ].join('. ');
-    const ocrResults = await this.ensemble.run(imageBuffer, processedImage, { context: ocrContext });
+    // Step 3: Run OCR ensemble (no classification context – let models figure it out)
+    const ocrResults = await this.ensemble.run(imageBuffer, processedImage);
 
     // Step 4: Consolidation and translation are temporarily disabled
     // TODO: Re-enable once OCR quality is sufficient

@@ -4,21 +4,9 @@ import type {
   ILayoutClassifier,
   IOcrEngine,
   ITranslator,
-  DocumentClassification,
   OcrEngineResult,
 } from '@ai-sedlacek/shared';
 import { ProcessDocument } from '../process-document.js';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-const mockClassification: DocumentClassification = {
-  tier: 'tier1',
-  scriptType: 'print',
-  layoutComplexity: 'simple',
-  detectedFeatures: ['fraktur'],
-  confidence: 0.9,
-  reasoning: 'Tištěný text',
-};
 
 const mockOcrResult: OcrEngineResult = {
   engine: 'ollama_vision',
@@ -28,15 +16,11 @@ const mockOcrResult: OcrEngineResult = {
 };
 
 function makePreprocessor(): IPreprocessor {
-  return {
-    process: vi.fn().mockResolvedValue(Buffer.from('processed-image')),
-  };
+  return { process: vi.fn().mockResolvedValue(Buffer.from('processed-image')) };
 }
 
 function makeClassifier(): ILayoutClassifier {
-  return {
-    classify: vi.fn().mockResolvedValue(mockClassification),
-  };
+  return { classify: vi.fn() };
 }
 
 function makeOcrEngine(available = true): IOcrEngine {
@@ -49,102 +33,56 @@ function makeOcrEngine(available = true): IOcrEngine {
 }
 
 function makeTranslator(): ITranslator {
-  return {
-    consolidateAndTranslate: vi.fn(),
-    polish: vi.fn(),
-  };
+  return { consolidateAndTranslate: vi.fn(), polish: vi.fn() };
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ProcessDocument', () => {
   const imageBuffer = Buffer.from('original-image');
   const imageUrl = '/tmp/uploads/test-image.jpg';
-  const targetLanguage = 'češtiny';
 
-  it('runs preprocessing, classification and OCR', async () => {
+  it('runs preprocessing and OCR (classification skipped)', async () => {
     const preprocessor = makePreprocessor();
-    const classifier = makeClassifier();
     const engine = makeOcrEngine();
-    const translator = makeTranslator();
 
-    const useCase = new ProcessDocument(preprocessor, classifier, [engine], translator);
-    await useCase.execute(imageBuffer, imageUrl, targetLanguage);
+    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [engine], makeTranslator());
+    await useCase.execute(imageBuffer, imageUrl, 'češtiny');
 
     expect(preprocessor.process).toHaveBeenCalledWith(imageBuffer);
-    expect(classifier.classify).toHaveBeenCalled();
-    expect(engine.isAvailable).toHaveBeenCalled();
     expect(engine.recognize).toHaveBeenCalled();
   });
 
-  it('passes original image to classifier', async () => {
+  it('does not call classifier', async () => {
     const classifier = makeClassifier();
     const useCase = new ProcessDocument(makePreprocessor(), classifier, [makeOcrEngine()], makeTranslator());
-    await useCase.execute(imageBuffer, imageUrl, targetLanguage);
+    await useCase.execute(imageBuffer, imageUrl, 'češtiny');
 
-    expect(classifier.classify).toHaveBeenCalledWith(imageBuffer);
+    expect(classifier.classify).not.toHaveBeenCalled();
   });
 
-  it('passes classification context to OCR engines', async () => {
-    const engine = makeOcrEngine();
-    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [engine], makeTranslator());
-    await useCase.execute(imageBuffer, imageUrl, targetLanguage);
-
-    expect(engine.recognize).toHaveBeenCalledWith(
-      imageBuffer,
-      expect.objectContaining({ context: expect.any(String) }),
-    );
-  });
-
-  it('returns ProcessingResult with OCR results and empty translations (temporarily disabled)', async () => {
-    const useCase = new ProcessDocument(
-      makePreprocessor(),
-      makeClassifier(),
-      [makeOcrEngine()],
-      makeTranslator(),
-    );
-
-    const result = await useCase.execute(imageBuffer, imageUrl, targetLanguage);
+  it('returns ProcessingResult with OCR results', async () => {
+    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [makeOcrEngine()], makeTranslator());
+    const result = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
 
     expect(result.id).toBeTruthy();
     expect(result.originalImage).toBe(imageUrl);
-    expect(result.classification).toEqual(mockClassification);
     expect(result.ocrResults).toHaveLength(1);
-    // Translations temporarily disabled
+    expect(result.ocrResults[0].text).toBe('Středověký přepsaný text');
     expect(result.consolidatedText).toBe('');
-    expect(result.literalTranslation).toBe('');
-    expect(result.polishedTranslation).toBe('');
     expect(result.confidenceNotes[0]).toContain('dočasně');
   });
 
-  it('generates a unique id for each execution', async () => {
-    const useCase = new ProcessDocument(
-      makePreprocessor(),
-      makeClassifier(),
-      [makeOcrEngine()],
-      makeTranslator(),
-    );
-
-    const result1 = await useCase.execute(imageBuffer, imageUrl, targetLanguage);
-    const result2 = await useCase.execute(imageBuffer, imageUrl, targetLanguage);
-
-    expect(result1.id).not.toBe(result2.id);
+  it('generates unique ids', async () => {
+    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [makeOcrEngine()], makeTranslator());
+    const r1 = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
+    const r2 = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
+    expect(r1.id).not.toBe(r2.id);
   });
 
-  it('propagates errors from preprocessor', async () => {
+  it('propagates preprocessing errors', async () => {
     const preprocessor: IPreprocessor = {
       process: vi.fn().mockRejectedValue(new Error('Preprocessing failed')),
     };
-
-    const useCase = new ProcessDocument(
-      preprocessor,
-      makeClassifier(),
-      [makeOcrEngine()],
-      makeTranslator(),
-    );
-
-    await expect(useCase.execute(imageBuffer, imageUrl, targetLanguage)).rejects.toThrow(
-      'Preprocessing failed',
-    );
+    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [makeOcrEngine()], makeTranslator());
+    await expect(useCase.execute(imageBuffer, imageUrl, 'češtiny')).rejects.toThrow('Preprocessing failed');
   });
 });
