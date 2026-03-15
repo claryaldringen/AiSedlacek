@@ -22,18 +22,7 @@ Detekované rysy mohou zahrnovat:
 - stav: "dekorativní_iniciály", "rubriky", "poškozený", "vybledlý", "fragmentární"
 - jazyk: rozpoznaný jazyk nebo jazyky dokumentu`;
 
-export const OCR_TRANSCRIPTION_PROMPT = `Přepiš co nejpřesněji veškerý text na tomto obrázku historického dokumentu.
-
-Pravidla:
-- Přepisuj přesně to, co vidíš – nepřekládej, neopravuj pravopis
-- Zachovej původní řádkování (každý řádek originálu = jeden řádek výstupu)
-- Středověké zkratky přepiš tak, jak vypadají (nerozváděj je)
-- Speciální znaky (dlouhé ſ, ligatury, rubriky) přepiš co nejblíže originálu
-- Místa, která nedokážeš přečíst, označ jako [...]
-- Místa, kde si nejsi jistý, označ jako [?text?]
-- Na konec přidej krátkou poznámku o typu písma a jazyce, který rozpoznáváš
-
-DŮLEŽITÉ: Nevymýšlej text, který nevidíš. Raději označ jako nečitelný.`;
+export const OCR_TRANSCRIPTION_PROMPT = `Jsi expert na paleografii a historické rukopisy. Přepiš text z tohoto rukopisu.`;
 
 export function buildConsolidationPrompt(
   ocrSection: string,
