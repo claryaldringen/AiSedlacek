@@ -1,1 +1,35 @@
-{"name":"@ai-sedlacek/web","version":"0.0.0","private":true,"type":"module","scripts":{"dev":"next dev","build":"next build","start":"next start","typecheck":"tsc --noEmit","lint":"eslint app/ lib/ components/","format:check":"prettier --check \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore","format":"prettier --write \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore","test":"vitest run"},"dependencies":{"@ai-sedlacek/shared":"*","next":"^15","react":"^19","react-dom":"^19","sharp":"^0.33"},"devDependencies":{"@tailwindcss/postcss":"^4","@types/node":"^22","@types/react":"^19","@types/react-dom":"^19","eslint":"^9","typescript-eslint":"^8","prettier":"^3","tailwindcss":"^4","typescript":"^5","vitest":"^3"}}
+{
+  "name": "@ai-sedlacek/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"app/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sedlacek/shared": "*",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19",
+    "sharp": "^0.33"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "typescript-eslint": "^8",
+    "prettier": "^3",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}

@@ -1,6 +1,11 @@
 export type OcrTier = 'tier1' | 'tier2';
 
-export type OcrEngineName = 'transkribus' | 'tesseract' | 'kraken' | 'claude_vision' | 'ollama_vision';
+export type OcrEngineName =
+  | 'transkribus'
+  | 'tesseract'
+  | 'kraken'
+  | 'claude_vision'
+  | 'ollama_vision';
 
 export interface DocumentClassification {
   tier: OcrTier;
