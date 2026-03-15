@@ -41,10 +41,10 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
               + 'Use your knowledge of historical orthography to '
               + 'disambiguate unclear characters (e.g. long ſ looks '
               + 'like f — always transcribe it as s). After the '
-              + 'transcription, add a translation into modern standard '
-              + 'language the user writes in, a brief contextual '
-              + 'explanation, and a glossary of terms that may be '
-              + 'unfamiliar to a modern reader. Respond in the '
+              + 'transcription, translate each entry into modern '
+              + 'standard language the user writes in. Then add a brief '
+              + 'contextual explanation and a glossary of terms that '
+              + 'may be unfamiliar to a modern reader. Respond in the '
               + 'user\'s language.',
           messages: [
               {
