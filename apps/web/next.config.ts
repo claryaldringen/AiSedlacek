@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@ai-sedlacek/shared'],
-  serverExternalPackages: ['sharp'],
+  serverExternalPackages: ['sharp', 'tesseract.js'],
 };
 
 export default nextConfig;

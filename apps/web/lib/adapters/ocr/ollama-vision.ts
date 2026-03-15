@@ -10,13 +10,16 @@ export class OllamaVisionOcrEngine implements IOcrEngine {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const response = await fetch(`${this.config.baseUrl}/api/tags`, {
-        signal: controller.signal,
+        signal: AbortSignal.timeout(2000),
       });
-      clearTimeout(timeoutId);
-      return response.ok;
+      if (!response.ok) return false;
+
+      // Check if the required model is actually installed
+      const data = (await response.json()) as { models?: { name: string }[] };
+      const models = data.models ?? [];
+      const modelBase = this.config.model.split(':')[0];
+      return models.some((m) => m.name.startsWith(modelBase ?? ''));
     } catch {
       return false;
     }

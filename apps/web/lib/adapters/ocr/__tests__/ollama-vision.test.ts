@@ -30,9 +30,12 @@ describe('OllamaVisionOcrEngine', () => {
   });
 
   describe('isAvailable()', () => {
-    it('returns true when /api/tags endpoint responds with 200', async () => {
+    it('returns true when /api/tags endpoint responds with 200 and model is present', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(JSON.stringify({ models: [] }), { status: 200 }),
+        new Response(
+          JSON.stringify({ models: [{ name: 'llama3.2-vision:11b' }] }),
+          { status: 200 },
+        ),
       );
       const engine = new OllamaVisionOcrEngine(defaultConfig);
       const result = await engine.isAvailable();
