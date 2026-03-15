@@ -7,12 +7,16 @@ import type { OllamaConfig } from '@ai-sedlacek/shared';
 import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision.js';
 import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator.js';
 import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier.js';
+import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision.js';
+import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus.js';
+import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator.js';
+import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier.js';
 import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp.js';
 import { ProcessDocument } from '@/lib/use-cases/process-document.js';
 
 /**
  * Creates a fully wired ProcessDocument pipeline using configured providers.
- * Currently supports 'ollama' provider. Claude adapters are TODO (Chunk 8).
+ * Supports 'ollama' provider (local dev) and 'claude' provider (production).
  */
 export function createPipeline(): ProcessDocument {
   const provider = getLlmProvider();
@@ -31,9 +35,13 @@ export function createPipeline(): ProcessDocument {
     return new ProcessDocument(preprocessor, classifier, [engine], translator);
   }
 
-  // TODO (Chunk 8): implementovat Claude adaptéry
-  // if (provider === 'claude') { ... }
-  throw new Error('Claude adaptéry nejsou ještě implementovány');
+  // Claude production path: ensemble of ClaudeVision + Transkribus
+  const claudeEngine = new ClaudeVisionOcrEngine();
+  const transkribusEngine = new TranskribusOcrEngine();
+  const translator = new ClaudeTranslator();
+  const classifier = new ClaudeLayoutClassifier();
+
+  return new ProcessDocument(preprocessor, classifier, [claudeEngine, transkribusEngine], translator);
 }
 
 /**
