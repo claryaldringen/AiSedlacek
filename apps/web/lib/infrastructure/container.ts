@@ -3,6 +3,39 @@
  * Provides fail-fast validation and auto-detection from API keys.
  */
 
+import type { OllamaConfig } from '@ai-sedlacek/shared';
+import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision.js';
+import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator.js';
+import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier.js';
+import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp.js';
+import { ProcessDocument } from '@/lib/use-cases/process-document.js';
+
+/**
+ * Creates a fully wired ProcessDocument pipeline using configured providers.
+ * Currently supports 'ollama' provider. Claude adapters are TODO (Chunk 8).
+ */
+export function createPipeline(): ProcessDocument {
+  const provider = getLlmProvider();
+  const preprocessor = new SharpPreprocessor();
+
+  if (provider === 'ollama') {
+    const config: OllamaConfig = {
+      baseUrl: process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
+      model: process.env['OLLAMA_MODEL'] ?? 'llama3.2-vision',
+    };
+
+    const engine = new OllamaVisionOcrEngine(config);
+    const translator = new OllamaTranslator(config);
+    const classifier = new OllamaLayoutClassifier(config);
+
+    return new ProcessDocument(preprocessor, classifier, [engine], translator);
+  }
+
+  // TODO (Chunk 8): implementovat Claude adaptéry
+  // if (provider === 'claude') { ... }
+  throw new Error('Claude adaptéry nejsou ještě implementovány');
+}
+
 /**
  * Resolves a provider value from environment configuration.
  *
