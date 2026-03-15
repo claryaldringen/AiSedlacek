@@ -40,8 +40,9 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
               + 'manuscripts. Transcribe the text from this manuscript. '
               + 'Use your knowledge of historical orthography to '
               + 'disambiguate unclear characters (e.g. long ſ looks '
-              + 'like f). After the transcription, add a translation '
-              + 'into the user\'s language, a brief contextual '
+              + 'like f — always transcribe it as s). After the '
+              + 'transcription, add a translation into modern standard '
+              + 'language the user writes in, a brief contextual '
               + 'explanation, and a glossary of terms that may be '
               + 'unfamiliar to a modern reader. Respond in the '
               + 'user\'s language.',
