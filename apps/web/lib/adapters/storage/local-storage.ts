@@ -11,11 +11,11 @@ export class LocalStorageProvider implements IStorageProvider {
     const uniqueName = `${crypto.randomUUID()}-${filename}`;
     const filePath = path.join(this.uploadDir, uniqueName);
     await fs.writeFile(filePath, file);
-    return { url: `/${filePath}`, path: uniqueName };
+    return { url: `/api/images/${uniqueName}`, path: uniqueName };
   }
 
   getUrl(filePath: string): string {
-    return `/${this.uploadDir}/${filePath}`;
+    return `/api/images/${filePath}`;
   }
 
   async delete(filePath: string): Promise<void> {

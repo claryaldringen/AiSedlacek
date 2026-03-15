@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import { createPipeline } from '@/lib/infrastructure/container';
+import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
+import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let body: unknown;
@@ -24,8 +26,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Resolve file path from URL: strip leading slash to get relative path
-  const imagePath = imageUrl.replace(/^\//, '');
+  // Resolve file path from API URL (/api/images/uuid-file.jpg → tmp/uploads/uuid-file.jpg)
+  const filename = imageUrl.replace(/^\/api\/images\//, '');
+  const imagePath = `tmp/uploads/${filename}`;
 
   let imageBuffer: Buffer;
   try {
@@ -35,8 +38,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    // Save preprocessed image for UI preview
+    const preprocessor = new SharpPreprocessor();
+    const preprocessedBuffer = await preprocessor.process(imageBuffer);
+    const storage = new LocalStorageProvider();
+    const { url: preprocessedUrl } = await storage.upload(preprocessedBuffer, 'preprocessed.png');
+
     const pipeline = createPipeline();
     const result = await pipeline.execute(imageBuffer, imageUrl, 'češtiny');
+    result.preprocessedImage = preprocessedUrl;
+
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Neznámá chyba pipeline';

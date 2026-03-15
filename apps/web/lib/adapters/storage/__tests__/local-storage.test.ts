@@ -16,7 +16,7 @@ describe('LocalStorageProvider', () => {
     const buffer = Buffer.from('test image data');
     const result = await storage.upload(buffer, 'test.jpg');
     expect(result.path).toContain('test.jpg');
-    expect(result.url).toContain('/tmp/test-uploads/');
+    expect(result.url).toContain('/api/images/');
     const saved = await fs.readFile(path.join(TEST_DIR, result.path));
     expect(saved).toEqual(buffer);
   });

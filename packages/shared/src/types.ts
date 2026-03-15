@@ -45,6 +45,7 @@ export interface OcrEngineResult {
 export interface ProcessingResult {
   id: string;
   originalImage: string;
+  preprocessedImage?: string;
   classification: DocumentClassification;
   ocrResults: OcrEngineResult[];
   consolidatedText: string;

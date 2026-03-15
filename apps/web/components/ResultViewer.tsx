@@ -75,21 +75,42 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
         <TextColumn title="Učesaný překlad" text={result.polishedTranslation} />
       </div>
 
-      {/* Original image */}
-      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-        <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-          <h3 className="text-sm font-semibold text-stone-700">Originální obrázek</h3>
+      {/* Images: original + preprocessed side by side */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+          <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
+            <h3 className="text-sm font-semibold text-stone-700">Originální obrázek</h3>
+          </div>
+          <div className="relative p-4">
+            <Image
+              src={result.originalImage}
+              alt="Originální dokument"
+              width={1200}
+              height={800}
+              className="max-h-[600px] w-full rounded object-contain"
+              unoptimized
+            />
+          </div>
         </div>
-        <div className="relative p-4">
-          <Image
-            src={result.originalImage}
-            alt="Originální dokument"
-            width={1200}
-            height={800}
-            className="max-h-[600px] w-full rounded object-contain"
-            unoptimized
-          />
-        </div>
+
+        {result.preprocessedImage && (
+          <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+            <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
+              <h3 className="text-sm font-semibold text-stone-700">Po předzpracování</h3>
+              <p className="text-xs text-stone-400">Binarizace, normalizace, zaostření</p>
+            </div>
+            <div className="relative p-4">
+              <Image
+                src={result.preprocessedImage}
+                alt="Předzpracovaný dokument"
+                width={1200}
+                height={800}
+                className="max-h-[600px] w-full rounded object-contain"
+                unoptimized
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Confidence notes */}

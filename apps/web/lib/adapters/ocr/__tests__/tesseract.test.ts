@@ -64,10 +64,10 @@ describe('TesseractOcrEngine', () => {
     expect(createWorker).toHaveBeenCalledWith('lat');
   });
 
-  it('falls back to deu_frak+ces+lat when no config', async () => {
+  it('falls back to deu+ces+lat when no config', async () => {
     const engine = new TesseractOcrEngine();
     await engine.recognize(Buffer.from('test'));
-    expect(createWorker).toHaveBeenCalledWith('deu_frak+ces+lat');
+    expect(createWorker).toHaveBeenCalledWith('deu+ces+lat');
   });
 
   it('recognize returns OcrEngineResult with text and confidence', async () => {
