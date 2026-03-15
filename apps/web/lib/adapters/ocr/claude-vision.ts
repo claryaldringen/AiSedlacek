@@ -57,6 +57,14 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
       ],
     });
 
+    console.log('[ClaudeVision] Full API response:', JSON.stringify({
+      id: response.id,
+      model: response.model,
+      stop_reason: response.stop_reason,
+      usage: response.usage,
+      content: response.content,
+    }, null, 2));
+
     const firstContent = response.content[0];
     const text = firstContent?.type === 'text' ? firstContent.text : '';
 
