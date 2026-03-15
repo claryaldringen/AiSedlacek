@@ -1,5 +1,10 @@
+export interface StorageResult {
+  url: string;
+  path: string;
+}
+
 export interface IStorageProvider {
-  upload(filename: string, data: Buffer, contentType: string): Promise<string>;
-  download(url: string): Promise<Buffer>;
-  delete(url: string): Promise<void>;
+  upload(file: Buffer, filename: string): Promise<StorageResult>;
+  getUrl(path: string): string;
+  delete(path: string): Promise<void>;
 }
