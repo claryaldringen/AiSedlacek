@@ -41,8 +41,9 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
               + 'Use your knowledge of historical orthography to '
               + 'disambiguate unclear characters (e.g. long ſ looks '
               + 'like f — always transcribe it as s). After the '
-              + 'transcription, translate each entry into modern '
-              + 'standard language the user writes in. Then add a brief '
+              + 'transcription, provide a line-by-line or entry-by-entry '
+              + 'translation into the modern standard form of the '
+              + 'language the user writes in. Then add a brief '
               + 'contextual explanation and a glossary of terms that '
               + 'may be unfamiliar to a modern reader. Respond in the '
               + 'user\'s language.',
