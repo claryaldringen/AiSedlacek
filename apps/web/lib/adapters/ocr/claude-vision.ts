@@ -33,29 +33,38 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
       prompt = `KONTEXT DOKUMENTU (z předchozí klasifikace): ${options.context}\n\n${prompt}`;
     }
 
-    const response = await client.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: image.toString('base64'),
+      const response = await client.messages.create({
+          model: 'claude-opus-4-6',
+          max_tokens: 4096,
+          system: 'You are an expert in paleography and historical '
+              + 'manuscripts. Transcribe the text from this manuscript. '
+              + 'Use your knowledge of historical orthography to '
+              + 'disambiguate unclear characters (e.g. long ſ looks '
+              + 'like f). After the transcription, add a translation '
+              + 'into the user\'s language, a brief contextual '
+              + 'explanation, and a glossary of terms that may be '
+              + 'unfamiliar to a modern reader. Respond in the '
+              + 'user\'s language.',
+          messages: [
+              {
+                  role: 'user',
+                  content: [
+                      {
+                          type: 'image',
+                          source: {
+                              type: 'base64',
+                              media_type: mediaType,
+                              data: image.toString('base64'),
+                          },
+                      },
+                      {
+                          type: 'text',
+                          text: prompt,
+                      },
+                  ],
               },
-            },
-            {
-              type: 'text',
-              text: prompt,
-            },
           ],
-        },
-      ],
-    });
+      });
 
     console.log('[ClaudeVision] Full API response:', JSON.stringify({
       id: response.id,

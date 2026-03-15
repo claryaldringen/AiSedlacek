@@ -66,7 +66,7 @@ describe('ProcessDocument', () => {
     expect(result.id).toBeTruthy();
     expect(result.originalImage).toBe(imageUrl);
     expect(result.ocrResults).toHaveLength(1);
-    expect(result.ocrResults[0].text).toBe('Středověký přepsaný text');
+    expect(result.ocrResults[0]?.text).toBe('Středověký přepsaný text');
     expect(result.consolidatedText).toBe('');
     expect(result.confidenceNotes[0]).toContain('dočasně');
   });

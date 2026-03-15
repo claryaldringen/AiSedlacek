@@ -156,7 +156,7 @@ describe('OllamaVisionOcrEngine', () => {
       expect(callArgs).toBeDefined();
       const body = JSON.parse(callArgs![1]?.body as string);
       // OCR_TRANSCRIPTION_PROMPT contains this distinctive text
-      expect(body.messages[0].content).toContain('Přepiš co nejpřesněji');
+      expect(body.messages[0].content).toContain('Přepiš text');
     });
   });
 });

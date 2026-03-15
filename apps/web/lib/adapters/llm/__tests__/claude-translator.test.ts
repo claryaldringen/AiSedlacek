@@ -54,7 +54,7 @@ describe('ClaudeTranslator', () => {
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-opus-4-20250514',
+          model: 'claude-opus-4-6',
         }),
       );
     });
@@ -153,7 +153,7 @@ Text překladu.
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'claude-opus-4-20250514',
+          model: 'claude-opus-4-6',
         }),
       );
     });
