@@ -8,7 +8,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pages = await prisma.page.findMany({
     where: {
       status: { not: 'archived' },
-      ...(collectionId ? { collectionId } : {}),
+      ...(collectionId ? { collectionId } : { collectionId: null }),
     },
     orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
     include: {
