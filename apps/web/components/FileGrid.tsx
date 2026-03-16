@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { Collection } from './Sidebar';
 
 export interface PageItem {
@@ -26,6 +27,7 @@ interface FileGridProps {
   onCollectionClick: (id: string) => void;
   processingPageIds: Set<string>;
   showCollections?: boolean;
+  onMovePages?: (pageIds: string[], targetCollectionId: string) => void;
 }
 
 function cleanFilename(raw: string): string {
@@ -120,7 +122,20 @@ export function FileGrid({
   onCollectionClick,
   processingPageIds,
   showCollections = true,
+  onMovePages,
 }: FileGridProps): React.JSX.Element {
+  const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
+
+  const getDraggedPageIds = (e: React.DragEvent): string[] => {
+    try {
+      const raw = e.dataTransfer.getData('application/x-page-ids');
+      if (raw) return JSON.parse(raw) as string[];
+    } catch {
+      // ignore
+    }
+    return [];
+  };
+
   if (pages.length === 0 && collections.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -156,7 +171,24 @@ export function FileGrid({
               <button
                 key={col.id}
                 onClick={() => onCollectionClick(col.id)}
-                className="group relative cursor-pointer rounded-lg border-2 border-transparent transition-all hover:border-slate-300 hover:shadow-sm"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverCollectionId(col.id);
+                }}
+                onDragLeave={() => setDragOverCollectionId(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverCollectionId(null);
+                  const ids = getDraggedPageIds(e);
+                  if (ids.length > 0) onMovePages?.(ids, col.id);
+                }}
+                className={[
+                  'group relative cursor-pointer rounded-lg border-2 transition-all',
+                  dragOverCollectionId === col.id
+                    ? 'border-blue-500 bg-blue-50 shadow-md'
+                    : 'border-transparent hover:border-slate-300 hover:shadow-sm',
+                ].join(' ')}
               >
                 <div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-md bg-amber-50">
                   <svg
@@ -193,15 +225,36 @@ export function FileGrid({
               const effectiveStatus = processingPageIds.has(page.id) ? 'processing' : page.status;
               const isDone = page.status === 'done';
 
+              const handleDragStart = (e: React.DragEvent<HTMLDivElement>): void => {
+                // If this page is selected, drag all selected; otherwise drag just this one
+                const ids = isSelected ? Array.from(selected) : [page.id];
+                e.dataTransfer.setData('application/x-page-ids', JSON.stringify(ids));
+                e.dataTransfer.effectAllowed = 'move';
+                // Show count badge if multiple
+                if (ids.length > 1) {
+                  const ghost = document.createElement('div');
+                  ghost.textContent = `${ids.length.toString()} stránek`;
+                  ghost.style.cssText =
+                    'position:fixed;top:-9999px;background:#3b82f6;color:white;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600;';
+                  document.body.appendChild(ghost);
+                  e.dataTransfer.setDragImage(ghost, 0, 0);
+                  setTimeout(() => document.body.removeChild(ghost), 0);
+                }
+              };
+
               return (
                 <div
                   key={page.id}
+                  draggable
+                  onDragStart={handleDragStart}
                   className={[
                     'group relative cursor-pointer rounded-lg border-2 transition-all',
                     isSelected
                       ? 'border-blue-500 shadow-md shadow-blue-100'
                       : 'border-transparent hover:border-slate-300 hover:shadow-sm',
+                    'dragging:opacity-50',
                   ].join(' ')}
+                  style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
                   onClick={() => {
                     if (isDone) onPageClick(page);
                   }}

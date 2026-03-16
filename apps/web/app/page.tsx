@@ -271,6 +271,40 @@ export default function HomePage(): React.JSX.Element {
     }
   }, [selected, pages, processingPageIds]);
 
+  // ---- Move pages (drag & drop) ----
+  const handleMovePages = useCallback(
+    async (pageIds: string[], targetCollectionId: string | null): Promise<void> => {
+      // Optimistically remove moved pages from the current view when in a specific collection
+      // (they've moved elsewhere, or back to "all" = null)
+      if (selectedCollectionId !== null) {
+        setPages((prev) => prev.filter((p) => !pageIds.includes(p.id)));
+      } else if (targetCollectionId !== null) {
+        // In "all" view: update collectionId locally
+        setPages((prev) =>
+          prev.map((p) => (pageIds.includes(p.id) ? { ...p, collectionId: targetCollectionId } : p)),
+        );
+      }
+
+      // Fire API calls
+      await Promise.all(
+        pageIds.map((id) =>
+          fetch(`/api/pages/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ collectionId: targetCollectionId }),
+          }).catch(() => {
+            // On error, reload pages to restore correct state
+            void loadPages(selectedCollectionId);
+          }),
+        ),
+      );
+
+      // Refresh collection counts
+      void loadCollections();
+    },
+    [selectedCollectionId, loadCollections, loadPages],
+  );
+
   // ---- Delete ----
   const handleDeletePage = useCallback(
     async (pageId: string): Promise<void> => {
@@ -375,6 +409,7 @@ export default function HomePage(): React.JSX.Element {
         setCollections((prev) => [col, ...prev]);
       }}
       onRefreshCollections={loadCollections}
+      onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
     >
       {/* Toolbar */}
       <Toolbar
@@ -415,7 +450,9 @@ export default function HomePage(): React.JSX.Element {
         ].join(' ')}
         onDragOver={(e) => {
           e.preventDefault();
-          setContentDragOver(true);
+          // Only show upload overlay for OS file drags, not internal page-card drags
+          const isPageDrag = e.dataTransfer.types.includes('application/x-page-ids');
+          if (!isPageDrag) setContentDragOver(true);
         }}
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
@@ -448,6 +485,7 @@ export default function HomePage(): React.JSX.Element {
             onCollectionClick={handleCollectionSelect}
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
+            onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
           />
         ) : (
           <FileList

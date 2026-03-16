@@ -12,6 +12,7 @@ interface AppShellProps {
   onCollectionSelect: (id: string | null) => void;
   onCollectionCreated?: (collection: Collection) => void;
   onRefreshCollections: () => void;
+  onMovePages?: (pageIds: string[], targetCollectionId: string | null) => void;
 }
 
 export function AppShell({
@@ -23,6 +24,7 @@ export function AppShell({
   onCollectionSelect,
   onCollectionCreated,
   onRefreshCollections,
+  onMovePages,
 }: AppShellProps): React.JSX.Element {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -71,6 +73,7 @@ export function AppShell({
           collections={collections}
           loadingCollections={loadingCollections}
           onRefresh={onRefreshCollections}
+          onMovePages={onMovePages}
         />
 
         {/* Main content area */}

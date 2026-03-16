@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 
 export interface Collection {
   id: string;
@@ -17,6 +17,7 @@ interface SidebarProps {
   collections: Collection[];
   loadingCollections: boolean;
   onRefresh: () => void;
+  onMovePages?: (pageIds: string[], targetCollectionId: string | null) => void;
 }
 
 export function Sidebar({
@@ -26,8 +27,20 @@ export function Sidebar({
   collections,
   loadingCollections,
   onRefresh,
+  onMovePages,
 }: SidebarProps): React.JSX.Element {
   const [showNewForm, setShowNewForm] = useState(false);
+  const [dragOverId, setDragOverId] = useState<string | 'all' | null>(null);
+
+  const getDraggedPageIds = useCallback((e: React.DragEvent): string[] => {
+    try {
+      const raw = e.dataTransfer.getData('application/x-page-ids');
+      if (raw) return JSON.parse(raw) as string[];
+    } catch {
+      // ignore
+    }
+    return [];
+  }, []);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [creating, setCreating] = useState(false);
@@ -66,11 +79,25 @@ export function Sidebar({
         {/* All items */}
         <button
           onClick={() => onCollectionSelect(null)}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setDragOverId('all');
+          }}
+          onDragLeave={() => setDragOverId(null)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOverId(null);
+            const ids = getDraggedPageIds(e);
+            if (ids.length > 0) onMovePages?.(ids, null);
+          }}
           className={[
             'flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-            selectedCollectionId === null
-              ? 'bg-blue-600 text-white'
-              : 'text-slate-300 hover:bg-slate-700 hover:text-white',
+            dragOverId === 'all'
+              ? 'bg-blue-500/30 text-white ring-1 ring-inset ring-blue-400'
+              : selectedCollectionId === null
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-300 hover:bg-slate-700 hover:text-white',
           ].join(' ')}
         >
           <svg
@@ -106,11 +133,25 @@ export function Sidebar({
             <button
               key={col.id}
               onClick={() => onCollectionSelect(col.id)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDragOverId(col.id);
+              }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverId(null);
+                const ids = getDraggedPageIds(e);
+                if (ids.length > 0) onMovePages?.(ids, col.id);
+              }}
               className={[
                 'flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-                selectedCollectionId === col.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-700 hover:text-white',
+                dragOverId === col.id
+                  ? 'bg-blue-500/30 text-white ring-1 ring-inset ring-blue-400'
+                  : selectedCollectionId === col.id
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-700 hover:text-white',
               ].join(' ')}
             >
               <svg
