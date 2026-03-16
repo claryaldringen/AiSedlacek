@@ -151,24 +151,28 @@ export function FileGrid({
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Svazky
           </h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {collections.map((col) => (
               <button
                 key={col.id}
                 onClick={() => onCollectionClick(col.id)}
-                className="group flex flex-col items-center gap-2 rounded-lg p-3 text-center transition-colors hover:bg-blue-50"
+                className="group relative cursor-pointer rounded-lg border-2 border-transparent transition-all hover:border-slate-300 hover:shadow-sm"
               >
-                <svg
-                  className="h-14 w-14 text-yellow-400 transition-transform group-hover:scale-105"
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 12h-15a4.483 4.483 0 0 0-3 1.146Z" />
-                </svg>
-                <span className="w-full truncate text-xs font-medium text-slate-700">
-                  {col.name}
-                </span>
-                <span className="text-[10px] text-slate-400">{col._count.pages} str.</span>
+                <div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-md bg-amber-50">
+                  <svg
+                    className="h-20 w-20 text-yellow-400 transition-transform group-hover:scale-105"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 12h-15a4.483 4.483 0 0 0-3 1.146Z" />
+                  </svg>
+                  <span className="absolute bottom-2 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 shadow-sm">
+                    {col._count.pages} str.
+                  </span>
+                </div>
+                <div className="px-1 pb-2 pt-1.5">
+                  <p className="truncate text-xs font-medium text-slate-700">{col.name}</p>
+                </div>
               </button>
             ))}
           </div>
