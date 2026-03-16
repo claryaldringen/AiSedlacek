@@ -237,6 +237,33 @@ export default function HomePage(): React.JSX.Element {
     }
   }, []);
 
+  const handleDeletePage = useCallback(async (pageId: string): Promise<void> => {
+    const page = pages.find((p) => p.id === pageId);
+    if (!page) return;
+
+    if (page.status === 'done' || page.document) {
+      // Processed page – archive (soft delete via status)
+      try {
+        await fetch(`/api/pages/${pageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'archived' }),
+        });
+        setPages((prev) => prev.filter((p) => p.id !== pageId));
+      } catch {
+        // ignore
+      }
+    } else {
+      // Unprocessed page – hard delete
+      try {
+        await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
+        setPages((prev) => prev.filter((p) => p.id !== pageId));
+      } catch {
+        // ignore
+      }
+    }
+  }, [pages]);
+
   const isProcessing = processingPageIds.size > 0;
 
   return (
@@ -292,6 +319,7 @@ export default function HomePage(): React.JSX.Element {
               pages={pages}
               onProcessSelected={(ids) => void handleProcessSelected(ids)}
               onPageClick={(page) => void handlePageClick(page)}
+              onDelete={(id) => void handleDeletePage(id)}
               processingPageIds={processingPageIds}
             />
           </section>

@@ -6,7 +6,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const collectionId = searchParams.get('collectionId');
 
   const pages = await prisma.page.findMany({
-    where: collectionId ? { collectionId } : undefined,
+    where: {
+      status: { not: 'archived' },
+      ...(collectionId ? { collectionId } : {}),
+    },
     orderBy: [{ order: 'asc' }, { createdAt: 'desc' }],
     include: {
       document: {

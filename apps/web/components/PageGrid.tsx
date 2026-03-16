@@ -9,6 +9,7 @@ export interface PageItem {
   status: string;
   order: number;
   collectionId: string | null;
+  createdAt?: string;
   document?: {
     id: string;
     detectedLanguage: string;
@@ -20,27 +21,43 @@ interface PageGridProps {
   pages: PageItem[];
   onProcessSelected: (pageIds: string[]) => void;
   onPageClick: (page: PageItem) => void;
+  onDelete?: (pageId: string) => void;
   processingPageIds?: Set<string>;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Čeká',
-  processing: 'Zpracovává se',
-  done: 'Hotovo',
-  error: 'Chyba',
+const STATUS_ICON: Record<string, string> = {
+  pending: '○',
+  processing: '◌',
+  done: '●',
+  error: '✕',
+  archived: '◇',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-stone-100 text-stone-600',
-  processing: 'bg-blue-100 text-blue-700',
-  done: 'bg-green-100 text-green-700',
-  error: 'bg-red-100 text-red-700',
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Čeká',
+  processing: 'Zpracovává se…',
+  done: 'Zpracováno',
+  error: 'Chyba',
+  archived: 'Smazáno',
 };
+
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'text-stone-400',
+  processing: 'text-blue-500 animate-spin',
+  done: 'text-green-500',
+  error: 'text-red-500',
+  archived: 'text-stone-300',
+};
+
+function cleanFilename(raw: string): string {
+  return raw.replace(/^[a-f0-9-]+-/, '');
+}
 
 export function PageGrid({
   pages,
   onProcessSelected,
   onPageClick,
+  onDelete,
   processingPageIds = new Set(),
 }: PageGridProps): React.JSX.Element {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -48,11 +65,8 @@ export function PageGrid({
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
@@ -70,153 +84,174 @@ export function PageGrid({
     onProcessSelected(Array.from(selected));
   }, [selected, onProcessSelected]);
 
+  const handleDeleteSelected = useCallback(() => {
+    if (!onDelete || selected.size === 0) return;
+    for (const id of selected) {
+      onDelete(id);
+    }
+    setSelected(new Set());
+  }, [selected, onDelete]);
+
   if (pages.length === 0) {
-    return <p className="text-sm text-stone-400">Zatím žádné stránky. Nahrajte obrázky výše.</p>;
+    return (
+      <div className="rounded-lg border border-dashed border-stone-200 p-8 text-center">
+        <p className="text-sm text-stone-400">Zatím žádné stránky. Nahrajte obrázky výše.</p>
+      </div>
+    );
   }
 
   const allSelected = selected.size === pages.length && pages.length > 0;
+  const pendingSelected = Array.from(selected).filter((id) => {
+    const p = pages.find((pg) => pg.id === id);
+    return p && (p.status === 'pending' || p.status === 'error');
+  });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={allSelected ? deselectAll : selectAll}
-          className="rounded border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
-        >
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+        <label className="flex items-center gap-2 text-sm text-stone-600">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={allSelected ? deselectAll : selectAll}
+            className="rounded border-stone-300"
+          />
           {allSelected ? 'Zrušit výběr' : 'Vybrat vše'}
-        </button>
-        {selected.size > 0 && (
-          <button
-            onClick={deselectAll}
-            className="rounded border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
-          >
-            Zrušit výběr ({selected.size})
-          </button>
-        )}
+        </label>
+
+        <div className="mx-2 h-4 w-px bg-stone-200" />
+
         <button
           onClick={handleProcess}
-          disabled={selected.size === 0 || processingPageIds.size > 0}
-          className="rounded bg-stone-800 px-4 py-1.5 text-sm font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={pendingSelected.length === 0 || processingPageIds.size > 0}
+          className="rounded bg-stone-800 px-3 py-1 text-xs font-medium text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {processingPageIds.size > 0
             ? 'Zpracovává se…'
-            : `Zpracovat vybrané${selected.size > 0 ? ` (${selected.size})` : ''}`}
+            : `Zpracovat${pendingSelected.length > 0 ? ` (${pendingSelected.length})` : ''}`}
         </button>
+
+        {selected.size > 0 && onDelete && (
+          <button
+            onClick={handleDeleteSelected}
+            className="rounded border border-red-200 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50"
+          >
+            Smazat ({selected.size})
+          </button>
+        )}
+
+        <span className="ml-auto text-xs text-stone-400">
+          {pages.length} stránek · {pages.filter((p) => p.status === 'done').length} zpracováno
+        </span>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {pages.map((page) => {
-          const isSelected = selected.has(page.id);
-          const isProcessing = processingPageIds.has(page.id);
-          const statusKey = isProcessing ? 'processing' : page.status;
+      {/* File list */}
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-stone-100 bg-stone-50 text-left text-xs text-stone-500">
+              <th className="w-8 px-3 py-2" />
+              <th className="w-10 px-2 py-2">Stav</th>
+              <th className="px-2 py-2">Náhled</th>
+              <th className="px-2 py-2">Název</th>
+              <th className="px-2 py-2">Jazyky</th>
+              <th className="w-20 px-2 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {pages.map((page) => {
+              const isSelected = selected.has(page.id);
+              const statusKey = processingPageIds.has(page.id) ? 'processing' : page.status;
+              const isDone = page.status === 'done';
 
-          return (
-            <div
-              key={page.id}
-              className={[
-                'group relative overflow-hidden rounded-lg border-2 bg-white shadow-sm transition-all',
-                isSelected ? 'border-stone-700' : 'border-stone-200',
-              ].join(' ')}
-            >
-              {/* Checkbox */}
-              <button
-                onClick={() => toggleOne(page.id)}
-                aria-label={isSelected ? 'Odebrat výběr' : 'Vybrat stránku'}
-                className="absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded border-2 border-white bg-white/80 shadow transition-opacity"
-              >
-                {isSelected && (
-                  <svg className="h-3 w-3 text-stone-800" viewBox="0 0 12 12" fill="currentColor">
-                    <path
-                      d="M10 3L5 8.5 2 5.5"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+              return (
+                <tr
+                  key={page.id}
+                  className={[
+                    'border-b border-stone-50 transition-colors',
+                    isSelected ? 'bg-stone-50' : 'hover:bg-stone-25',
+                    isDone ? 'cursor-pointer' : '',
+                  ].join(' ')}
+                  onClick={() => isDone && onPageClick(page)}
+                >
+                  {/* Checkbox */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleOne(page.id)}
+                      className="rounded border-stone-300"
                     />
-                  </svg>
-                )}
-              </button>
+                  </td>
 
-              {/* Status badge */}
-              <span
-                className={[
-                  'absolute right-2 top-2 z-10 rounded px-1.5 py-0.5 text-xs font-medium',
-                  STATUS_COLORS[statusKey] ?? STATUS_COLORS['pending'],
-                ].join(' ')}
-              >
-                {STATUS_LABELS[statusKey] ?? statusKey}
-              </span>
-
-              {/* Thumbnail */}
-              <button
-                onClick={() => onPageClick(page)}
-                disabled={page.status !== 'done'}
-                className="block w-full focus:outline-none"
-                aria-label={`Zobrazit dokument: ${page.filename}`}
-              >
-                <div className="relative aspect-[3/4] w-full overflow-hidden bg-stone-100">
-                  <img
-                    src={page.imageUrl}
-                    alt={page.filename}
-                    className={[
-                      'h-full w-full object-cover transition-opacity',
-                      page.status === 'done' ? 'group-hover:opacity-90' : 'opacity-80',
-                    ].join(' ')}
-                  />
-                  {isProcessing && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-white/50">
-                      <svg
-                        className="h-8 w-8 animate-spin text-stone-600"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              </button>
-
-              {/* Filename */}
-              <div className="px-2 py-1.5">
-                <p className="truncate text-xs text-stone-600" title={page.filename}>
-                  {page.filename.replace(/^[a-f0-9-]+-/, '')}
-                </p>
-                {page.document && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <span className="rounded bg-stone-100 px-1 py-0.5 text-[10px] text-stone-500">
-                      {page.document.detectedLanguage}
+                  {/* Status */}
+                  <td className="px-2 py-2">
+                    <span
+                      className={`text-sm ${STATUS_COLOR[statusKey] ?? STATUS_COLOR['pending']}`}
+                      title={STATUS_LABEL[statusKey] ?? statusKey}
+                    >
+                      {STATUS_ICON[statusKey] ?? '○'}
                     </span>
-                    {page.document.translations.map((t) => (
-                      <span
-                        key={t.language}
-                        className="rounded bg-blue-50 px-1 py-0.5 text-[10px] text-blue-600"
+                  </td>
+
+                  {/* Thumbnail */}
+                  <td className="px-2 py-2">
+                    <div className="h-10 w-8 overflow-hidden rounded border border-stone-100 bg-stone-50">
+                      <img
+                        src={page.imageUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  </td>
+
+                  {/* Filename */}
+                  <td className="px-2 py-2">
+                    <span className="text-sm text-stone-700">{cleanFilename(page.filename)}</span>
+                    {page.status === 'error' && (
+                      <span className="ml-2 text-xs text-red-400">Zpracování selhalo</span>
+                    )}
+                  </td>
+
+                  {/* Languages */}
+                  <td className="px-2 py-2">
+                    {page.document && (
+                      <div className="flex flex-wrap gap-1">
+                        <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500">
+                          {page.document.detectedLanguage}
+                        </span>
+                        {page.document.translations.map((t) => (
+                          <span
+                            key={t.language}
+                            className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                          >
+                            → {t.language}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(page.id)}
+                        className="rounded p-1 text-stone-300 hover:bg-red-50 hover:text-red-500"
+                        title={isDone ? 'Archivovat' : 'Smazat'}
                       >
-                        {t.language}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                        </svg>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
