@@ -32,7 +32,7 @@ export function AppShell({
       <header className="flex h-12 shrink-0 items-center gap-4 bg-slate-800 px-4">
         {/* Logo */}
         <span className="select-none text-base font-bold tracking-tight text-white">
-          AiSedlacek
+          A<span className="inline-flex flex-col items-center leading-none text-slate-500" style={{fontSize:'0.55em',verticalAlign:'baseline',marginBottom:'-0.1em'}}><span className="text-white" style={{fontSize:'0.7em',lineHeight:1}}>&#x2022;</span><span style={{lineHeight:1,marginTop:'-0.15em'}}>&#x0131;</span></span>Sedlacek
         </span>
 
         {/* Divider */}
