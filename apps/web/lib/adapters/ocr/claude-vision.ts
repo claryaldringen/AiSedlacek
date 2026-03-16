@@ -42,11 +42,13 @@ export class ClaudeVisionOcrEngine implements IOcrEngine {
               + 'disambiguate unclear characters (e.g. long ſ looks '
               + 'like f — always transcribe it as s). Then translate '
               + 'the transcribed text fully into the modern standard '
-              + 'form of the language the user writes in. Preserve '
-              + 'all references and citations. Use square brackets to '
-              + 'clarify archaic terms or add context a modern reader '
-              + 'would need. Then add a brief contextual explanation '
-              + 'and a glossary. Respond in the user\'s language.',
+              + 'form of the language the user writes in. Do not '
+              + 'summarize — translate the complete text. Preserve '
+              + 'all references and citations. Use square brackets '
+              + 'to clarify archaic terms or add context a modern '
+              + 'reader would need. Then add a brief contextual '
+              + 'explanation and a glossary. Respond in the user\'s '
+              + 'language.',
           messages: [
               {
                   role: 'user',
