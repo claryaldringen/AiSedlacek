@@ -24,10 +24,16 @@ model Page {
   hash         String
   imageUrl     String
   order        Int         @default(0)
-  status       String      @default("pending") // pending | processing | done | error
+  status       String      @default("pending")
   errorMessage String?
   createdAt    DateTime    @default(now())
   document     Document?
+
+  // Image metadata
+  mimeType  String?
+  fileSize  Int?     // bytes
+  width     Int?     // pixels
+  height    Int?     // pixels
 
   @@index([collectionId])
   @@index([hash])
@@ -48,6 +54,12 @@ model Document {
   glossary GlossaryEntry[]
 
   translations Translation[]
+
+  // Processing metadata
+  model           String?  // e.g. "claude-opus-4-6"
+  inputTokens     Int?
+  outputTokens    Int?
+  processingTimeMs Int?
 }
 
 model Translation {
@@ -57,6 +69,11 @@ model Translation {
   language   String
   text       String
   createdAt  DateTime @default(now())
+
+  // Processing metadata
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
 
   @@unique([documentId, language])
 }

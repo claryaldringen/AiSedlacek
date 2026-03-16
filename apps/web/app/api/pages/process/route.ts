@@ -143,11 +143,11 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
 
           // Run Claude OCR
-          const { result, processingTimeMs } = await processWithClaude(
-            imageBuffer,
-            'Přepiš text z tohoto rukopisu.',
+          const { result, processingTimeMs, model, inputTokens, outputTokens } =
+            await processWithClaude(imageBuffer, 'Přepiš text z tohoto rukopisu.');
+          console.log(
+            `[BatchProcess] Page ${pageId} done in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
           );
-          console.log(`[BatchProcess] Page ${pageId} done in ${processingTimeMs}ms`);
 
           let doc;
           if (page.document !== null) {
@@ -169,6 +169,10 @@ export async function POST(request: NextRequest): Promise<Response> {
                 transcription: result.transcription,
                 detectedLanguage: result.detectedLanguage,
                 context: result.context,
+                model,
+                inputTokens,
+                outputTokens,
+                processingTimeMs,
                 glossary: {
                   create: result.glossary.map((g) => ({
                     term: g.term,

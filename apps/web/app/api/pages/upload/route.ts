@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
 
@@ -80,6 +81,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
 
+      // Extract image metadata
+      let width: number | undefined;
+      let height: number | undefined;
+      try {
+        const metadata = await sharp(buffer).metadata();
+        width = metadata.width;
+        height = metadata.height;
+      } catch {
+        // not a valid image for sharp – skip metadata
+      }
+
       const page = await prisma.page.create({
         data: {
           filename,
@@ -87,6 +99,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           imageUrl: storageResult.url,
           collectionId: resolvedCollectionId,
           status: 'pending',
+          mimeType: file.type,
+          fileSize: buffer.length,
+          width,
+          height,
         },
       });
 

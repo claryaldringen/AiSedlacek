@@ -38,7 +38,13 @@ export interface StructuredOcrResult {
 export async function processWithClaude(
   image: Buffer,
   userPrompt: string,
-): Promise<{ result: StructuredOcrResult; processingTimeMs: number }> {
+): Promise<{
+  result: StructuredOcrResult;
+  processingTimeMs: number;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}> {
   const startTime = Date.now();
   const client = new Anthropic();
   const mediaType = detectMediaType(image);
@@ -90,5 +96,8 @@ export async function processWithClaude(
   return {
     result: parsed,
     processingTimeMs: Date.now() - startTime,
+    model: response.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
   };
 }
