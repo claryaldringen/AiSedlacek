@@ -32,7 +32,7 @@ export function AppShell({
       <header className="flex h-12 shrink-0 items-center gap-4 bg-slate-800 px-4">
         {/* Logo */}
         <span className="select-none text-base font-bold tracking-tight text-white">
-          A<span className="relative -mx-[0.03em] inline-block scale-y-[0.7] text-slate-500">i<span className="absolute left-1/2 top-[0.05em] -translate-x-1/2 scale-y-[1.43] text-white">.</span></span>Sedlacek
+          A<span className="text-slate-500">&#x0131;</span><span className="text-white">&#x0307;</span>Sedl&#xe1;&#x010D;ek
         </span>
 
         {/* Divider */}
