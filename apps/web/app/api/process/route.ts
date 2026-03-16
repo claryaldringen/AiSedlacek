@@ -1,8 +1,6 @@
 import { NextRequest } from 'next/server';
 import fs from 'fs/promises';
 import { createPipeline } from '@/lib/infrastructure/container';
-import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
-import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -47,25 +45,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     async start(controller) {
       try {
         sendEvent(controller, encoder, 'progress', {
-          step: 'preprocessing',
-          message: 'Předzpracování obrázku…',
-          progress: 10,
-        });
-
-        const preprocessor = new SharpPreprocessor();
-        const preprocessedBuffer = await preprocessor.process(imageBuffer);
-        const storage = new LocalStorageProvider();
-        const { url: preprocessedUrl } = await storage.upload(preprocessedBuffer, 'preprocessed.png');
-
-        sendEvent(controller, encoder, 'progress', {
           step: 'ocr',
           message: 'Zpracovávám text (Claude Opus 4.6)…',
-          progress: 30,
+          progress: 20,
         });
 
         const pipeline = createPipeline();
         const result = await pipeline.execute(imageBuffer, imageUrl);
-        result.preprocessedImage = preprocessedUrl;
 
         sendEvent(controller, encoder, 'progress', {
           step: 'done',
