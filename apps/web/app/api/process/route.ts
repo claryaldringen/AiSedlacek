@@ -46,7 +46,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Step 1: Preprocessing
         sendEvent(controller, encoder, 'progress', {
           step: 'preprocessing',
           message: 'Předzpracování obrázku…',
@@ -56,36 +55,16 @@ export async function POST(request: NextRequest): Promise<Response> {
         const preprocessor = new SharpPreprocessor();
         const preprocessedBuffer = await preprocessor.process(imageBuffer);
         const storage = new LocalStorageProvider();
-        const { url: preprocessedUrl } = await storage.upload(
-          preprocessedBuffer,
-          'preprocessed.png',
-        );
+        const { url: preprocessedUrl } = await storage.upload(preprocessedBuffer, 'preprocessed.png');
 
-        sendEvent(controller, encoder, 'progress', {
-          step: 'preprocessing_done',
-          message: 'Obrázek předzpracován',
-          progress: 20,
-          preprocessedImage: preprocessedUrl,
-        });
-
-        // Step 2: Classification
-        sendEvent(controller, encoder, 'progress', {
-          step: 'classification',
-          message: 'Klasifikace dokumentu…',
-          progress: 25,
-        });
-
-        // Step 3-4: Pipeline (classification + OCR)
-        const pipeline = createPipeline();
-
-        // Hook into pipeline progress via console output (pipeline logs steps)
         sendEvent(controller, encoder, 'progress', {
           step: 'ocr',
-          message: 'Spouštím OCR enginy (Claude Vision + Tesseract)…',
+          message: 'Zpracovávám text (Claude Opus 4.6)…',
           progress: 30,
         });
 
-        const result = await pipeline.execute(imageBuffer, imageUrl, 'češtiny');
+        const pipeline = createPipeline();
+        const result = await pipeline.execute(imageBuffer, imageUrl);
         result.preprocessedImage = preprocessedUrl;
 
         sendEvent(controller, encoder, 'progress', {
@@ -96,8 +75,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         sendEvent(controller, encoder, 'result', result);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Neznámá chyba pipeline';
-        console.error('[/api/process] Pipeline error:', message);
+        const message = err instanceof Error ? err.message : 'Neznámá chyba';
+        console.error('[/api/process] Error:', message);
         sendEvent(controller, encoder, 'error', { error: message });
       } finally {
         controller.close();

@@ -22,7 +22,7 @@ Detekované rysy mohou zahrnovat:
 - stav: "dekorativní_iniciály", "rubriky", "poškozený", "vybledlý", "fragmentární"
 - jazyk: rozpoznaný jazyk nebo jazyky dokumentu`;
 
-export const OCR_TRANSCRIPTION_PROMPT = `Přepiš text z tohoto rukopisu.`;
+export const OCR_TRANSCRIPTION_PROMPT = `Přepiš text z tohoto rukopisu a přelož jej do moderní češtiny.`;
 
 export function buildConsolidationPrompt(
   ocrSection: string,

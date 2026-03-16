@@ -1,69 +1,27 @@
 /**
- * DI container with provider switching logic.
- * Provides fail-fast validation and auto-detection from API keys.
+ * DI container – creates the processing pipeline.
+ * Supports 'ollama' (local dev) and 'claude' (production) providers.
  */
 
 import type { OllamaConfig } from '@ai-sedlacek/shared';
 import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision';
-import { OllamaTranslator } from '@/lib/adapters/llm/ollama-translator';
-import { OllamaLayoutClassifier } from '@/lib/adapters/llm/ollama-classifier';
 import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision';
-import { TranskribusOcrEngine } from '@/lib/adapters/ocr/transkribus';
-import { createTesseractEngines } from '@/lib/adapters/ocr/tesseract';
-import { ClaudeTranslator } from '@/lib/adapters/llm/claude-translator';
-import { ClaudeLayoutClassifier } from '@/lib/adapters/llm/claude-classifier';
-import { SharpPreprocessor } from '@/lib/adapters/preprocessing/sharp';
 import { ProcessDocument } from '@/lib/use-cases/process-document';
 
-/**
- * Creates a fully wired ProcessDocument pipeline using configured providers.
- * Supports 'ollama' provider (local dev) and 'claude' provider (production).
- */
 export function createPipeline(): ProcessDocument {
   const provider = getLlmProvider();
-  const preprocessor = new SharpPreprocessor();
 
   if (provider === 'ollama') {
     const config: OllamaConfig = {
       baseUrl: process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
-      model: process.env['OLLAMA_MODEL'] ?? 'llama3.2-vision',
+      model: process.env['OLLAMA_MODEL'] ?? 'llama3.2-vision:11b',
     };
-
-    const engine = new OllamaVisionOcrEngine(config);
-    const translator = new OllamaTranslator(config);
-    const classifier = new OllamaLayoutClassifier(config);
-
-    return new ProcessDocument(
-      preprocessor,
-      classifier,
-      [engine, ...createTesseractEngines()],
-      translator,
-    );
+    return new ProcessDocument(new OllamaVisionOcrEngine(config));
   }
 
-  // Claude production path: ensemble of ClaudeVision + Transkribus
-  const claudeEngine = new ClaudeVisionOcrEngine();
-  const transkribusEngine = new TranskribusOcrEngine();
-  const translator = new ClaudeTranslator();
-  const classifier = new ClaudeLayoutClassifier();
-
-  return new ProcessDocument(
-    preprocessor,
-    classifier,
-    [claudeEngine, transkribusEngine, ...createTesseractEngines()],
-    translator,
-  );
+  return new ProcessDocument(new ClaudeVisionOcrEngine());
 }
 
-/**
- * Resolves a provider value from environment configuration.
- *
- * @param envValue - Explicit value from environment (e.g. LLM_PROVIDER)
- * @param apiKey - API key that implies a specific provider if set
- * @param validValues - List of valid provider values
- * @param defaultProvider - Default provider when nothing is configured
- * @param apiKeyProvider - Provider to auto-select when apiKey is present
- */
 export function resolveProvider(
   envValue: string | undefined,
   apiKey: string | undefined,
@@ -77,14 +35,12 @@ export function resolveProvider(
         `Invalid provider value "${envValue}". Valid values: ${validValues.join(', ')}`,
       );
     }
-    // Explicit provider set – validate it has the required key if applicable
     if (envValue === apiKeyProvider && !apiKey) {
       throw new Error(`Provider "${envValue}" requires an API key but none was provided.`);
     }
     return envValue;
   }
 
-  // Auto-detect from API key presence
   if (apiKey) {
     return apiKeyProvider;
   }

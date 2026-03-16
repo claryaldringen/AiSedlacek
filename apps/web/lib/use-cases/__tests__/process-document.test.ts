@@ -1,88 +1,60 @@
 import { describe, it, expect, vi } from 'vitest';
-import type {
-  IPreprocessor,
-  ILayoutClassifier,
-  IOcrEngine,
-  ITranslator,
-  OcrEngineResult,
-} from '@ai-sedlacek/shared';
+import type { IOcrEngine, OcrEngineResult } from '@ai-sedlacek/shared';
 import { ProcessDocument } from '../process-document.js';
 
 const mockOcrResult: OcrEngineResult = {
-  engine: 'ollama_vision',
+  engine: 'claude_vision',
   role: 'recognizer',
-  text: 'Středověký přepsaný text',
-  processingTimeMs: 100,
+  text: 'Přepis středověkého textu s překladem a slovníčkem.',
+  processingTimeMs: 5000,
 };
 
-function makePreprocessor(): IPreprocessor {
-  return { process: vi.fn().mockResolvedValue(Buffer.from('processed-image')) };
-}
-
-function makeClassifier(): ILayoutClassifier {
-  return { classify: vi.fn() };
-}
-
-function makeOcrEngine(available = true): IOcrEngine {
+function makeEngine(): IOcrEngine {
   return {
-    name: 'ollama_vision',
+    name: 'claude_vision',
     role: 'recognizer',
-    isAvailable: vi.fn().mockResolvedValue(available),
+    isAvailable: vi.fn().mockResolvedValue(true),
     recognize: vi.fn().mockResolvedValue(mockOcrResult),
   };
 }
 
-function makeTranslator(): ITranslator {
-  return { consolidateAndTranslate: vi.fn(), polish: vi.fn() };
-}
-
 describe('ProcessDocument', () => {
   const imageBuffer = Buffer.from('original-image');
-  const imageUrl = '/tmp/uploads/test-image.jpg';
+  const imageUrl = '/api/images/test.jpg';
 
-  it('runs preprocessing and OCR (classification skipped)', async () => {
-    const preprocessor = makePreprocessor();
-    const engine = makeOcrEngine();
+  it('calls engine.recognize with image buffer', async () => {
+    const engine = makeEngine();
+    const useCase = new ProcessDocument(engine);
+    await useCase.execute(imageBuffer, imageUrl);
 
-    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [engine], makeTranslator());
-    await useCase.execute(imageBuffer, imageUrl, 'češtiny');
-
-    expect(preprocessor.process).toHaveBeenCalledWith(imageBuffer);
-    expect(engine.recognize).toHaveBeenCalled();
+    expect(engine.recognize).toHaveBeenCalledWith(imageBuffer);
   });
 
-  it('does not call classifier', async () => {
-    const classifier = makeClassifier();
-    const useCase = new ProcessDocument(makePreprocessor(), classifier, [makeOcrEngine()], makeTranslator());
-    await useCase.execute(imageBuffer, imageUrl, 'češtiny');
-
-    expect(classifier.classify).not.toHaveBeenCalled();
-  });
-
-  it('returns ProcessingResult with OCR results', async () => {
-    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [makeOcrEngine()], makeTranslator());
-    const result = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
+  it('returns ProcessingResult with OCR output', async () => {
+    const useCase = new ProcessDocument(makeEngine());
+    const result = await useCase.execute(imageBuffer, imageUrl);
 
     expect(result.id).toBeTruthy();
     expect(result.originalImage).toBe(imageUrl);
     expect(result.ocrResults).toHaveLength(1);
-    expect(result.ocrResults[0]?.text).toBe('Středověký přepsaný text');
-    expect(result.consolidatedText).toBe('');
-    expect(result.confidenceNotes[0]).toContain('dočasně');
+    expect(result.consolidatedText).toBe(mockOcrResult.text);
   });
 
   it('generates unique ids', async () => {
-    const useCase = new ProcessDocument(makePreprocessor(), makeClassifier(), [makeOcrEngine()], makeTranslator());
-    const r1 = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
-    const r2 = await useCase.execute(imageBuffer, imageUrl, 'češtiny');
+    const useCase = new ProcessDocument(makeEngine());
+    const r1 = await useCase.execute(imageBuffer, imageUrl);
+    const r2 = await useCase.execute(imageBuffer, imageUrl);
     expect(r1.id).not.toBe(r2.id);
   });
 
-  it('propagates preprocessing errors', async () => {
-    const preprocessor: IPreprocessor = {
-      process: vi.fn().mockRejectedValue(new Error('Preprocessing failed')),
+  it('propagates engine errors', async () => {
+    const engine: IOcrEngine = {
+      name: 'claude_vision',
+      role: 'recognizer',
+      isAvailable: vi.fn().mockResolvedValue(true),
+      recognize: vi.fn().mockRejectedValue(new Error('API error')),
     };
-    const useCase = new ProcessDocument(preprocessor, makeClassifier(), [makeOcrEngine()], makeTranslator());
-    await expect(useCase.execute(imageBuffer, imageUrl, 'češtiny')).rejects.toThrow('Preprocessing failed');
+    const useCase = new ProcessDocument(engine);
+    await expect(useCase.execute(imageBuffer, imageUrl)).rejects.toThrow('API error');
   });
 });

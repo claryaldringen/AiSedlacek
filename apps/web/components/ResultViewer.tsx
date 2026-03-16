@@ -1,114 +1,37 @@
 import Image from 'next/image';
 import type { ProcessingResult } from '@ai-sedlacek/shared';
-import { TextColumn } from '@/components/TextColumn';
 
 interface ResultViewerProps {
   result: ProcessingResult;
 }
 
-const TIER_LABEL: Record<string, string> = {
-  tier1: 'Tier 1 (standardní)',
-  tier2: 'Tier 2 (složitý layout)',
-};
-
-const SCRIPT_LABEL: Record<string, string> = {
-  print: 'Tisk',
-  manuscript: 'Rukopis',
-};
-
-const COMPLEXITY_LABEL: Record<string, string> = {
-  simple: 'Jednoduchý',
-  complex: 'Složitý',
-};
-
 export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
-  const { classification, ocrResults, confidenceNotes } = result;
-
-  // Concatenate OCR text from all recognizer engines
-  const ocrText = ocrResults
-    .filter((r) => r.role === 'recognizer')
-    .map((r) => `[${r.engine}]\n${r.text}`)
-    .join('\n\n---\n\n');
+  const ocrText = result.ocrResults[0]?.text ?? '';
 
   return (
-    <div className="space-y-4">
-      {/* Classification info */}
-      <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">Klasifikace dokumentu</h2>
-        <div className="flex flex-wrap gap-3 text-sm">
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-800">
-            {TIER_LABEL[classification.tier] ?? classification.tier}
-          </span>
-          <span className="rounded-full bg-stone-200 px-2 py-0.5 text-stone-700">
-            {SCRIPT_LABEL[classification.scriptType] ?? classification.scriptType}
-          </span>
-          <span className="rounded-full bg-stone-200 px-2 py-0.5 text-stone-700">
-            Layout:{' '}
-            {COMPLEXITY_LABEL[classification.layoutComplexity] ?? classification.layoutComplexity}
-          </span>
-          <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800">
-            Spolehlivost: {Math.round(classification.confidence * 100)} %
-          </span>
+    <div className="space-y-6">
+      {/* Main output */}
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+        <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
+          <h2 className="text-sm font-semibold text-stone-700">Výsledek</h2>
+          {result.ocrResults[0] && (
+            <p className="text-xs text-stone-400">
+              {result.ocrResults[0].engine} – {result.ocrResults[0].processingTimeMs}ms
+            </p>
+          )}
         </div>
-        {classification.reasoning && (
-          <p className="mt-2 text-sm text-stone-500 italic">{classification.reasoning}</p>
-        )}
-        {classification.detectedFeatures.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {classification.detectedFeatures.map((feature) => (
-              <span
-                key={feature}
-                className="rounded bg-stone-200 px-1.5 py-0.5 text-xs text-stone-600"
-              >
-                {feature}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* OCR results from each engine */}
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-stone-600">OCR výstupy</h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {ocrResults
-            .filter((r) => r.role === 'recognizer')
-            .map((r, i) => (
-              <TextColumn
-                key={i}
-                title={`${r.engine} ${r.confidence != null ? `(${Math.round(r.confidence * 100)}%)` : ''} – ${r.processingTimeMs}ms`}
-                text={r.text}
-                highlight
-              />
-            ))}
+        <div className="whitespace-pre-wrap p-6 text-sm leading-relaxed text-stone-800">
+          {ocrText}
         </div>
       </div>
 
-      {/* Translation results */}
-      {(result.consolidatedText || result.literalTranslation || result.polishedTranslation) && (
-        <div>
-          <h2 className="mb-2 text-sm font-semibold text-stone-600">Překlad</h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {result.consolidatedText && (
-              <TextColumn title="Konsolidovaný text" text={result.consolidatedText} highlight />
-            )}
-            {result.literalTranslation && (
-              <TextColumn title="Doslovný překlad" text={result.literalTranslation} highlight />
-            )}
-            {result.polishedTranslation && (
-              <TextColumn title="Učesaný překlad" text={result.polishedTranslation} />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Images: original + preprocessed side by side */}
+      {/* Images: original + preprocessed */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
           <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-            <h3 className="text-sm font-semibold text-stone-700">Originální obrázek</h3>
+            <h3 className="text-sm font-semibold text-stone-700">Originál</h3>
           </div>
-          <div className="relative p-4">
+          <div className="p-4">
             <Image
               src={result.originalImage}
               alt="Originální dokument"
@@ -124,9 +47,8 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
           <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
             <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
               <h3 className="text-sm font-semibold text-stone-700">Po předzpracování</h3>
-              <p className="text-xs text-stone-400">Binarizace, normalizace, zaostření</p>
             </div>
-            <div className="relative p-4">
+            <div className="p-4">
               <Image
                 src={result.preprocessedImage}
                 alt="Předzpracovaný dokument"
@@ -139,22 +61,6 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
           </div>
         )}
       </div>
-
-      {/* Confidence notes */}
-      {confidenceNotes.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-amber-800">
-            Poznámky o nejistých místech
-          </h3>
-          <ul className="list-inside list-disc space-y-1">
-            {confidenceNotes.map((note, index) => (
-              <li key={index} className="text-sm text-amber-700">
-                {note}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
