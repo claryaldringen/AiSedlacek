@@ -7,22 +7,46 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Collection {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  pages       Page[]
+}
+
+model Page {
+  id           String      @id @default(cuid())
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  filename     String
+  hash         String
+  imageUrl     String
+  order        Int         @default(0)
+  status       String      @default("pending") // pending | processing | done | error
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+  document     Document?
+
+  @@index([collectionId])
+  @@index([hash])
+}
+
 model Document {
   id        String   @id @default(cuid())
+  pageId    String   @unique
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
   hash      String   @unique
-  filename  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Original transcription (language of the manuscript)
   transcription    String
-  detectedLanguage String // e.g. "cs-old", "de-old", "la"
+  detectedLanguage String
 
-  // Context and glossary (language-independent)
-  context String // brief contextual explanation
+  context  String
   glossary GlossaryEntry[]
 
-  // Translations into modern languages
   translations Translation[]
 }
 
@@ -30,7 +54,7 @@ model Translation {
   id         String   @id @default(cuid())
   documentId String
   document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  language   String // ISO code: cs, en, de, fr...
+  language   String
   text       String
   createdAt  DateTime @default(now())
 

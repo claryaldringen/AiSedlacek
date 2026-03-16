@@ -30,9 +30,7 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
         <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
           <h2 className="text-sm font-semibold text-stone-700">Transkripce</h2>
-          <p className="text-xs text-stone-400">
-            Jazyk originálu: {result.detectedLanguage}
-          </p>
+          <p className="text-xs text-stone-400">Jazyk originálu: {result.detectedLanguage}</p>
         </div>
         <div className="prose prose-stone prose-sm max-w-none p-6">
           <ReactMarkdown>{result.transcription}</ReactMarkdown>
@@ -43,9 +41,7 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
         <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
           <h2 className="text-sm font-semibold text-stone-700">Překlad</h2>
-          <p className="text-xs text-stone-400">
-            Jazyk: {result.translationLanguage}
-          </p>
+          <p className="text-xs text-stone-400">Jazyk: {result.translationLanguage}</p>
         </div>
         <div className="prose prose-stone prose-sm max-w-none p-6">
           <ReactMarkdown>{result.translation}</ReactMarkdown>

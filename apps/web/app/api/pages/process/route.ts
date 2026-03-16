@@ -1,0 +1,234 @@
+import { NextRequest } from 'next/server';
+import fs from 'fs/promises';
+import crypto from 'crypto';
+import { prisma } from '@/lib/infrastructure/db';
+import { processWithClaude } from '@/lib/adapters/ocr/claude-vision';
+
+function sendEvent(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  event: string,
+  data: unknown,
+): void {
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'Neplatný JSON' }, { status: 400 });
+  }
+
+  if (typeof body !== 'object' || body === null || !('pageIds' in body)) {
+    return Response.json({ error: 'Chybí pageIds' }, { status: 400 });
+  }
+
+  const { pageIds, language } = body as { pageIds: unknown; language?: unknown };
+
+  if (!Array.isArray(pageIds) || pageIds.length === 0) {
+    return Response.json({ error: 'pageIds musí být neprázdné pole' }, { status: 400 });
+  }
+
+  const targetLang =
+    typeof language === 'string' && language.trim() !== '' ? language.trim() : 'cs';
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const total = pageIds.length as number;
+      let completed = 0;
+
+      for (const pageId of pageIds) {
+        if (typeof pageId !== 'string') {
+          completed++;
+          sendEvent(controller, encoder, 'page_error', {
+            pageId,
+            error: 'Neplatné ID stránky',
+          });
+          continue;
+        }
+
+        try {
+          // Fetch the page record
+          const page = await prisma.page.findUnique({
+            where: { id: pageId },
+            include: {
+              document: {
+                include: {
+                  translations: { select: { language: true } },
+                  glossary: true,
+                },
+              },
+            },
+          });
+
+          if (!page) {
+            completed++;
+            sendEvent(controller, encoder, 'page_error', {
+              pageId,
+              error: 'Stránka nenalezena',
+            });
+            continue;
+          }
+
+          // Skip if document with requested language already exists
+          if (page.document !== null) {
+            const hasTranslation = page.document.translations.some(
+              (t) => t.language === targetLang,
+            );
+            if (hasTranslation) {
+              completed++;
+              sendEvent(controller, encoder, 'page_skipped', {
+                pageId,
+                reason: 'Dokument již existuje s požadovaným jazykem',
+                progress: Math.round((completed / total) * 100),
+              });
+              continue;
+            }
+          }
+
+          // Mark as processing
+          await prisma.page.update({
+            where: { id: pageId },
+            data: { status: 'processing', errorMessage: null },
+          });
+
+          sendEvent(controller, encoder, 'page_progress', {
+            pageId,
+            message: 'Zpracovávám…',
+            progress: Math.round((completed / total) * 100),
+          });
+
+          // Load image from disk
+          const filename = page.imageUrl.replace('/api/images/', '');
+          const imagePath = `tmp/uploads/${filename}`;
+          const imageBuffer = await fs.readFile(imagePath);
+          const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+
+          // Check if document with same hash exists (different page, same image)
+          const existingByHash = await prisma.document.findUnique({
+            where: { hash: imageHash },
+            include: {
+              translations: true,
+              glossary: true,
+            },
+          });
+
+          if (existingByHash !== null) {
+            const existingTranslation = existingByHash.translations.find(
+              (t) => t.language === targetLang,
+            );
+
+            if (existingTranslation !== undefined) {
+              // Reuse existing document – link page to it if not yet linked
+              if (page.document === null) {
+                // Cannot link because pageId is unique – just update status
+              }
+              await prisma.page.update({
+                where: { id: pageId },
+                data: { status: 'done' },
+              });
+
+              completed++;
+              sendEvent(controller, encoder, 'page_done', {
+                pageId,
+                documentId: existingByHash.id,
+                cached: true,
+                progress: Math.round((completed / total) * 100),
+              });
+              continue;
+            }
+          }
+
+          // Run Claude OCR
+          const { result, processingTimeMs } = await processWithClaude(
+            imageBuffer,
+            'Přepiš text z tohoto rukopisu.',
+          );
+          console.log(`[BatchProcess] Page ${pageId} done in ${processingTimeMs}ms`);
+
+          let doc;
+          if (page.document !== null) {
+            // Document exists but needs a new translation
+            await prisma.translation.create({
+              data: {
+                documentId: page.document.id,
+                language: result.translationLanguage || targetLang,
+                text: result.translation,
+              },
+            });
+            doc = page.document;
+          } else {
+            // Create new document linked to this page
+            doc = await prisma.document.create({
+              data: {
+                pageId,
+                hash: imageHash,
+                transcription: result.transcription,
+                detectedLanguage: result.detectedLanguage,
+                context: result.context,
+                glossary: {
+                  create: result.glossary.map((g) => ({
+                    term: g.term,
+                    definition: g.definition,
+                  })),
+                },
+                translations: {
+                  create: {
+                    language: result.translationLanguage || targetLang,
+                    text: result.translation,
+                  },
+                },
+              },
+            });
+          }
+
+          await prisma.page.update({
+            where: { id: pageId },
+            data: { status: 'done', errorMessage: null },
+          });
+
+          completed++;
+          sendEvent(controller, encoder, 'page_done', {
+            pageId,
+            documentId: doc.id,
+            cached: false,
+            progress: Math.round((completed / total) * 100),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Neznámá chyba';
+          console.error(`[BatchProcess] Page ${pageId} error:`, message);
+
+          try {
+            await prisma.page.update({
+              where: { id: pageId },
+              data: { status: 'error', errorMessage: message },
+            });
+          } catch {
+            // ignore update failure
+          }
+
+          completed++;
+          sendEvent(controller, encoder, 'page_error', {
+            pageId,
+            error: message,
+            progress: Math.round((completed / total) * 100),
+          });
+        }
+      }
+
+      sendEvent(controller, encoder, 'done', { total, completed });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
+}

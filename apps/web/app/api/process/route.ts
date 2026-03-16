@@ -60,9 +60,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         if (existing) {
           // Check if we have translation in the requested language
-          const existingTranslation = existing.translations.find(
-            (t) => t.language === targetLang,
-          );
+          const existingTranslation = existing.translations.find((t) => t.language === targetLang);
 
           if (existingTranslation) {
             console.log(`[Process] DB hit: ${hash.slice(0, 8)}… (lang: ${targetLang})`);
@@ -105,9 +103,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           });
 
           const translatedText =
-            translateResponse.content[0]?.type === 'text'
-              ? translateResponse.content[0].text
-              : '';
+            translateResponse.content[0]?.type === 'text' ? translateResponse.content[0].text : '';
 
           await prisma.translation.create({
             data: {
@@ -148,11 +144,26 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
         console.log(`[Process] Claude done in ${processingTimeMs}ms`);
 
+        // Ensure a Page record exists for this imageUrl (upsert by imageUrl)
+        let page = await prisma.page.findFirst({ where: { imageUrl } });
+        if (!page) {
+          page = await prisma.page.create({
+            data: {
+              filename,
+              hash,
+              imageUrl,
+              status: 'done',
+            },
+          });
+        } else {
+          await prisma.page.update({ where: { id: page.id }, data: { status: 'done' } });
+        }
+
         // Save to DB
         const doc = await prisma.document.create({
           data: {
             hash,
-            filename,
+            pageId: page.id,
             transcription: result.transcription,
             detectedLanguage: result.detectedLanguage,
             context: result.context,

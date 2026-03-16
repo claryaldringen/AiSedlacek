@@ -68,17 +68,23 @@ export async function processWithClaude(
     ],
   });
 
-  console.log('[Claude] Response:', JSON.stringify({
-    id: response.id,
-    model: response.model,
-    usage: response.usage,
-    stop_reason: response.stop_reason,
-  }));
+  console.log(
+    '[Claude] Response:',
+    JSON.stringify({
+      id: response.id,
+      model: response.model,
+      usage: response.usage,
+      stop_reason: response.stop_reason,
+    }),
+  );
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
   // Parse JSON from response (handle potential markdown fences)
-  const jsonStr = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+  const jsonStr = text
+    .replace(/^```json\s*/, '')
+    .replace(/\s*```$/, '')
+    .trim();
   const parsed = JSON.parse(jsonStr) as StructuredOcrResult;
 
   return {
