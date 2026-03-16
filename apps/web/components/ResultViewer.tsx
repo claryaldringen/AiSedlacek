@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 
 export interface DocumentResult {
   id: string;
@@ -33,7 +34,8 @@ function EditableSection({
   saving?: boolean;
 }): React.JSX.Element {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(content);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
+  const [draft, setDraft] = useState('');
 
   const handleEdit = useCallback((): void => {
     setDraft(content);
@@ -41,14 +43,14 @@ function EditableSection({
   }, [content]);
 
   const handleSave = useCallback((): void => {
-    onSave(draft);
+    const md = editorRef.current?.getMarkdown() ?? draft;
+    onSave(md);
     setEditing(false);
   }, [draft, onSave]);
 
   const handleCancel = useCallback((): void => {
-    setDraft(content);
     setEditing(false);
-  }, [content]);
+  }, []);
 
   return (
     <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
@@ -83,12 +85,13 @@ function EditableSection({
         )}
       </div>
       {editing ? (
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          className="block w-full resize-y p-4 font-mono text-sm leading-relaxed text-stone-800 focus:outline-none"
-          rows={Math.max(10, content.split('\n').length + 2)}
-        />
+        <div className="p-2">
+          <MarkdownEditor
+            ref={editorRef}
+            initialValue={content}
+            onChange={setDraft}
+          />
+        </div>
       ) : (
         <div className="prose prose-stone prose-sm max-w-none p-6">
           <ReactMarkdown>{content}</ReactMarkdown>
@@ -103,21 +106,21 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
   const [retranslating, setRetranslating] = useState(false);
 
   const saveField = useCallback(
-    async (field: string, value: string): Promise<void> => {
+    async (field: string, value: string): Promise<DocumentResult> => {
       setSaving(true);
       try {
         const body: Record<string, string> = { [field]: value };
         if (field === 'translation') {
           body.translationLanguage = result.translationLanguage;
         }
-        const res = await fetch(`/api/documents/${result.id}`, {
+        await fetch(`/api/documents/${result.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        if (res.ok) {
-          onUpdate?.({ ...result, [field]: value });
-        }
+        const updated = { ...result, [field]: value };
+        onUpdate?.(updated);
+        return updated;
       } finally {
         setSaving(false);
       }
@@ -127,7 +130,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
 
   const handleTranscriptionSave = useCallback(
     async (newText: string): Promise<void> => {
-      await saveField('transcription', newText);
+      const updated = await saveField('transcription', newText);
 
       // Re-translate based on updated transcription
       setRetranslating(true);
@@ -139,7 +142,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         });
         if (res.ok) {
           const data = (await res.json()) as { translation: string };
-          onUpdate?.({ ...result, transcription: newText, translation: data.translation });
+          onUpdate?.({ ...updated, translation: data.translation });
         }
       } finally {
         setRetranslating(false);
@@ -170,7 +173,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
 
       <EditableSection
         title="Překlad"
-        subtitle={`Jazyk: ${result.translationLanguage}`}
+        subtitle={`Jazyk: ${result.translationLanguage}${retranslating ? ' (aktualizuje se…)' : ''}`}
         content={result.translation}
         onSave={(text) => void saveField('translation', text)}
         saving={saving}
