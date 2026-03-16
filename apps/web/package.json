@@ -16,9 +16,11 @@
   "dependencies": {
     "@ai-sedlacek/shared": "*",
     "@anthropic-ai/sdk": "^0.78.0",
+    "@tailwindcss/typography": "^0.5.19",
     "next": "^15",
     "react": "^19",
     "react-dom": "^19",
+    "react-markdown": "^10.1.0",
     "sharp": "^0.33",
     "tesseract.js": "^7.0.0"
   },

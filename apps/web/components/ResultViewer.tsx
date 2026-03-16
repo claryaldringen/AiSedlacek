@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import ReactMarkdown from 'react-markdown';
 import type { ProcessingResult } from '@ai-sedlacek/shared';
 
 interface ResultViewerProps {
@@ -10,7 +11,7 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* Main output */}
+      {/* Main output with markdown rendering */}
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
         <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
           <h2 className="text-sm font-semibold text-stone-700">Výsledek</h2>
@@ -20,8 +21,8 @@ export function ResultViewer({ result }: ResultViewerProps): React.JSX.Element {
             </p>
           )}
         </div>
-        <div className="whitespace-pre-wrap p-6 text-sm leading-relaxed text-stone-800">
-          {ocrText}
+        <div className="prose prose-stone prose-sm max-w-none p-6">
+          <ReactMarkdown>{ocrText}</ReactMarkdown>
         </div>
       </div>
 
