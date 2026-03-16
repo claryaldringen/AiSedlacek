@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
@@ -10,6 +10,7 @@ import { FileUploadZone, type UploadedPage } from '@/components/FileUploadZone';
 import { DocumentPanel } from '@/components/DocumentPanel';
 import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
+import { useDesktopSelection } from '@/hooks/useDesktopSelection';
 
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
@@ -23,9 +24,6 @@ export default function HomePage(): React.JSX.Element {
   // Pages
   const [pages, setPages] = useState<PageItem[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
-
-  // Selection
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // View mode
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -49,6 +47,53 @@ export default function HomePage(): React.JSX.Element {
   const [contentDragOver, setContentDragOver] = useState(false);
   const contentAreaRef = useRef<HTMLDivElement>(null);
 
+  // Collections visible only in "all" view (no specific collection selected)
+  const visibleCollections = selectedCollectionId === null ? collections : [];
+
+  // All selectable item IDs in visual order (collections first, then pages)
+  const allItemIds = useMemo(() => {
+    const ids: string[] = [];
+    if (selectedCollectionId === null) {
+      for (const col of collections) {
+        ids.push(col.id);
+      }
+    }
+    for (const page of pages) {
+      ids.push(page.id);
+    }
+    return ids;
+  }, [collections, pages, selectedCollectionId]);
+
+  // Desktop selection hook
+  const {
+    selected,
+    handleItemClick,
+    selectAll: handleSelectAll,
+    deselectAll: handleDeselectAll,
+    setSelected,
+  } = useDesktopSelection({ itemIds: allItemIds });
+
+  // ---- Keyboard shortcuts (Ctrl+A, Escape) ----
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      // Don't capture when typing in input fields
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if ((e.target as HTMLElement).isContentEditable) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault();
+        handleSelectAll();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleDeselectAll();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleSelectAll, handleDeselectAll]);
+
   // ---- Load collections ----
   const loadCollections = useCallback(async (): Promise<void> => {
     setLoadingCollections(true);
@@ -71,7 +116,6 @@ export default function HomePage(): React.JSX.Element {
   // ---- Load pages ----
   const loadPages = useCallback(async (collectionId: string | null): Promise<void> => {
     setLoadingPages(true);
-    setSelected(new Set());
     try {
       const url = collectionId !== null ? `/api/collections/${collectionId}` : '/api/pages';
       const res = await fetch(url);
@@ -139,24 +183,6 @@ export default function HomePage(): React.JSX.Element {
     [loadCollections],
   );
 
-  // ---- Selection ----
-  const handleToggleSelect = useCallback((id: string): void => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const handleSelectAll = useCallback((): void => {
-    setSelected(new Set(pages.map((p) => p.id)));
-  }, [pages]);
-
-  const handleDeselectAll = useCallback((): void => {
-    setSelected(new Set());
-  }, []);
-
   // ---- Processing ----
   const handleProcessSelected = useCallback(async (): Promise<void> => {
     const pageIds = Array.from(selected).filter((id) => {
@@ -166,7 +192,7 @@ export default function HomePage(): React.JSX.Element {
     if (pageIds.length === 0) return;
 
     setProcessingPageIds(new Set(pageIds));
-    setProcessingStep('Spouštím zpracování…');
+    setProcessingStep('Spoustim zpracovani...');
     setProcessingProgress(0);
     setError(null);
 
@@ -269,7 +295,7 @@ export default function HomePage(): React.JSX.Element {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
+      setError(err instanceof Error ? err.message : 'Neznama chyba');
       setPages((prev) =>
         prev.map((p) => (processingPageIds.has(p.id) ? { ...p, status: 'error' } : p)),
       );
@@ -343,17 +369,17 @@ export default function HomePage(): React.JSX.Element {
       await handleDeletePage(id);
     }
     setSelected(new Set());
-  }, [selected, handleDeletePage]);
+  }, [selected, handleDeletePage, setSelected]);
 
-  // ---- Page click (open panel) ----
-  const handlePageClick = useCallback(async (page: PageItem): Promise<void> => {
+  // ---- Page click (open panel) – now triggered by double-click ----
+  const handlePageDoubleClick = useCallback(async (page: PageItem): Promise<void> => {
     if (!page.document) return;
     setPanelResult(null);
     setPanelLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/documents/${page.document.id}`);
-      if (!res.ok) throw new Error('Nepodařilo se načíst dokument');
+      if (!res.ok) throw new Error('Nepodarilo se nacist dokument');
       const doc = (await res.json()) as {
         id: string;
         transcription: string;
@@ -375,7 +401,7 @@ export default function HomePage(): React.JSX.Element {
         cached: true,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
+      setError(err instanceof Error ? err.message : 'Neznama chyba');
     } finally {
       setPanelLoading(false);
     }
@@ -388,9 +414,6 @@ export default function HomePage(): React.JSX.Element {
     return p && (p.status === 'pending' || p.status === 'error');
   }).length;
   const doneCount = pages.filter((p) => p.status === 'done').length;
-
-  // Collections visible only in "all" view (no specific collection selected)
-  const visibleCollections = selectedCollectionId === null ? collections : [];
 
   // Drag-and-drop on content area to open upload
   const handleContentDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
@@ -439,7 +462,7 @@ export default function HomePage(): React.JSX.Element {
           <strong className="font-semibold">Chyba: </strong>
           {error}
           <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-600">
-            ×
+            x
           </button>
         </div>
       )}
@@ -483,22 +506,35 @@ export default function HomePage(): React.JSX.Element {
             pages={pages}
             collections={visibleCollections}
             selected={selected}
-            onToggleSelect={handleToggleSelect}
-            onPageClick={(page) => void handlePageClick(page)}
-            onCollectionClick={handleCollectionSelect}
+            onItemClick={handleItemClick}
+            onPageDoubleClick={(page) => void handlePageDoubleClick(page)}
+            onCollectionDoubleClick={handleCollectionSelect}
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
             onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
+            onSetSelected={setSelected}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
+            onProcessSelected={() => void handleProcessSelected()}
+            onDeleteSelected={() => void handleDeleteSelected()}
+            onUploadClick={() => setUploadOpen(true)}
           />
         ) : (
           <FileList
             pages={pages}
             collections={visibleCollections}
             selected={selected}
-            onToggleSelect={handleToggleSelect}
+            onToggleSelect={(id) =>
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              })
+            }
             onSelectAll={handleSelectAll}
             onDeselectAll={handleDeselectAll}
-            onPageClick={(page) => void handlePageClick(page)}
+            onPageClick={(page) => void handlePageDoubleClick(page)}
             onCollectionClick={handleCollectionSelect}
             onDelete={(id) => void handleDeletePage(id)}
             processingPageIds={processingPageIds}
@@ -510,7 +546,7 @@ export default function HomePage(): React.JSX.Element {
         {contentDragOver && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="rounded-xl bg-blue-600/90 px-8 py-4 text-white shadow-xl">
-              <p className="text-lg font-semibold">Pusťte soubory pro nahrání</p>
+              <p className="text-lg font-semibold">Pustte soubory pro nahrani</p>
             </div>
           </div>
         )}
