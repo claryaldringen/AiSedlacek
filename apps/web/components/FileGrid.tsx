@@ -12,6 +12,11 @@ export interface PageItem {
   order: number;
   collectionId: string | null;
   createdAt?: string;
+  errorMessage?: string | null;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  width?: number | null;
+  height?: number | null;
   document?: {
     id: string;
     detectedLanguage: string;
@@ -407,13 +412,11 @@ export function FileGrid({
       const selCount = selected.size;
       const items: ContextMenuEntry[] = [];
 
-      if (isDone) {
-        items.push({
-          label: 'Otevrit',
-          icon: <OpenIcon />,
-          onClick: () => onPageDoubleClick(page),
-        });
-      }
+      items.push({
+        label: 'Otevrit',
+        icon: <OpenIcon />,
+        onClick: () => onPageDoubleClick(page),
+      });
 
       items.push({
         label: 'Zpracovat',
@@ -821,9 +824,7 @@ export function FileGrid({
                   }}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    if (page.status === 'done') {
-                      onPageDoubleClick(page);
-                    }
+                    onPageDoubleClick(page);
                   }}
                   onContextMenu={(e) => {
                     e.stopPropagation();

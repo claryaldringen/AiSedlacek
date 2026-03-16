@@ -37,6 +37,7 @@ export default function HomePage(): React.JSX.Element {
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
 
   // Document panel
+  const [panelPage, setPanelPage] = useState<PageItem | null>(null);
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
 
@@ -484,9 +485,12 @@ export default function HomePage(): React.JSX.Element {
           // ignore
         }
       }
-      if (panelResult?.id === page.document?.id) setPanelResult(null);
+      if (panelPage?.id === pageId) {
+        setPanelPage(null);
+        setPanelResult(null);
+      }
     },
-    [pages, panelResult],
+    [pages, panelPage],
   );
 
   const handleDeleteSelected = useCallback(async (): Promise<void> => {
@@ -498,39 +502,53 @@ export default function HomePage(): React.JSX.Element {
   // Keep ref in sync
   handleDeleteSelectedRef.current = handleDeleteSelected;
 
-  // ---- Page click (open panel) – now triggered by double-click ----
+  // ---- Page double-click (open panel for any status) ----
   const handlePageDoubleClick = useCallback(async (page: PageItem): Promise<void> => {
-    if (!page.document) return;
+    setPanelPage(page);
     setPanelResult(null);
-    setPanelLoading(true);
     setError(null);
-    try {
-      const res = await fetch(`/api/documents/${page.document.id}`);
-      if (!res.ok) throw new Error('Nepodarilo se nacist dokument');
-      const doc = (await res.json()) as {
-        id: string;
-        transcription: string;
-        detectedLanguage: string;
-        context: string;
-        translations: { language: string; text: string }[];
-        glossary: { term: string; definition: string }[];
-      };
 
-      const translation = doc.translations[0];
-      setPanelResult({
-        id: doc.id,
-        transcription: doc.transcription,
-        detectedLanguage: doc.detectedLanguage,
-        translation: translation?.text ?? '',
-        translationLanguage: translation?.language ?? '',
-        context: doc.context,
-        glossary: doc.glossary,
-        cached: true,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznama chyba');
-    } finally {
-      setPanelLoading(false);
+    if (page.document) {
+      setPanelLoading(true);
+      try {
+        const res = await fetch(`/api/documents/${page.document.id}`);
+        if (!res.ok) throw new Error('Nepodarilo se nacist dokument');
+        const doc = (await res.json()) as {
+          id: string;
+          transcription: string;
+          detectedLanguage: string;
+          context: string;
+          translations: { language: string; text: string }[];
+          glossary: { term: string; definition: string }[];
+        };
+
+        const translation = doc.translations[0];
+        setPanelResult({
+          id: doc.id,
+          transcription: doc.transcription,
+          detectedLanguage: doc.detectedLanguage,
+          translation: translation?.text ?? '',
+          translationLanguage: translation?.language ?? '',
+          context: doc.context,
+          glossary: doc.glossary,
+          cached: true,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Neznama chyba');
+      } finally {
+        setPanelLoading(false);
+      }
+    } else {
+      // Fetch full page data for metadata (width, height, etc.)
+      try {
+        const res = await fetch(`/api/pages/${page.id}`);
+        if (res.ok) {
+          const fullPage = (await res.json()) as PageItem & { width?: number; height?: number; fileSize?: number; errorMessage?: string };
+          setPanelPage(fullPage);
+        }
+      } catch {
+        // use what we have
+      }
     }
   }, []);
   // Keep ref in sync
@@ -693,9 +711,11 @@ export default function HomePage(): React.JSX.Element {
 
       {/* Document panel */}
       <DocumentPanel
+        page={panelPage}
         result={panelResult}
         isLoading={panelLoading}
         onClose={() => {
+          setPanelPage(null);
           setPanelResult(null);
           setPanelLoading(false);
         }}
