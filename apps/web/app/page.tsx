@@ -1,21 +1,20 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import type { ProcessingResult } from '@ai-sedlacek/shared';
 import { FileUpload } from '@/components/FileUpload';
 import { ProcessingStatus } from '@/components/ProcessingStatus';
-import { ResultViewer } from '@/components/ResultViewer';
+import { ResultViewer, type DocumentResult } from '@/components/ResultViewer';
 
 export default function HomePage(): React.JSX.Element {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState<string | undefined>(undefined);
   const [progress, setProgress] = useState<number | undefined>(undefined);
-  const [result, setResult] = useState<ProcessingResult | null>(null);
+  const [result, setResult] = useState<DocumentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleFileUploaded = useCallback(async (url: string): Promise<void> => {
     setIsProcessing(true);
-    setCurrentStep('Spouštím pipeline…');
+    setCurrentStep('Nahrávám…');
     setProgress(5);
     setResult(null);
     setError(null);
@@ -24,7 +23,7 @@ export default function HomePage(): React.JSX.Element {
       const response = await fetch('/api/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: url }),
+        body: JSON.stringify({ imageUrl: url, language: 'cs' }),
       });
 
       if (!response.ok || !response.body) {
@@ -42,7 +41,6 @@ export default function HomePage(): React.JSX.Element {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE events from buffer
         const events = buffer.split('\n\n');
         buffer = events.pop() ?? '';
 
@@ -59,7 +57,7 @@ export default function HomePage(): React.JSX.Element {
             setCurrentStep(data.message);
             setProgress(data.progress);
           } else if (eventType === 'result') {
-            const data = JSON.parse(dataStr) as ProcessingResult;
+            const data = JSON.parse(dataStr) as DocumentResult;
             setResult(data);
           } else if (eventType === 'error') {
             const data = JSON.parse(dataStr) as { error: string };
@@ -78,19 +76,19 @@ export default function HomePage(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-8">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold text-stone-900">Čtečka starých textů</h1>
-        <p className="text-stone-600">Nahrajte obrázek středověkého dokumentu pro OCR a překlad.</p>
+        <p className="text-stone-600">
+          Nahrajte obrázek historického dokumentu. Systém přepíše text, přeloží ho a přidá kontext.
+        </p>
       </div>
 
-      <div className="mx-auto max-w-2xl">
-        <FileUpload
-          onFileUploaded={(url) => {
-            void handleFileUploaded(url);
-          }}
-        />
-      </div>
+      <FileUpload
+        onFileUploaded={(url) => {
+          void handleFileUploaded(url);
+        }}
+      />
 
       <ProcessingStatus isProcessing={isProcessing} currentStep={currentStep} progress={progress} />
 

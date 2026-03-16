@@ -1,26 +1,7 @@
 /**
- * DI container – creates the processing pipeline.
- * Supports 'ollama' (local dev) and 'claude' (production) providers.
+ * DI container – simplified pipeline.
+ * Claude Opus 4.6 handles OCR + translation + context in one call.
  */
-
-import type { OllamaConfig } from '@ai-sedlacek/shared';
-import { OllamaVisionOcrEngine } from '@/lib/adapters/ocr/ollama-vision';
-import { ClaudeVisionOcrEngine } from '@/lib/adapters/ocr/claude-vision';
-import { ProcessDocument } from '@/lib/use-cases/process-document';
-
-export function createPipeline(): ProcessDocument {
-  const provider = getLlmProvider();
-
-  if (provider === 'ollama') {
-    const config: OllamaConfig = {
-      baseUrl: process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
-      model: process.env['OLLAMA_MODEL'] ?? 'llama3.2-vision:11b',
-    };
-    return new ProcessDocument(new OllamaVisionOcrEngine(config));
-  }
-
-  return new ProcessDocument(new ClaudeVisionOcrEngine());
-}
 
 export function resolveProvider(
   envValue: string | undefined,

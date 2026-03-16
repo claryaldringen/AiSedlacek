@@ -1,7 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { IOcrEngine } from '@ai-sedlacek/shared';
-import type { OcrEngineResult, OcrOptions } from '@ai-sedlacek/shared';
-import { OCR_TRANSCRIPTION_PROMPT } from '@ai-sedlacek/shared';
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
@@ -13,84 +10,79 @@ function detectMediaType(buffer: Buffer): ImageMediaType {
   return 'image/jpeg';
 }
 
-export class ClaudeVisionOcrEngine implements IOcrEngine {
-  readonly name = 'claude_vision' as const;
-  readonly role = 'recognizer' as const;
+const SYSTEM_PROMPT = `You are an expert in paleography and historical manuscripts. Transcribe the text from this manuscript. Use your knowledge of historical orthography to disambiguate unclear characters (e.g. long ſ looks like f — always transcribe it as s). Then translate the transcribed text fully into the modern standard form of the language the user writes in. Do not summarize — translate the complete text. Preserve all references and citations. Use square brackets to clarify archaic terms or add context a modern reader would need. Then add a brief contextual explanation and a glossary. Respond in the user's language.
 
-  async isAvailable(): Promise<boolean> {
-    return !!process.env['ANTHROPIC_API_KEY'];
-  }
+IMPORTANT: Return your response as valid JSON with this exact structure:
+{
+  "transcription": "the transcribed original text",
+  "detectedLanguage": "ISO language code of the original, e.g. cs-old, de-old, la",
+  "translation": "full translation into the user's language",
+  "translationLanguage": "ISO code of translation language, e.g. cs, en, de",
+  "context": "brief contextual explanation of the document",
+  "glossary": [
+    {"term": "term", "definition": "definition"}
+  ]
+}
 
-  async recognize(image: Buffer, options?: OcrOptions): Promise<OcrEngineResult> {
-    const startTime = Date.now();
+Return ONLY the JSON object, no markdown fences, no extra text.`;
 
-    const client = new Anthropic();
-    const mediaType = detectMediaType(image);
+export interface StructuredOcrResult {
+  transcription: string;
+  detectedLanguage: string;
+  translation: string;
+  translationLanguage: string;
+  context: string;
+  glossary: { term: string; definition: string }[];
+}
 
-    // Build prompt with classification context if available
-    let prompt = OCR_TRANSCRIPTION_PROMPT;
-    if (options?.context) {
-      prompt = `KONTEXT DOKUMENTU (z předchozí klasifikace): ${options.context}\n\n${prompt}`;
-    }
+export async function processWithClaude(
+  image: Buffer,
+  userPrompt: string,
+): Promise<{ result: StructuredOcrResult; processingTimeMs: number }> {
+  const startTime = Date.now();
+  const client = new Anthropic();
+  const mediaType = detectMediaType(image);
 
-      const response = await client.messages.create({
-          model: 'claude-opus-4-6',
-          max_tokens: 4096,
-          system: 'You are an expert in paleography and historical '
-              + 'manuscripts. Transcribe the text from this manuscript. '
-              + 'Use your knowledge of historical orthography to '
-              + 'disambiguate unclear characters (e.g. long ſ looks '
-              + 'like f — always transcribe it as s). Then translate '
-              + 'the transcribed text fully into the modern standard '
-              + 'form of the language the user writes in. Do not '
-              + 'summarize — translate the complete text. Preserve '
-              + 'all references and citations. Use square brackets '
-              + 'to clarify archaic terms or add context a modern '
-              + 'reader would need. Then add a brief contextual '
-              + 'explanation and a glossary. Respond in the user\'s '
-              + 'language.',
-          messages: [
-              {
-                  role: 'user',
-                  content: [
-                      {
-                          type: 'image',
-                          source: {
-                              type: 'base64',
-                              media_type: mediaType,
-                              data: image.toString('base64'),
-                          },
-                      },
-                      {
-                          type: 'text',
-                          text: prompt,
-                      },
-                  ],
-              },
-          ],
-      });
+  const response = await client.messages.create({
+    model: 'claude-opus-4-6',
+    max_tokens: 8192,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: image.toString('base64'),
+            },
+          },
+          {
+            type: 'text',
+            text: userPrompt,
+          },
+        ],
+      },
+    ],
+  });
 
-    console.log('[ClaudeVision] Full API response:', JSON.stringify({
-      id: response.id,
-      model: response.model,
-      stop_reason: response.stop_reason,
-      usage: response.usage,
-      content: response.content,
-    }, null, 2));
+  console.log('[Claude] Response:', JSON.stringify({
+    id: response.id,
+    model: response.model,
+    usage: response.usage,
+    stop_reason: response.stop_reason,
+  }));
 
-    const firstContent = response.content[0];
-    const text = firstContent?.type === 'text' ? firstContent.text : '';
+  const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
-    const uncertainMarkers = [...text.matchAll(/\[\?(.+?)\?\]/g)]
-      .map((m) => m[1])
-      .filter((s): s is string => s !== undefined);
+  // Parse JSON from response (handle potential markdown fences)
+  const jsonStr = text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+  const parsed = JSON.parse(jsonStr) as StructuredOcrResult;
 
-    return {
-      engine: this.name,
-      role: this.role,
-      text,
-      uncertainMarkers,
-      processingTimeMs: Date.now() - startTime,
-    };
-  }
+  return {
+    result: parsed,
+    processingTimeMs: Date.now() - startTime,
+  };
 }

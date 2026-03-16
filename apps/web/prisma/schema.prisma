@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  hash      String   @unique
+  filename  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Original transcription (language of the manuscript)
+  transcription    String
+  detectedLanguage String // e.g. "cs-old", "de-old", "la"
+
+  // Context and glossary (language-independent)
+  context String // brief contextual explanation
+  glossary GlossaryEntry[]
+
+  // Translations into modern languages
+  translations Translation[]
+}
+
+model Translation {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  language   String // ISO code: cs, en, de, fr...
+  text       String
+  createdAt  DateTime @default(now())
+
+  @@unique([documentId, language])
+}
+
+model GlossaryEntry {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  term       String
+  definition String
+
+  @@index([documentId])
+}
