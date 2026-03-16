@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
 import { FileGrid, type PageItem } from '@/components/FileGrid';
@@ -11,8 +12,11 @@ import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 
 export default function HomePage(): React.JSX.Element {
-  // Navigation state
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Navigation state – synced with URL ?collection=ID
+  const selectedCollectionId = searchParams.get('collection');
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(true);
 
@@ -93,11 +97,18 @@ export default function HomePage(): React.JSX.Element {
     void loadPages(selectedCollectionId);
   }, [loadPages, selectedCollectionId]);
 
-  // ---- Collection navigation ----
-  const handleCollectionSelect = useCallback((id: string | null): void => {
-    setSelectedCollectionId(id);
-    setPanelResult(null);
-  }, []);
+  // ---- Collection navigation (URL-based for browser back/forward) ----
+  const handleCollectionSelect = useCallback(
+    (id: string | null): void => {
+      if (id === null) {
+        router.push('/');
+      } else {
+        router.push(`/?collection=${id}`);
+      }
+      setPanelResult(null);
+    },
+    [router],
+  );
 
   const selectedCollection =
     selectedCollectionId !== null
@@ -274,16 +285,8 @@ export default function HomePage(): React.JSX.Element {
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
     async (pageIds: string[], targetCollectionId: string | null): Promise<void> => {
-      // Optimistically remove moved pages from the current view when in a specific collection
-      // (they've moved elsewhere, or back to "all" = null)
-      if (selectedCollectionId !== null) {
-        setPages((prev) => prev.filter((p) => !pageIds.includes(p.id)));
-      } else if (targetCollectionId !== null) {
-        // In "all" view: update collectionId locally
-        setPages((prev) =>
-          prev.map((p) => (pageIds.includes(p.id) ? { ...p, collectionId: targetCollectionId } : p)),
-        );
-      }
+      // Optimistically remove moved pages from current view
+      setPages((prev) => prev.filter((p) => !pageIds.includes(p.id)));
 
       // Fire API calls
       await Promise.all(
