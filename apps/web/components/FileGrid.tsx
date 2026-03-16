@@ -44,6 +44,10 @@ interface FileGridProps {
   onDeleteSelected: () => void;
   /** Open upload dialog */
   onUploadClick: () => void;
+  /** The item that currently has keyboard focus (shows focus ring) */
+  focusedItemId?: string | null;
+  /** Called whenever the actual column count of the grid changes */
+  onColumnsChange?: (columns: number) => void;
 }
 
 function cleanFilename(raw: string): string {
@@ -306,6 +310,8 @@ export function FileGrid({
   onProcessSelected,
   onDeleteSelected,
   onUploadClick,
+  focusedItemId,
+  onColumnsChange,
 }: FileGridProps): React.JSX.Element {
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
 
@@ -326,6 +332,51 @@ export function FileGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   // Map of item ID -> DOM element ref for rubber band intersection
   const itemRefsMap = useRef<Map<string, HTMLElement>>(new Map());
+
+  // Grid ref to observe column count (the pages grid)
+  const pagesGridRef = useRef<HTMLDivElement>(null);
+  const collectionsGridRef = useRef<HTMLDivElement>(null);
+  const onColumnsChangeRef = useRef(onColumnsChange);
+  onColumnsChangeRef.current = onColumnsChange;
+
+  // Detect column count from a grid element using computed style
+  const detectColumns = useCallback((gridEl: HTMLElement): number => {
+    const style = window.getComputedStyle(gridEl);
+    const templateCols = style.gridTemplateColumns;
+    if (!templateCols || templateCols === 'none') return 1;
+    return templateCols.trim().split(/\s+/).length;
+  }, []);
+
+  // ResizeObserver to detect column count changes in the pages grid
+  useEffect(() => {
+    const gridEl = pagesGridRef.current ?? collectionsGridRef.current;
+    if (!gridEl) return;
+
+    let lastCols = 0;
+    const observer = new ResizeObserver(() => {
+      const cols = detectColumns(gridEl);
+      if (cols !== lastCols) {
+        lastCols = cols;
+        onColumnsChangeRef.current?.(cols);
+      }
+    });
+    observer.observe(gridEl);
+    // Fire immediately
+    const initial = detectColumns(gridEl);
+    lastCols = initial;
+    onColumnsChangeRef.current?.(initial);
+
+    return () => observer.disconnect();
+  }, [detectColumns, pages.length, collections.length]);
+
+  // Scroll focused item into view whenever focusedItemId changes
+  useEffect(() => {
+    if (focusedItemId == null) return;
+    const el = itemRefsMap.current.get(focusedItemId);
+    if (el) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [focusedItemId]);
 
   // Touch long-press for mobile
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -648,9 +699,13 @@ export function FileGrid({
           <h3 className="filegrid-bg mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Svazky
           </h3>
-          <div className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div
+            ref={collectionsGridRef}
+            className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          >
             {collections.map((col) => {
               const isColSelected = selected.has(col.id);
+              const isColFocused = focusedItemId === col.id;
               return (
                 <div
                   key={col.id}
@@ -686,6 +741,7 @@ export function FileGrid({
                       : dragOverCollectionId === col.id
                         ? 'border-blue-500 bg-blue-50 shadow-md'
                         : 'border-transparent hover:border-slate-300 hover:shadow-sm',
+                    isColFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
                   ].join(' ')}
                 >
                   <div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-md bg-amber-50">
@@ -718,9 +774,13 @@ export function FileGrid({
               Stranky
             </h3>
           )}
-          <div className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div
+            ref={pagesGridRef}
+            className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          >
             {pages.map((page) => {
               const isSelected = selected.has(page.id);
+              const isFocused = focusedItemId === page.id;
               const effectiveStatus = processingPageIds.has(page.id) ? 'processing' : page.status;
 
               const handleDragStart = (e: React.DragEvent<HTMLDivElement>): void => {
@@ -778,6 +838,7 @@ export function FileGrid({
                       ? 'border-blue-500 bg-blue-50/60 shadow-md shadow-blue-100'
                       : 'border-transparent hover:border-slate-300 hover:shadow-sm',
                     'dragging:opacity-50',
+                    isFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
                   ].join(' ')}
                   style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
                 >

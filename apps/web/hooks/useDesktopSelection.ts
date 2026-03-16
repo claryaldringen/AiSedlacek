@@ -21,6 +21,13 @@ interface UseDesktopSelectionReturn {
   /** Whether selection mode is active (for mobile touch) */
   selectionMode: boolean;
   setSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
+  /**
+   * Select the range between anchorId and targetId (inclusive), replacing existing selection.
+   * If extend is true, merges with current selection instead of replacing.
+   */
+  selectRange: (anchorId: string, targetId: string, extend?: boolean) => void;
+  /** Update the anchor (lastClickedId) without changing selection */
+  setAnchor: (id: string | null) => void;
 }
 
 export function useDesktopSelection({
@@ -99,6 +106,27 @@ export function useDesktopSelection({
     setSelectionMode(false);
   }, []);
 
+  const selectRange = useCallback((anchorId: string, targetId: string, extend = false): void => {
+    const ids = itemIdsRef.current;
+    const startIdx = ids.indexOf(anchorId);
+    const endIdx = ids.indexOf(targetId);
+    if (startIdx === -1 || endIdx === -1) return;
+    const from = Math.min(startIdx, endIdx);
+    const to = Math.max(startIdx, endIdx);
+    const rangeIds = ids.slice(from, to + 1);
+    setSelected((prev) => {
+      const next = extend ? new Set(prev) : new Set<string>();
+      for (const rangeId of rangeIds) {
+        next.add(rangeId);
+      }
+      return next;
+    });
+  }, []);
+
+  const setAnchor = useCallback((id: string | null): void => {
+    setLastClickedId(id);
+  }, []);
+
   return {
     selected,
     lastClickedId,
@@ -108,5 +136,7 @@ export function useDesktopSelection({
     setSelected,
     selectionMode,
     setSelectionMode,
+    selectRange,
+    setAnchor,
   };
 }

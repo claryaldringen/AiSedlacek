@@ -67,13 +67,45 @@ export default function HomePage(): React.JSX.Element {
   // Desktop selection hook
   const {
     selected,
+    lastClickedId,
     handleItemClick,
     selectAll: handleSelectAll,
     deselectAll: handleDeselectAll,
     setSelected,
+    selectRange,
+    setAnchor,
   } = useDesktopSelection({ itemIds: allItemIds });
 
-  // ---- Keyboard shortcuts (Ctrl+A, Escape) ----
+  // Keyboard focus cursor (independent from selection anchor)
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  // Actual columns count reported by FileGrid via ResizeObserver
+  const [columnsCount, setColumnsCount] = useState(4);
+
+  const columnsCountRef = useRef(columnsCount);
+  columnsCountRef.current = columnsCount;
+
+  const allItemIdsRef = useRef(allItemIds);
+  allItemIdsRef.current = allItemIds;
+
+  // Stable refs for callbacks defined later in the file, so the keyboard
+  // useEffect can read the latest version without a forward-reference dep.
+  const handleCollectionSelectRef = useRef<((id: string) => void) | null>(null);
+  const handlePageDoubleClickRef = useRef<((page: PageItem) => Promise<void>) | null>(null);
+  const handleDeleteSelectedRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Mutable state refs so the keyboard handler always sees current values
+  const focusedItemIdRef = useRef(focusedItemId);
+  focusedItemIdRef.current = focusedItemId;
+  const lastClickedIdRef = useRef(lastClickedId);
+  lastClickedIdRef.current = lastClickedId;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const collectionsRef = useRef(collections);
+  collectionsRef.current = collections;
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+
+  // ---- Keyboard shortcuts (Ctrl+A, Escape, Arrow keys, Home/End, Enter, Delete) ----
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
       // Don't capture when typing in input fields
@@ -84,15 +116,106 @@ export default function HomePage(): React.JSX.Element {
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
         e.preventDefault();
         handleSelectAll();
-      } else if (e.key === 'Escape') {
+        return;
+      }
+
+      if (e.key === 'Escape') {
         e.preventDefault();
         handleDeselectAll();
+        setFocusedItemId(null);
+        return;
+      }
+
+      // Arrow / Home / End navigation
+      const isArrow =
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight' ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown';
+
+      if (isArrow || e.key === 'Home' || e.key === 'End') {
+        const ids = allItemIdsRef.current;
+        if (ids.length === 0) return;
+        e.preventDefault();
+
+        const currentFocused = focusedItemIdRef.current;
+        const currentIndex = currentFocused !== null ? ids.indexOf(currentFocused) : -1;
+        const cols = columnsCountRef.current;
+
+        let nextIndex: number;
+        if (e.key === 'Home') {
+          nextIndex = 0;
+        } else if (e.key === 'End') {
+          nextIndex = ids.length - 1;
+        } else if (e.key === 'ArrowLeft') {
+          nextIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
+        } else if (e.key === 'ArrowRight') {
+          nextIndex =
+            currentIndex === -1
+              ? 0
+              : currentIndex >= ids.length - 1
+                ? ids.length - 1
+                : currentIndex + 1;
+        } else if (e.key === 'ArrowUp') {
+          nextIndex =
+            currentIndex === -1 ? 0 : currentIndex - cols < 0 ? currentIndex : currentIndex - cols;
+        } else {
+          // ArrowDown
+          nextIndex =
+            currentIndex === -1
+              ? 0
+              : currentIndex + cols >= ids.length
+                ? currentIndex
+                : currentIndex + cols;
+        }
+
+        const nextId = ids[nextIndex];
+        if (nextId == null) return;
+
+        setFocusedItemId(nextId);
+
+        if (e.shiftKey) {
+          // Extend selection from anchor to new focused item
+          const anchorId = lastClickedIdRef.current ?? ids[0] ?? nextId;
+          selectRange(anchorId, nextId);
+        } else {
+          // Move focus + select only the focused item (Finder behaviour)
+          setSelected(new Set([nextId]));
+          setAnchor(nextId);
+        }
+        return;
+      }
+
+      // Enter = open focused item
+      if (e.key === 'Enter') {
+        const focused = focusedItemIdRef.current;
+        if (focused == null) return;
+        e.preventDefault();
+        // Check if it's a collection
+        const col = collectionsRef.current.find((c) => c.id === focused);
+        if (col) {
+          handleCollectionSelectRef.current?.(col.id);
+          return;
+        }
+        // Otherwise it's a page
+        const page = pagesRef.current.find((p) => p.id === focused);
+        if (page?.status === 'done') {
+          void handlePageDoubleClickRef.current?.(page);
+        }
+        return;
+      }
+
+      // Delete / Backspace = delete selected
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedRef.current.size === 0) return;
+        e.preventDefault();
+        void handleDeleteSelectedRef.current?.();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleSelectAll, handleDeselectAll]);
+  }, [handleSelectAll, handleDeselectAll, selectRange, setSelected, setAnchor]);
 
   // ---- Load collections ----
   const loadCollections = useCallback(async (): Promise<void> => {
@@ -153,6 +276,8 @@ export default function HomePage(): React.JSX.Element {
     },
     [router],
   );
+  // Keep ref in sync (used by keyboard handler to avoid forward-reference dep)
+  handleCollectionSelectRef.current = (id: string) => handleCollectionSelect(id);
 
   const selectedCollection =
     selectedCollectionId !== null
@@ -370,6 +495,8 @@ export default function HomePage(): React.JSX.Element {
     }
     setSelected(new Set());
   }, [selected, handleDeletePage, setSelected]);
+  // Keep ref in sync
+  handleDeleteSelectedRef.current = handleDeleteSelected;
 
   // ---- Page click (open panel) – now triggered by double-click ----
   const handlePageDoubleClick = useCallback(async (page: PageItem): Promise<void> => {
@@ -406,6 +533,8 @@ export default function HomePage(): React.JSX.Element {
       setPanelLoading(false);
     }
   }, []);
+  // Keep ref in sync
+  handlePageDoubleClickRef.current = handlePageDoubleClick;
 
   // ---- Derived values ----
   const isProcessing = processingPageIds.size > 0;
@@ -518,6 +647,8 @@ export default function HomePage(): React.JSX.Element {
             onProcessSelected={() => void handleProcessSelected()}
             onDeleteSelected={() => void handleDeleteSelected()}
             onUploadClick={() => setUploadOpen(true)}
+            focusedItemId={focusedItemId}
+            onColumnsChange={setColumnsCount}
           />
         ) : (
           <FileList
