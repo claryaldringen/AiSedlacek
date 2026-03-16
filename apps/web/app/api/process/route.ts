@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import fs from 'fs/promises';
 import { createPipeline } from '@/lib/infrastructure/container';
+import { computeHash, getCachedResult, cacheResult } from '@/lib/infrastructure/result-cache';
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -40,10 +41,25 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: `Soubor nebyl nalezen: ${imagePath}` }, { status: 400 });
   }
 
+  const hash = computeHash(imageBuffer);
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        // Check cache first
+        const cached = await getCachedResult(hash);
+        if (cached) {
+          console.log(`[/api/process] Cache hit: ${hash.slice(0, 8)}…`);
+          sendEvent(controller, encoder, 'progress', {
+            step: 'cached',
+            message: 'Nalezen cachovaný výsledek',
+            progress: 100,
+          });
+          sendEvent(controller, encoder, 'result', { ...cached, originalImage: imageUrl });
+          return;
+        }
+
         sendEvent(controller, encoder, 'progress', {
           step: 'ocr',
           message: 'Zpracovávám text (Claude Opus 4.6)…',
@@ -52,6 +68,10 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const pipeline = createPipeline();
         const result = await pipeline.execute(imageBuffer, imageUrl);
+
+        // Cache the result
+        await cacheResult(hash, result);
+        console.log(`[/api/process] Cached result: ${hash.slice(0, 8)}…`);
 
         sendEvent(controller, encoder, 'progress', {
           step: 'done',
