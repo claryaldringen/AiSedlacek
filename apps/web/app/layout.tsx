@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Čtečka starých textů',
-  description: 'Webová aplikace pro čtení a překlad středověkých textů pomocí OCR a AI.',
+  title: 'AiSedlacek',
+  description: 'Čtení a překlad historických rukopisů pomocí AI. Na počest Augusta Sedláčka.',
 };
 
 export default function RootLayout({
