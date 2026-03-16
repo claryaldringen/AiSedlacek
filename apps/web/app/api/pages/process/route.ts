@@ -40,6 +40,13 @@ export async function POST(request: NextRequest): Promise<Response> {
       const total = pageIds.length as number;
       let completed = 0;
 
+      // Get average output tokens from previous documents for progress estimation
+      const avgResult = await prisma.document.aggregate({
+        _avg: { outputTokens: true },
+        where: { outputTokens: { not: null } },
+      });
+      const estimatedTokens = Math.round(avgResult._avg.outputTokens ?? 1500);
+
       for (const pageId of pageIds) {
         if (typeof pageId !== 'string') {
           completed++;
@@ -142,9 +149,24 @@ export async function POST(request: NextRequest): Promise<Response> {
             }
           }
 
-          // Run Claude OCR
+          // Run Claude OCR with streaming progress
           const { result, processingTimeMs, model, inputTokens, outputTokens } =
-            await processWithClaude(imageBuffer, 'Přepiš text z tohoto rukopisu.');
+            await processWithClaude(
+              imageBuffer,
+              'Přepiš text z tohoto rukopisu.',
+              (currentTokens, estTotal) => {
+                const tokenProgress = Math.min(currentTokens / estTotal, 0.95);
+                const pageBase = completed / total;
+                const pageSlice = 1 / total;
+                const overallProgress = Math.round((pageBase + pageSlice * tokenProgress) * 100);
+                sendEvent(controller, encoder, 'page_progress', {
+                  pageId,
+                  message: `Generuji text… (${currentTokens}/${estTotal} tokenů)`,
+                  progress: overallProgress,
+                });
+              },
+              estimatedTokens,
+            );
           console.log(
             `[BatchProcess] Page ${pageId} done in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
           );

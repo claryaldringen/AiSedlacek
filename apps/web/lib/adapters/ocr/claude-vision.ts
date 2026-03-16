@@ -36,29 +36,16 @@ export interface StructuredOcrResult {
   glossary: { term: string; definition: string }[];
 }
 
-export async function processWithClaude(
-  image: Buffer,
-  userPrompt: string,
-): Promise<{
-  result: StructuredOcrResult;
-  processingTimeMs: number;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-}> {
-  const startTime = Date.now();
-  const client = new Anthropic();
-
-  // Claude API limit: 5 MB for base64 images. Resize if needed.
+async function prepareImage(image: Buffer): Promise<{ buffer: Buffer; mediaType: ImageMediaType }> {
   const MAX_BYTES = 5 * 1024 * 1024;
   let imageToSend = image;
+
   if (image.length > MAX_BYTES) {
     console.log(`[Claude] Image too large (${(image.length / 1024 / 1024).toFixed(1)} MB), resizing…`);
     imageToSend = await sharp(image)
       .resize({ width: 3000, withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
-    // If still too large, reduce further
     if (imageToSend.length > MAX_BYTES) {
       imageToSend = await sharp(image)
         .resize({ width: 2000, withoutEnlargement: true })
@@ -68,9 +55,30 @@ export async function processWithClaude(
     console.log(`[Claude] Resized to ${(imageToSend.length / 1024 / 1024).toFixed(1)} MB`);
   }
 
-  const mediaType = detectMediaType(imageToSend);
+  return { buffer: imageToSend, mediaType: detectMediaType(imageToSend) };
+}
 
-  const response = await client.messages.create({
+export async function processWithClaude(
+  image: Buffer,
+  userPrompt: string,
+  onProgress?: (outputTokens: number, estimatedTotal: number) => void,
+  estimatedOutputTokens?: number,
+): Promise<{
+  result: StructuredOcrResult;
+  processingTimeMs: number;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}> {
+  const startTime = Date.now();
+  const client = new Anthropic();
+  const { buffer: imageToSend, mediaType } = await prepareImage(image);
+
+  const estimated = estimatedOutputTokens ?? 1500;
+  let currentTokens = 0;
+  let fullText = '';
+
+  const stream = client.messages.stream({
     model: 'claude-opus-4-6',
     max_tokens: 8192,
     system: SYSTEM_PROMPT,
@@ -95,17 +103,26 @@ export async function processWithClaude(
     ],
   });
 
+  stream.on('text', (text) => {
+    fullText += text;
+    // Rough estimate: ~4 chars per token
+    currentTokens = Math.round(fullText.length / 4);
+    onProgress?.(currentTokens, estimated);
+  });
+
+  const finalMessage = await stream.finalMessage();
+
   console.log(
-    '[Claude] Response:',
+    '[Claude] Done:',
     JSON.stringify({
-      id: response.id,
-      model: response.model,
-      usage: response.usage,
-      stop_reason: response.stop_reason,
+      id: finalMessage.id,
+      model: finalMessage.model,
+      usage: finalMessage.usage,
+      stop_reason: finalMessage.stop_reason,
     }),
   );
 
-  const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const text = fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
   // Parse JSON from response (handle potential markdown fences)
   const jsonStr = text
@@ -117,8 +134,8 @@ export async function processWithClaude(
   return {
     result: parsed,
     processingTimeMs: Date.now() - startTime,
-    model: response.model,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    model: finalMessage.model,
+    inputTokens: finalMessage.usage.input_tokens,
+    outputTokens: finalMessage.usage.output_tokens,
   };
 }
