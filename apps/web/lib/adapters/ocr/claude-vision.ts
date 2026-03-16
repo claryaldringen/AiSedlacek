@@ -14,17 +14,17 @@ const SYSTEM_PROMPT = `You are an expert in paleography and historical manuscrip
 
 IMPORTANT: Return your response as valid JSON with this exact structure:
 {
-  "transcription": "the transcribed original text",
+  "transcription": "the transcribed original text in markdown (preserve line breaks, use headings, bold for initials etc.)",
   "detectedLanguage": "ISO language code of the original, e.g. cs-old, de-old, la",
-  "translation": "full translation into the user's language",
+  "translation": "full translation in markdown (preserve structure, headings, line breaks matching the original)",
   "translationLanguage": "ISO code of translation language, e.g. cs, en, de",
-  "context": "brief contextual explanation of the document",
+  "context": "brief contextual explanation in markdown",
   "glossary": [
     {"term": "term", "definition": "definition"}
   ]
 }
 
-Return ONLY the JSON object, no markdown fences, no extra text.`;
+Use \\n for newlines inside JSON strings. Return ONLY the JSON object, no markdown fences, no extra text.`;
 
 export interface StructuredOcrResult {
   transcription: string;
