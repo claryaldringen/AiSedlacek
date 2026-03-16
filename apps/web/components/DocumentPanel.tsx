@@ -9,6 +9,7 @@ interface DocumentPanelProps {
   result: DocumentResult | null;
   isLoading: boolean;
   onClose: () => void;
+  onResultUpdate?: (updated: DocumentResult) => void;
 }
 
 function cleanFilename(raw: string): string {
@@ -20,6 +21,7 @@ export function DocumentPanel({
   result,
   isLoading,
   onClose,
+  onResultUpdate,
 }: DocumentPanelProps): React.JSX.Element | null {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -106,7 +108,7 @@ export function DocumentPanel({
                   </div>
                 </div>
               ) : status === 'done' && result ? (
-                <ResultViewer result={result} />
+                <ResultViewer result={result} onUpdate={onResultUpdate} />
               ) : status === 'error' ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                   <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>

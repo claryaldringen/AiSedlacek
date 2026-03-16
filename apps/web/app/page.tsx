@@ -719,6 +719,7 @@ export default function HomePage(): React.JSX.Element {
           setPanelResult(null);
           setPanelLoading(false);
         }}
+        onResultUpdate={(updated) => setPanelResult(updated)}
       />
     </AppShell>
   );
