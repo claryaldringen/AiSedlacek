@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import sharp from 'sharp';
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
@@ -47,7 +48,27 @@ export async function processWithClaude(
 }> {
   const startTime = Date.now();
   const client = new Anthropic();
-  const mediaType = detectMediaType(image);
+
+  // Claude API limit: 5 MB for base64 images. Resize if needed.
+  const MAX_BYTES = 5 * 1024 * 1024;
+  let imageToSend = image;
+  if (image.length > MAX_BYTES) {
+    console.log(`[Claude] Image too large (${(image.length / 1024 / 1024).toFixed(1)} MB), resizing…`);
+    imageToSend = await sharp(image)
+      .resize({ width: 3000, withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    // If still too large, reduce further
+    if (imageToSend.length > MAX_BYTES) {
+      imageToSend = await sharp(image)
+        .resize({ width: 2000, withoutEnlargement: true })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+    }
+    console.log(`[Claude] Resized to ${(imageToSend.length / 1024 / 1024).toFixed(1)} MB`);
+  }
+
+  const mediaType = detectMediaType(imageToSend);
 
   const response = await client.messages.create({
     model: 'claude-opus-4-6',
@@ -62,7 +83,7 @@ export async function processWithClaude(
             source: {
               type: 'base64',
               media_type: mediaType,
-              data: image.toString('base64'),
+              data: imageToSend.toString('base64'),
             },
           },
           {
