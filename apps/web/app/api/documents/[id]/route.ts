@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
+import { createVersion } from '@/lib/infrastructure/versioning';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -36,9 +36,25 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     context?: string;
   };
 
+  // Fetch current state for versioning
+  const current = await prisma.document.findUnique({
+    where: { id },
+    include: { translations: true },
+  });
+  if (!current) {
+    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+  }
+
   const data: Record<string, string> = {};
-  if (typeof transcription === 'string') data.transcription = transcription;
-  if (typeof context === 'string') data.context = context;
+
+  if (typeof transcription === 'string' && transcription !== current.transcription) {
+    await createVersion(id, 'transcription', current.transcription, 'manual_edit');
+    data.transcription = transcription;
+  }
+  if (typeof context === 'string' && context !== current.context) {
+    await createVersion(id, 'context', current.context, 'manual_edit');
+    data.context = context;
+  }
 
   if (Object.keys(data).length > 0) {
     await prisma.document.update({ where: { id }, data });
@@ -46,6 +62,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   // Update translation if provided
   if (typeof translation === 'string' && typeof translationLanguage === 'string') {
+    const existingTranslation = current.translations.find((t) => t.language === translationLanguage);
+    if (existingTranslation && existingTranslation.text !== translation) {
+      await createVersion(id, `translation:${translationLanguage}`, existingTranslation.text, 'manual_edit');
+    }
     await prisma.translation.upsert({
       where: { documentId_language: { documentId: id, language: translationLanguage } },
       update: { text: translation },

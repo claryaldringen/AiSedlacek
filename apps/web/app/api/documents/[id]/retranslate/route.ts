@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
+import { createVersion } from '@/lib/infrastructure/versioning';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -65,6 +66,11 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
 
   const translatedText =
     response.content[0]?.type === 'text' ? response.content[0].text : '';
+
+  // Save old translation as version before overwriting
+  if (existingTranslation) {
+    await createVersion(id, `translation:${targetLang}`, existingTranslation, 'ai_retranslate', response.model);
+  }
 
   await prisma.translation.upsert({
     where: { documentId_language: { documentId: id, language: targetLang } },

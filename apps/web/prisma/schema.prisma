@@ -54,6 +54,7 @@ model Document {
   glossary GlossaryEntry[]
 
   translations Translation[]
+  versions     DocumentVersion[]
 
   // Processing metadata
   model           String?  // e.g. "claude-opus-4-6"
@@ -76,6 +77,25 @@ model Translation {
   outputTokens Int?
 
   @@unique([documentId, language])
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version    Int      // auto-increment per document
+  createdAt  DateTime @default(now())
+
+  // What changed
+  field   String // "transcription" | "translation" | "context" | "all"
+  content String // the content at this version
+
+  // How it was created
+  source String // "ai_initial" | "ai_retranslate" | "ai_regenerate" | "manual_edit"
+  model  String? // AI model if applicable
+
+  @@index([documentId])
+  @@unique([documentId, version])
 }
 
 model GlossaryEntry {

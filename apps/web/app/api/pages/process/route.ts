@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { processWithClaude } from '@/lib/adapters/ocr/claude-vision';
+import { createVersion } from '@/lib/infrastructure/versioning';
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -209,6 +210,11 @@ export async function POST(request: NextRequest): Promise<Response> {
                 },
               },
             });
+
+            // Save initial versions
+            await createVersion(doc.id, 'transcription', result.transcription, 'ai_initial', model);
+            await createVersion(doc.id, `translation:${result.translationLanguage || targetLang}`, result.translation, 'ai_initial', model);
+            await createVersion(doc.id, 'context', result.context, 'ai_initial', model);
           }
 
           await prisma.page.update({
