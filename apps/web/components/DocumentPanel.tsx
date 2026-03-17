@@ -141,13 +141,27 @@ export function DocumentPanel({
                     {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
                   </p>
                 </div>
+              ) : status === 'processing' || isRegenerating ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-center">
+                    <svg className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <p className="text-sm text-slate-500">Zpracovávám dokument…</p>
+                  </div>
+                </div>
               ) : (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center">
-                  <p className="text-sm text-slate-500">
-                    {status === 'processing'
-                      ? 'Dokument se právě zpracovává…'
-                      : 'Dokument zatím nebyl zpracován. Vyberte ho a klikněte na „Zpracovat".'}
-                  </p>
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <p className="mb-4 text-sm text-slate-500">Dokument zatím nebyl zpracován.</p>
+                  {page && onRegenerate && (
+                    <button
+                      onClick={() => onRegenerate(page.id)}
+                      className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    >
+                      Zpracovat
+                    </button>
+                  )}
                 </div>
               )}
             </div>
