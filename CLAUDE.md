@@ -115,7 +115,6 @@ Collection  1──N  Page  1──1  Document  1──N  Translation
 ### Documents
 | Metoda | Endpoint | Popis |
 |--------|----------|-------|
-| GET | `/api/documents` | Seznam dokumentů |
 | GET | `/api/documents/[id]` | Detail s překlady a glosářem |
 | PATCH | `/api/documents/[id]` | Editace transkripce/překladu/kontextu |
 | DELETE | `/api/documents/[id]` | Smazání dokumentu |
@@ -135,7 +134,6 @@ Collection  1──N  Page  1──1  Document  1──N  Translation
 | Metoda | Endpoint | Popis |
 |--------|----------|-------|
 | GET | `/api/images/[...path]` | Servírování obrázků z tmp/uploads/ |
-| POST | `/api/upload` | Legacy upload endpoint |
 
 ---
 
@@ -164,19 +162,14 @@ Collection  1──N  Page  1──1  Document  1──N  Translation
 │       │       ├── pages/               # CRUD stránek + upload + processing
 │       │       ├── documents/           # CRUD dokumentů + retranslate + versions
 │       │       ├── collections/         # CRUD kolekcí
-│       │       ├── images/              # Servírování obrázků
-│       │       ├── upload/              # Legacy upload
-│       │       └── process/             # Legacy processing
+│       │       └── images/              # Servírování obrázků
 │       ├── lib/
 │       │   ├── adapters/
 │       │   │   ├── ocr/
 │       │   │   │   └── claude-vision.ts # processWithClaude() – OCR + překlad v jednom
-│       │   │   ├── preprocessing/
-│       │   │   │   └── sharp.ts         # SharpPreprocessor
 │       │   │   └── storage/
 │       │   │       └── local-storage.ts # Lokální filesystem storage
 │       │   └── infrastructure/
-│       │       ├── container.ts         # DI – resolveProvider, getLlmProvider, getStorageProvider
 │       │       ├── db.ts                # Prisma client singleton
 │       │       └── versioning.ts        # createVersion() – auto-increment per document
 │       ├── components/
@@ -185,18 +178,13 @@ Collection  1──N  Page  1──1  Document  1──N  Translation
 │       │   ├── Sidebar.tsx              # Kolekce v levém panelu
 │       │   ├── FileGrid.tsx             # Grid zobrazení stránek (drag-drop, context menu)
 │       │   ├── FileList.tsx             # Tabulkové zobrazení
-│       │   ├── FileUpload.tsx           # Upload komponenta
 │       │   ├── FileUploadZone.tsx       # Modální upload s drag-drop a preview
 │       │   ├── DocumentPanel.tsx        # Boční panel – obrázek + text
 │       │   ├── ResultViewer.tsx         # Transkripce + překlad + kontext + glosář + verze
 │       │   ├── VersionHistory.tsx       # Historie verzí s restore
 │       │   ├── MarkdownEditor.tsx       # Inline markdown editor
-│       │   ├── ProcessingStatus.tsx     # Průběh zpracování
-│       │   ├── CollectionSelector.tsx   # Výběr kolekce
 │       │   ├── Breadcrumbs.tsx          # Navigační drobečky
 │       │   ├── ContextMenu.tsx          # Kontextové menu (pravý klik)
-│       │   ├── PageGrid.tsx             # Grid layout helper
-│       │   └── DocumentList.tsx         # Seznam dokumentů
 │       ├── hooks/
 │       │   └── useDesktopSelection.ts   # Multi-select s range selection
 │       ├── prisma/

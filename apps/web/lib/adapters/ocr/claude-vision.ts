@@ -3,7 +3,7 @@ import sharp from 'sharp';
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
-function detectMediaType(buffer: Buffer): ImageMediaType {
+export function detectMediaType(buffer: Buffer): ImageMediaType {
   if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
   if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
   if (buffer[0] === 0x52 && buffer[1] === 0x49) return 'image/webp';
@@ -34,6 +34,22 @@ export interface StructuredOcrResult {
   translationLanguage: string;
   context: string;
   glossary: { term: string; definition: string }[];
+}
+
+export function parseOcrJson(raw: string): StructuredOcrResult {
+  let jsonStr = raw.trim();
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1] ?? jsonStr;
+  }
+  if (!jsonStr.startsWith('{')) {
+    const braceStart = jsonStr.indexOf('{');
+    const braceEnd = jsonStr.lastIndexOf('}');
+    if (braceStart !== -1 && braceEnd !== -1) {
+      jsonStr = jsonStr.slice(braceStart, braceEnd + 1);
+    }
+  }
+  return JSON.parse(jsonStr) as StructuredOcrResult;
 }
 
 async function prepareImage(image: Buffer): Promise<{ buffer: Buffer; mediaType: ImageMediaType }> {
@@ -124,22 +140,7 @@ export async function processWithClaude(
 
   const text = fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
-  // Parse JSON from response (handle markdown fences, extra text around JSON)
-  let jsonStr = text.trim();
-  // Strip ```json ... ``` fences
-  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenceMatch) {
-    jsonStr = fenceMatch[1] ?? jsonStr;
-  }
-  // If still not starting with {, try to find the JSON object
-  if (!jsonStr.startsWith('{')) {
-    const braceStart = jsonStr.indexOf('{');
-    const braceEnd = jsonStr.lastIndexOf('}');
-    if (braceStart !== -1 && braceEnd !== -1) {
-      jsonStr = jsonStr.slice(braceStart, braceEnd + 1);
-    }
-  }
-  const parsed = JSON.parse(jsonStr) as StructuredOcrResult;
+  const parsed = parseOcrJson(text);
 
   return {
     result: parsed,
