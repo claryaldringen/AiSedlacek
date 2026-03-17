@@ -124,11 +124,21 @@ export async function processWithClaude(
 
   const text = fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
-  // Parse JSON from response (handle potential markdown fences)
-  const jsonStr = text
-    .replace(/^```json\s*/, '')
-    .replace(/\s*```$/, '')
-    .trim();
+  // Parse JSON from response (handle markdown fences, extra text around JSON)
+  let jsonStr = text.trim();
+  // Strip ```json ... ``` fences
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1] ?? jsonStr;
+  }
+  // If still not starting with {, try to find the JSON object
+  if (!jsonStr.startsWith('{')) {
+    const braceStart = jsonStr.indexOf('{');
+    const braceEnd = jsonStr.lastIndexOf('}');
+    if (braceStart !== -1 && braceEnd !== -1) {
+      jsonStr = jsonStr.slice(braceStart, braceEnd + 1);
+    }
+  }
   const parsed = JSON.parse(jsonStr) as StructuredOcrResult;
 
   return {
