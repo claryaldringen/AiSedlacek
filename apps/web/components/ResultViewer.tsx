@@ -138,7 +138,10 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         const res = await fetch(`/api/documents/${result.id}/retranslate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ language: result.translationLanguage }),
+          body: JSON.stringify({
+            language: result.translationLanguage,
+            previousTranslation: result.translation,
+          }),
         });
         if (res.ok) {
           const data = (await res.json()) as { translation: string };
