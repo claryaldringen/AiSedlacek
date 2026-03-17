@@ -10,6 +10,8 @@ interface DocumentPanelProps {
   isLoading: boolean;
   onClose: () => void;
   onResultUpdate?: (updated: DocumentResult) => void;
+  onRegenerate?: (pageId: string) => void;
+  isRegenerating?: boolean;
 }
 
 function cleanFilename(raw: string): string {
@@ -22,6 +24,8 @@ export function DocumentPanel({
   isLoading,
   onClose,
   onResultUpdate,
+  onRegenerate,
+  isRegenerating,
 }: DocumentPanelProps): React.JSX.Element | null {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -60,15 +64,36 @@ export function DocumentPanel({
               )}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
-            aria-label="Zavřít"
-          >
+          <div className="flex items-center gap-2">
+            {page && onRegenerate && (
+              <button
+                onClick={() => onRegenerate(page.id)}
+                disabled={isRegenerating}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 hover:text-white disabled:opacity-50"
+              >
+                {isRegenerating ? (
+                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                  </svg>
+                )}
+                {isRegenerating ? 'Generuji…' : 'Přegenerovat'}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+              aria-label="Zavřít"
+            >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
+          </div>
         </div>
 
         {/* Content: split view */}

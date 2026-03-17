@@ -40,6 +40,7 @@ export default function HomePage(): React.JSX.Element {
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   // Error
   const [error, setError] = useState<string | null>(null);
@@ -554,6 +555,84 @@ export default function HomePage(): React.JSX.Element {
   // Keep ref in sync
   handlePageDoubleClickRef.current = handlePageDoubleClick;
 
+  // ---- Regenerate document ----
+  const handleRegenerate = useCallback(async (pageId: string): Promise<void> => {
+    setRegenerating(true);
+    setPanelResult(null);
+    try {
+      // Delete existing document
+      const page = pages.find((p) => p.id === pageId);
+      if (page?.document) {
+        await fetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
+      }
+      // Reset page status
+      await fetch(`/api/pages/${pageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' }),
+      });
+      // Process again
+      const response = await fetch('/api/pages/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageIds: [pageId], language: 'cs' }),
+      });
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() ?? '';
+          for (const eventStr of events) {
+            const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
+            if (!match) continue;
+            const eventType = match[1];
+            const dataStr = match[2];
+            if (!eventType || !dataStr) continue;
+            if (eventType === 'page_done') {
+              // Reload the document
+              const pageRes = await fetch(`/api/pages/${pageId}`);
+              if (pageRes.ok) {
+                const updatedPage = (await pageRes.json()) as PageItem;
+                setPanelPage(updatedPage);
+                setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+                if (updatedPage.document) {
+                  const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+                  if (docRes.ok) {
+                    const doc = (await docRes.json()) as {
+                      id: string; transcription: string; detectedLanguage: string; context: string;
+                      translations: { language: string; text: string }[];
+                      glossary: { term: string; definition: string }[];
+                    };
+                    const translation = doc.translations[0];
+                    setPanelResult({
+                      id: doc.id,
+                      transcription: doc.transcription,
+                      detectedLanguage: doc.detectedLanguage,
+                      translation: translation?.text ?? '',
+                      translationLanguage: translation?.language ?? '',
+                      context: doc.context,
+                      glossary: doc.glossary,
+                      cached: false,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
+    } finally {
+      setRegenerating(false);
+    }
+  }, [pages]);
+
   // ---- Derived values ----
   const isProcessing = processingPageIds.size > 0;
   const pendingSelectedCount = Array.from(selected).filter((id) => {
@@ -720,6 +799,8 @@ export default function HomePage(): React.JSX.Element {
           setPanelLoading(false);
         }}
         onResultUpdate={(updated) => setPanelResult(updated)}
+        onRegenerate={(pageId) => void handleRegenerate(pageId)}
+        isRegenerating={regenerating}
       />
     </AppShell>
   );
