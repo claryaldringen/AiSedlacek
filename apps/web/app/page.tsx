@@ -41,6 +41,8 @@ export default function HomePage(): React.JSX.Element {
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
+  const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
 
   // Error
   const [error, setError] = useState<string | null>(null);
@@ -558,6 +560,8 @@ export default function HomePage(): React.JSX.Element {
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(async (pageId: string): Promise<void> => {
     setRegenerating(true);
+    setRegenerateStep('Připravuji…');
+    setRegenerateProgress(0);
     setPanelResult(null);
     try {
       // Delete existing document
@@ -593,7 +597,11 @@ export default function HomePage(): React.JSX.Element {
             const eventType = match[1];
             const dataStr = match[2];
             if (!eventType || !dataStr) continue;
-            if (eventType === 'page_done') {
+            if (eventType === 'page_progress') {
+              const data = JSON.parse(dataStr) as { message: string; progress: number };
+              setRegenerateStep(data.message);
+              setRegenerateProgress(data.progress);
+            } else if (eventType === 'page_done') {
               // Reload the document
               const pageRes = await fetch(`/api/pages/${pageId}`);
               if (pageRes.ok) {
@@ -630,6 +638,8 @@ export default function HomePage(): React.JSX.Element {
       setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
     } finally {
       setRegenerating(false);
+      setRegenerateStep(undefined);
+      setRegenerateProgress(undefined);
     }
   }, [pages]);
 
@@ -801,6 +811,8 @@ export default function HomePage(): React.JSX.Element {
         onResultUpdate={(updated) => setPanelResult(updated)}
         onRegenerate={(pageId) => void handleRegenerate(pageId)}
         isRegenerating={regenerating}
+        regenerateStep={regenerateStep}
+        regenerateProgress={regenerateProgress}
       />
     </AppShell>
   );

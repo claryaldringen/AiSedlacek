@@ -12,6 +12,8 @@ interface DocumentPanelProps {
   onResultUpdate?: (updated: DocumentResult) => void;
   onRegenerate?: (pageId: string) => void;
   isRegenerating?: boolean;
+  regenerateStep?: string;
+  regenerateProgress?: number;
 }
 
 function cleanFilename(raw: string): string {
@@ -26,6 +28,8 @@ export function DocumentPanel({
   onResultUpdate,
   onRegenerate,
   isRegenerating,
+  regenerateStep,
+  regenerateProgress,
 }: DocumentPanelProps): React.JSX.Element | null {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -143,12 +147,23 @@ export function DocumentPanel({
                 </div>
               ) : status === 'processing' || isRegenerating ? (
                 <div className="flex items-center justify-center py-20">
-                  <div className="text-center">
-                    <svg className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                  <div className="w-full max-w-xs space-y-3 text-center">
+                    <svg className="mx-auto h-8 w-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    <p className="text-sm text-slate-500">Zpracovávám dokument…</p>
+                    <p className="text-sm text-slate-600">{regenerateStep ?? 'Zpracovávám dokument…'}</p>
+                    {regenerateProgress != null && (
+                      <div className="space-y-1">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-blue-500 transition-all duration-300 ease-out"
+                            style={{ width: `${Math.min(regenerateProgress, 100)}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-slate-400">{regenerateProgress}%</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
