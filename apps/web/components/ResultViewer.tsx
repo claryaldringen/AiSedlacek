@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
+import { VersionHistory } from './VersionHistory';
 
 export interface DocumentResult {
   id: string;
@@ -208,6 +209,29 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
           </div>
         </div>
       )}
+
+      {/* Version history */}
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+        <details>
+          <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
+            Historie verzí
+          </summary>
+          <div className="p-4">
+            <VersionHistory
+              documentId={result.id}
+              onRestore={(field, content) => {
+                if (field === 'transcription') {
+                  void handleTranscriptionSave(content);
+                } else if (field.startsWith('translation:')) {
+                  void saveField('translation', content);
+                } else if (field === 'context') {
+                  void saveField('context', content);
+                }
+              }}
+            />
+          </div>
+        </details>
+      </div>
     </div>
   );
 }
