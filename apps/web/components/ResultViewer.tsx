@@ -14,6 +14,24 @@ export interface DocumentResult {
   context: string;
   glossary: { term: string; definition: string }[];
   cached: boolean;
+  // Processing metadata
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  processingTimeMs?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  // Page metadata (passed through)
+  hash?: string | null;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  pageCreatedAt?: string | null;
+  // Translation metadata
+  translationModel?: string | null;
+  translationInputTokens?: number | null;
+  translationOutputTokens?: number | null;
 }
 
 interface ResultViewerProps {
@@ -232,6 +250,120 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
           </div>
         </details>
       </div>
+
+      {/* Metadata */}
+      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+        <details>
+          <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
+            Metadata
+          </summary>
+          <div className="divide-y divide-stone-100 text-sm">
+            {/* Document processing */}
+            <MetadataGroup title="Zpracování">
+              <MetadataRow label="Model" value={result.model} />
+              <MetadataRow
+                label="Tokeny"
+                value={
+                  result.inputTokens != null || result.outputTokens != null
+                    ? `${result.inputTokens ?? '?'} vstup / ${result.outputTokens ?? '?'} výstup`
+                    : null
+                }
+              />
+              <MetadataRow
+                label="Čas zpracování"
+                value={result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null}
+              />
+              <MetadataRow label="Vytvořeno" value={result.createdAt ? formatDate(result.createdAt) : null} />
+              <MetadataRow label="Upraveno" value={result.updatedAt ? formatDate(result.updatedAt) : null} />
+            </MetadataGroup>
+
+            {/* Translation */}
+            {(result.translationModel || result.translationInputTokens != null) && (
+              <MetadataGroup title="Překlad">
+                <MetadataRow label="Model" value={result.translationModel} />
+                <MetadataRow
+                  label="Tokeny"
+                  value={
+                    result.translationInputTokens != null || result.translationOutputTokens != null
+                      ? `${result.translationInputTokens ?? '?'} vstup / ${result.translationOutputTokens ?? '?'} výstup`
+                      : null
+                  }
+                />
+              </MetadataGroup>
+            )}
+
+            {/* Image / Page */}
+            {(result.mimeType || result.width || result.hash) && (
+              <MetadataGroup title="Obrázek">
+                <MetadataRow label="Formát" value={result.mimeType} />
+                <MetadataRow
+                  label="Rozměry"
+                  value={result.width && result.height ? `${result.width} × ${result.height} px` : null}
+                />
+                <MetadataRow
+                  label="Velikost"
+                  value={result.fileSize != null ? formatFileSize(result.fileSize) : null}
+                />
+                <MetadataRow label="Nahráno" value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null} />
+                <MetadataRow label="SHA-256" value={result.hash} mono />
+              </MetadataGroup>
+            )}
+          </div>
+        </details>
+      </div>
     </div>
   );
+}
+
+function MetadataGroup({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="px-4 py-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">{title}</h3>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">{children}</dl>
+    </div>
+  );
+}
+
+function MetadataRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string | number | null | undefined;
+  mono?: boolean;
+}): React.JSX.Element | null {
+  if (value == null || value === '') return null;
+  return (
+    <>
+      <dt className="text-stone-500">{label}</dt>
+      <dd className={`text-stone-800 ${mono ? 'truncate font-mono text-xs leading-5' : ''}`}>{value}</dd>
+    </>
+  );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)} s`;
+  const m = Math.floor(s / 60);
+  const rest = Math.round(s % 60);
+  return `${m} min ${rest} s`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString('cs-CZ', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

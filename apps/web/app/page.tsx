@@ -521,8 +521,15 @@ export default function HomePage(): React.JSX.Element {
           transcription: string;
           detectedLanguage: string;
           context: string;
-          translations: { language: string; text: string }[];
+          hash: string;
+          translations: { language: string; text: string; model?: string; inputTokens?: number; outputTokens?: number }[];
           glossary: { term: string; definition: string }[];
+          model?: string;
+          inputTokens?: number;
+          outputTokens?: number;
+          processingTimeMs?: number;
+          createdAt?: string;
+          updatedAt?: string;
         };
 
         const translation = doc.translations[0];
@@ -535,6 +542,24 @@ export default function HomePage(): React.JSX.Element {
           context: doc.context,
           glossary: doc.glossary,
           cached: true,
+          // Processing metadata
+          model: doc.model,
+          inputTokens: doc.inputTokens,
+          outputTokens: doc.outputTokens,
+          processingTimeMs: doc.processingTimeMs,
+          createdAt: doc.createdAt,
+          updatedAt: doc.updatedAt,
+          hash: doc.hash,
+          // Page metadata
+          mimeType: page.mimeType,
+          fileSize: page.fileSize,
+          width: page.width,
+          height: page.height,
+          pageCreatedAt: page.createdAt,
+          // Translation metadata
+          translationModel: translation?.model,
+          translationInputTokens: translation?.inputTokens,
+          translationOutputTokens: translation?.outputTokens,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Neznama chyba');
