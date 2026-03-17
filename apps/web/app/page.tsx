@@ -589,9 +589,47 @@ export default function HomePage(): React.JSX.Element {
     setRegenerateProgress(0);
     setPanelResult(null);
     try {
-      // Delete existing document
+      // Try re-parsing from stored rawResponse first (free, no API call)
       const page = pages.find((p) => p.id === pageId);
       if (page?.document) {
+        setRegenerateStep('Zkouším opravit parsování…');
+        const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, { method: 'POST' });
+        if (reparseRes.ok) {
+          // Re-parse succeeded — reload document
+          const pageRes = await fetch(`/api/pages/${pageId}`);
+          if (pageRes.ok) {
+            const updatedPage = (await pageRes.json()) as PageItem;
+            setPanelPage(updatedPage);
+            setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+            if (updatedPage.document) {
+              const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+              if (docRes.ok) {
+                const doc = (await docRes.json()) as {
+                  id: string; transcription: string; detectedLanguage: string; context: string; hash: string;
+                  translations: { language: string; text: string; model?: string; inputTokens?: number; outputTokens?: number }[];
+                  glossary: { term: string; definition: string }[];
+                  model?: string; inputTokens?: number; outputTokens?: number; processingTimeMs?: number;
+                  createdAt?: string; updatedAt?: string;
+                };
+                const translation = doc.translations[0];
+                setPanelResult({
+                  id: doc.id, transcription: doc.transcription, detectedLanguage: doc.detectedLanguage,
+                  translation: translation?.text ?? '', translationLanguage: translation?.language ?? '',
+                  context: doc.context, glossary: doc.glossary, cached: false,
+                  model: doc.model, inputTokens: doc.inputTokens, outputTokens: doc.outputTokens,
+                  processingTimeMs: doc.processingTimeMs, createdAt: doc.createdAt, updatedAt: doc.updatedAt,
+                  hash: doc.hash, mimeType: page.mimeType, fileSize: page.fileSize,
+                  width: page.width, height: page.height, pageCreatedAt: page.createdAt,
+                  translationModel: translation?.model, translationInputTokens: translation?.inputTokens,
+                  translationOutputTokens: translation?.outputTokens,
+                });
+              }
+            }
+          }
+          return; // Done — no API call needed
+        }
+        // Re-parse failed — fall through to full regeneration
+        console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
         await fetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
       }
       // Reset page status
@@ -600,7 +638,8 @@ export default function HomePage(): React.JSX.Element {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'pending' }),
       });
-      // Process again
+      // Process again with full API call
+      setRegenerateStep('Volám model…');
       const response = await fetch('/api/pages/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -692,10 +731,6 @@ export default function HomePage(): React.JSX.Element {
       collections={collections}
       loadingCollections={loadingCollections}
       onCollectionSelect={handleCollectionSelect}
-      onCollectionCreated={(col) => {
-        setCollections((prev) => [col, ...prev]);
-      }}
-      onRefreshCollections={loadCollections}
       onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
     >
       {/* Toolbar */}
@@ -710,6 +745,18 @@ export default function HomePage(): React.JSX.Element {
         onUploadClick={() => setUploadOpen(true)}
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
+        onCreateCollection={async (name) => {
+          const res = await fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { id: string };
+            void loadCollections();
+            handleCollectionSelect(data.id);
+          }
+        }}
         processingStep={processingStep}
         processingProgress={processingProgress}
       />
@@ -834,10 +881,34 @@ export default function HomePage(): React.JSX.Element {
           setPanelLoading(false);
         }}
         onResultUpdate={(updated) => setPanelResult(updated)}
+        onPageUpdate={(updated) => {
+          setPanelPage(updated);
+          setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+        }}
         onRegenerate={(pageId) => void handleRegenerate(pageId)}
         isRegenerating={regenerating}
         regenerateStep={regenerateStep}
         regenerateProgress={regenerateProgress}
+        hasPrevious={(() => {
+          if (!panelPage) return false;
+          const idx = pages.findIndex((p) => p.id === panelPage.id);
+          return idx > 0;
+        })()}
+        hasNext={(() => {
+          if (!panelPage) return false;
+          const idx = pages.findIndex((p) => p.id === panelPage.id);
+          return idx >= 0 && idx < pages.length - 1;
+        })()}
+        onPrevious={() => {
+          if (!panelPage) return;
+          const idx = pages.findIndex((p) => p.id === panelPage.id);
+          if (idx > 0) void handlePageDoubleClick(pages[idx - 1]!);
+        }}
+        onNext={() => {
+          if (!panelPage) return;
+          const idx = pages.findIndex((p) => p.id === panelPage.id);
+          if (idx >= 0 && idx < pages.length - 1) void handlePageDoubleClick(pages[idx + 1]!);
+        }}
       />
     </AppShell>
   );

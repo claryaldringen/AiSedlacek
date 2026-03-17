@@ -10,8 +10,6 @@ interface AppShellProps {
   collections: Collection[];
   loadingCollections: boolean;
   onCollectionSelect: (id: string | null) => void;
-  onCollectionCreated?: (collection: Collection) => void;
-  onRefreshCollections: () => void;
   onMovePages?: (pageIds: string[], targetCollectionId: string | null) => void;
 }
 
@@ -22,8 +20,6 @@ export function AppShell({
   collections,
   loadingCollections,
   onCollectionSelect,
-  onCollectionCreated,
-  onRefreshCollections,
   onMovePages,
 }: AppShellProps): React.JSX.Element {
   return (
@@ -56,10 +52,8 @@ export function AppShell({
         <Sidebar
           selectedCollectionId={selectedCollectionId}
           onCollectionSelect={onCollectionSelect}
-          onCollectionCreated={onCollectionCreated}
           collections={collections}
           loadingCollections={loadingCollections}
-          onRefresh={onRefreshCollections}
           onMovePages={onMovePages}
         />
 

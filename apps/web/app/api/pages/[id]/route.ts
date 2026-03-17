@@ -40,13 +40,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
   }
 
-  const { collectionId, order, status } = body as {
+  const { collectionId, order, status, displayName } = body as {
     collectionId?: unknown;
     order?: unknown;
     status?: unknown;
+    displayName?: unknown;
   };
 
-  const data: { collectionId?: string | null; order?: number; status?: string } = {};
+  const data: { collectionId?: string | null; order?: number; status?: string; displayName?: string | null } = {};
 
   if ('collectionId' in (body as object)) {
     data.collectionId =
@@ -63,6 +64,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   if (typeof status === 'string') {
     data.status = status;
+  }
+
+  if ('displayName' in (body as object)) {
+    data.displayName =
+      typeof displayName === 'string' && displayName.trim() !== ''
+        ? displayName.trim()
+        : null;
   }
 
   if (Object.keys(data).length === 0) {

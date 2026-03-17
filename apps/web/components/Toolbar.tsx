@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 interface ToolbarProps {
   totalCount: number;
   doneCount: number;
@@ -12,6 +14,7 @@ interface ToolbarProps {
   onProcessSelected: () => void;
   onDeleteSelected: () => void;
   onMoveSelected?: () => void;
+  onCreateCollection?: (name: string) => void;
   processingStep?: string;
   processingProgress?: number;
 }
@@ -27,9 +30,13 @@ export function Toolbar({
   onUploadClick,
   onProcessSelected,
   onDeleteSelected,
+  onCreateCollection,
   processingStep,
   processingProgress,
 }: ToolbarProps): React.JSX.Element {
+  const [showNewCollection, setShowNewCollection] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+
   return (
     <div className="flex flex-col border-b border-slate-200 bg-white">
       {/* Main toolbar row */}
@@ -54,6 +61,63 @@ export function Toolbar({
           </svg>
           Nahrát
         </button>
+
+        {/* New collection */}
+        {onCreateCollection && (
+          showNewCollection ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                placeholder="Název svazku…"
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newCollectionName.trim()) {
+                    onCreateCollection(newCollectionName.trim());
+                    setNewCollectionName('');
+                    setShowNewCollection(false);
+                  }
+                  if (e.key === 'Escape') {
+                    setNewCollectionName('');
+                    setShowNewCollection(false);
+                  }
+                  e.stopPropagation();
+                }}
+                autoFocus
+                className="w-40 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => {
+                  if (newCollectionName.trim()) {
+                    onCreateCollection(newCollectionName.trim());
+                    setNewCollectionName('');
+                    setShowNewCollection(false);
+                  }
+                }}
+                disabled={!newCollectionName.trim()}
+                className="rounded bg-slate-800 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+              >
+                Vytvořit
+              </button>
+              <button
+                onClick={() => { setNewCollectionName(''); setShowNewCollection(false); }}
+                className="rounded px-1.5 py-1 text-xs text-slate-400 hover:text-slate-600"
+              >
+                Zrušit
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowNewCollection(true)}
+              className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              Nový svazek
+            </button>
+          )
+        )}
 
         {/* Divider */}
         <div className="h-5 w-px bg-slate-200" />

@@ -38,10 +38,12 @@ export interface StructuredOcrResult {
 
 export function parseOcrJson(raw: string): StructuredOcrResult {
   let jsonStr = raw.trim();
+  // Strip ```json ... ``` fences
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (fenceMatch) {
     jsonStr = fenceMatch[1] ?? jsonStr;
   }
+  // Extract JSON object if surrounded by extra text
   if (!jsonStr.startsWith('{')) {
     const braceStart = jsonStr.indexOf('{');
     const braceEnd = jsonStr.lastIndexOf('}');
@@ -49,7 +51,92 @@ export function parseOcrJson(raw: string): StructuredOcrResult {
       jsonStr = jsonStr.slice(braceStart, braceEnd + 1);
     }
   }
-  return JSON.parse(jsonStr) as StructuredOcrResult;
+  // Try parsing as-is first
+  try {
+    return JSON.parse(jsonStr) as StructuredOcrResult;
+  } catch {
+    // Fix common issues in Claude's JSON output:
+    // 1. Unescaped newlines/tabs inside string values
+    // 2. Unescaped ASCII quotes inside strings (e.g. Czech „A" where " is U+0022)
+    //
+    // Strategy: rebuild the JSON character by character, tracking whether we're
+    // inside a string value, and escaping problematic characters.
+    const fixed = fixJsonString(jsonStr);
+    return JSON.parse(fixed) as StructuredOcrResult;
+  }
+}
+
+/**
+ * Fix broken JSON from LLM output by escaping unescaped characters inside string values.
+ * Handles: literal newlines, tabs, and unescaped ASCII quotes (e.g. Czech „A" uses U+0022).
+ */
+function fixJsonString(json: string): string {
+  const out: string[] = [];
+  let inString = false;
+  let i = 0;
+
+  while (i < json.length) {
+    const ch = json[i]!;
+
+    if (!inString) {
+      out.push(ch);
+      if (ch === '"') inString = true;
+      i++;
+      continue;
+    }
+
+    // Inside a string
+    if (ch === '\\') {
+      // Escaped character — pass through both chars
+      out.push(ch);
+      i++;
+      if (i < json.length) {
+        out.push(json[i]!);
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      // Is this the real end of the string, or an unescaped quote inside it?
+      // Look ahead: if after optional whitespace we see : , ] } or end-of-string,
+      // it's a real string terminator.
+      const rest = json.slice(i + 1);
+      const afterQuote = rest.match(/^\s*([,:\]}\n]|$)/);
+      if (afterQuote) {
+        // Real end of string
+        out.push(ch);
+        inString = false;
+        i++;
+        continue;
+      }
+      // Unescaped quote inside string — escape it
+      out.push('\\"');
+      i++;
+      continue;
+    }
+
+    if (ch === '\n') {
+      out.push('\\n');
+      i++;
+      continue;
+    }
+    if (ch === '\r') {
+      out.push('\\r');
+      i++;
+      continue;
+    }
+    if (ch === '\t') {
+      out.push('\\t');
+      i++;
+      continue;
+    }
+
+    out.push(ch);
+    i++;
+  }
+
+  return out.join('');
 }
 
 async function prepareImage(image: Buffer): Promise<{ buffer: Buffer; mediaType: ImageMediaType }> {
@@ -81,6 +168,7 @@ export async function processWithClaude(
   estimatedOutputTokens?: number,
 ): Promise<{
   result: StructuredOcrResult;
+  rawResponse: string;
   processingTimeMs: number;
   model: string;
   inputTokens: number;
@@ -140,10 +228,19 @@ export async function processWithClaude(
 
   const text = fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
-  const parsed = parseOcrJson(text);
+  let parsed: StructuredOcrResult;
+  try {
+    parsed = parseOcrJson(text);
+  } catch (err) {
+    console.error('[Claude] JSON parse failed. Raw response saved to /tmp/claude-raw-response.txt');
+    const fs = await import('fs/promises');
+    await fs.writeFile('/tmp/claude-raw-response.txt', text, 'utf-8');
+    throw err;
+  }
 
   return {
     result: parsed,
+    rawResponse: text,
     processingTimeMs: Date.now() - startTime,
     model: finalMessage.model,
     inputTokens: finalMessage.usage.input_tokens,

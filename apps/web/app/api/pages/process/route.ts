@@ -151,7 +151,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           }
 
           // Run Claude OCR with streaming progress
-          const { result, processingTimeMs, model, inputTokens, outputTokens } =
+          const { result, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
             await processWithClaude(
               imageBuffer,
               'Přepiš text z tohoto rukopisu.',
@@ -189,6 +189,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               data: {
                 pageId,
                 hash: imageHash,
+                rawResponse,
                 transcription: result.transcription,
                 detectedLanguage: result.detectedLanguage,
                 context: result.context,

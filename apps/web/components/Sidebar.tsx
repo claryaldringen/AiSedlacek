@@ -13,23 +13,18 @@ export interface Collection {
 interface SidebarProps {
   selectedCollectionId: string | null;
   onCollectionSelect: (id: string | null) => void;
-  onCollectionCreated?: (collection: Collection) => void;
   collections: Collection[];
   loadingCollections: boolean;
-  onRefresh: () => void;
   onMovePages?: (pageIds: string[], targetCollectionId: string | null) => void;
 }
 
 export function Sidebar({
   selectedCollectionId,
   onCollectionSelect,
-  onCollectionCreated,
   collections,
   loadingCollections,
-  onRefresh,
   onMovePages,
 }: SidebarProps): React.JSX.Element {
-  const [showNewForm, setShowNewForm] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | 'all' | null>(null);
 
   const getDraggedPageIds = useCallback((e: React.DragEvent): string[] => {
@@ -41,36 +36,6 @@ export function Sidebar({
     }
     return [];
   }, []);
-  const [newName, setNewName] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleCreate = async (): Promise<void> => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/collections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), description: newDescription.trim() }),
-      });
-      const data = (await res.json()) as Collection & { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Nepodařilo se vytvořit svazek');
-
-      setNewName('');
-      setNewDescription('');
-      setShowNewForm(false);
-      onCollectionCreated?.(data);
-      onRefresh();
-      onCollectionSelect(data.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
-    } finally {
-      setCreating(false);
-    }
-  };
 
   return (
     <aside className="flex h-full w-56 flex-col bg-slate-800 text-slate-200">
@@ -168,69 +133,6 @@ export function Sidebar({
         )}
       </div>
 
-      {/* New collection button at bottom */}
-      <div className="border-t border-slate-700 p-3">
-        {showNewForm ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              placeholder="Název svazku"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleCreate();
-                if (e.key === 'Escape') setShowNewForm(false);
-              }}
-              autoFocus
-              className="w-full rounded bg-slate-700 px-2.5 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <input
-              type="text"
-              placeholder="Popis (volitelně)"
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              className="w-full rounded bg-slate-700 px-2.5 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            {error && <p className="text-xs text-red-400">{error}</p>}
-            <div className="flex gap-2">
-              <button
-                onClick={() => void handleCreate()}
-                disabled={creating || !newName.trim()}
-                className="flex-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {creating ? 'Vytvářím…' : 'Vytvořit'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowNewForm(false);
-                  setNewName('');
-                  setNewDescription('');
-                  setError(null);
-                }}
-                className="rounded px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-700 hover:text-white"
-              >
-                Zrušit
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShowNewForm(true)}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-sm text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Nový svazek
-          </button>
-        )}
-      </div>
     </aside>
   );
 }

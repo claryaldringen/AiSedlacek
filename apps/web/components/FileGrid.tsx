@@ -7,6 +7,7 @@ import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 export interface PageItem {
   id: string;
   filename: string;
+  displayName?: string | null;
   imageUrl: string;
   status: string;
   order: number;

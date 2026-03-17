@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ResultViewer, type DocumentResult } from './ResultViewer';
+import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
+
+type RightPanelTab = 'result' | 'chat';
 
 interface DocumentPanelProps {
   page: PageItem | null;
@@ -10,14 +13,24 @@ interface DocumentPanelProps {
   isLoading: boolean;
   onClose: () => void;
   onResultUpdate?: (updated: DocumentResult) => void;
+  onPageUpdate?: (updated: PageItem) => void;
   onRegenerate?: (pageId: string) => void;
   isRegenerating?: boolean;
   regenerateStep?: string;
   regenerateProgress?: number;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
 }
 
 function cleanFilename(raw: string): string {
   return raw.replace(/^[a-f0-9-]+-/, '');
+}
+
+function getDisplayTitle(page: PageItem | null): string {
+  if (!page) return 'Dokument';
+  return page.displayName || cleanFilename(page.filename);
 }
 
 export function DocumentPanel({
@@ -26,23 +39,87 @@ export function DocumentPanel({
   isLoading,
   onClose,
   onResultUpdate,
+  onPageUpdate,
   onRegenerate,
   isRegenerating,
   regenerateStep,
   regenerateProgress,
+  onPrevious,
+  onNext,
+  hasPrevious,
+  hasNext,
 }: DocumentPanelProps): React.JSX.Element | null {
+  const [activeTab, setActiveTab] = useState<RightPanelTab>('result');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // Reset tab when switching documents
   useEffect(() => {
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+    setActiveTab('result');
+    setEditingTitle(false);
+  }, [page?.id]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent): void => {
+      // Don't capture arrows when typing in chat input or title
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable;
+
+      if (e.key === 'Escape' && !isInput) onClose();
+      if (!isInput && e.key === 'ArrowLeft' && hasPrevious) onPrevious?.();
+      if (!isInput && e.key === 'ArrowRight' && hasNext) onNext?.();
+    },
+    [onClose, onPrevious, onNext, hasPrevious, hasNext],
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  const handleChatApplyUpdate = useCallback(
+    (field: string, content: string): void => {
+      if (!result) return;
+      void fetch(`/api/documents/${result.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: content, ...(field === 'translation' ? { translationLanguage: result.translationLanguage } : {}) }),
+      });
+      const updated = { ...result, [field]: content };
+      onResultUpdate?.(updated);
+    },
+    [result, onResultUpdate],
+  );
+
+  const handleTitleClick = useCallback((): void => {
+    if (!page) return;
+    setTitleDraft(page.displayName || cleanFilename(page.filename));
+    setEditingTitle(true);
+    setTimeout(() => titleInputRef.current?.select(), 0);
+  }, [page]);
+
+  const handleTitleSave = useCallback((): void => {
+    if (!page) return;
+    setEditingTitle(false);
+    const newName = titleDraft.trim();
+    const displayName = newName === cleanFilename(page.filename) ? null : newName || null;
+    if (displayName === (page.displayName ?? null)) return;
+    void fetch(`/api/pages/${page.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName }),
+    });
+    const updated = { ...page, displayName };
+    onPageUpdate?.(updated);
+  }, [page, titleDraft, onPageUpdate]);
 
   if (!page && !isLoading) return null;
 
   const status = page?.status ?? 'pending';
-  const title = page ? cleanFilename(page.filename) : 'Dokument';
+  const title = getDisplayTitle(page);
+  const showRegenerate = page && onRegenerate && (status === 'done' || status === 'error');
+  const showTabs = status === 'done' && result;
 
   return (
     <>
@@ -51,25 +128,67 @@ export function DocumentPanel({
 
       {/* Fullscreen panel */}
       <div className="fixed inset-4 z-40 flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-800 px-6 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-white">{title}</h2>
-            <p className="text-xs text-slate-400">
-              {status === 'done' && 'Zpracováno'}
-              {status === 'pending' && 'Čeká na zpracování'}
-              {status === 'processing' && 'Zpracovává se…'}
-              {status === 'error' && 'Chyba zpracování'}
-              {page?.width && page.height && (
-                <span className="ml-2">
-                  {page.width} × {page.height} px
-                  {page.fileSize ? ` · ${(page.fileSize / 1024).toFixed(0)} KB` : ''}
-                </span>
-              )}
-            </p>
-          </div>
+        {/* Toolbar */}
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-800 px-4 py-2">
+          {/* Left: navigation + title */}
           <div className="flex items-center gap-2">
-            {page && onRegenerate && (
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={onPrevious}
+                disabled={!hasPrevious}
+                className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                aria-label="Předchozí"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                </svg>
+              </button>
+              <button
+                onClick={onNext}
+                disabled={!hasNext}
+                className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                aria-label="Další"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+            </div>
+            <div className="ml-1">
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={handleTitleSave}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleTitleSave();
+                    if (e.key === 'Escape') setEditingTitle(false);
+                    e.stopPropagation();
+                  }}
+                  className="w-48 rounded bg-slate-700 px-1.5 py-0.5 text-sm font-semibold text-white outline-none ring-1 ring-slate-500 focus:ring-blue-400"
+                />
+              ) : (
+                <h2
+                  className="cursor-text text-sm font-semibold text-white hover:text-slate-200"
+                  onClick={handleTitleClick}
+                  title="Klikněte pro přejmenování"
+                >
+                  {title}
+                </h2>
+              )}
+              <p className="text-xs text-slate-400">
+                {status === 'done' && 'Zpracováno'}
+                {status === 'pending' && 'Čeká na zpracování'}
+                {status === 'processing' && 'Zpracovává se…'}
+                {status === 'error' && 'Chyba zpracování'}
+              </p>
+            </div>
+          </div>
+
+          {/* Right: actions */}
+          <div className="flex items-center gap-1">
+            {showRegenerate && (
               <button
                 onClick={() => onRegenerate(page.id)}
                 disabled={isRegenerating}
@@ -93,10 +212,10 @@ export function DocumentPanel({
               className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
               aria-label="Zavřít"
             >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -118,35 +237,42 @@ export function DocumentPanel({
             </div>
           )}
 
-          {/* Right: result / status */}
+          {/* Right: tabs (result / chat) or status */}
           <div className="flex w-1/2 flex-col">
-            <div className="shrink-0 border-b border-slate-100 px-4 py-2">
-              <span className="text-xs font-medium text-slate-500">
-                {status === 'done' ? 'Přepis a překlad' : 'Stav'}
-              </span>
+            {/* Tab bar */}
+            <div className="flex shrink-0 items-center gap-0 border-b border-slate-100">
+              {showTabs ? (
+                <>
+                  <button
+                    onClick={() => setActiveTab('result')}
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                      activeTab === 'result'
+                        ? 'border-b-2 border-slate-800 text-slate-800'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    Přepis a překlad
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`px-4 py-2 text-xs font-medium transition-colors ${
+                      activeTab === 'chat'
+                        ? 'border-b-2 border-slate-800 text-slate-800'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    Chat
+                  </button>
+                </>
+              ) : (
+                <span className="px-4 py-2 text-xs font-medium text-slate-500">Stav</span>
+              )}
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="text-center">
-                    <svg className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p className="text-sm text-slate-500">Načítám…</p>
-                  </div>
-                </div>
-              ) : status === 'done' && result ? (
-                <ResultViewer result={result} onUpdate={onResultUpdate} />
-              ) : status === 'error' ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                  <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>
-                  <p className="text-sm text-red-600">
-                    {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
-                  </p>
-                </div>
-              ) : status === 'processing' || isRegenerating ? (
-                <div className="flex items-center justify-center py-20">
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden">
+              {isRegenerating || status === 'processing' ? (
+                <div className="flex h-full items-center justify-center">
                   <div className="w-full max-w-xs space-y-3 text-center">
                     <svg className="mx-auto h-8 w-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -161,13 +287,46 @@ export function DocumentPanel({
                             style={{ width: `${Math.min(regenerateProgress, 100)}%` }}
                           />
                         </div>
-                        <p className="text-xs text-slate-400">{regenerateProgress}%</p>
+                        <p className="text-xs text-slate-400">{regenerateProgress} %</p>
                       </div>
                     )}
                   </div>
                 </div>
+              ) : isLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center">
+                    <svg className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <p className="text-sm text-slate-500">Načítám…</p>
+                  </div>
+                </div>
+              ) : status === 'done' && result ? (
+                <>
+                  {/* Result tab */}
+                  <div className={`h-full overflow-y-auto p-4 ${activeTab !== 'result' ? 'hidden' : ''}`}>
+                    <ResultViewer result={result} onUpdate={onResultUpdate} />
+                  </div>
+                  {/* Chat tab */}
+                  <div className={`h-full ${activeTab !== 'chat' ? 'hidden' : ''}`}>
+                    <DocumentChat
+                      documentId={result.id}
+                      onApplyUpdate={handleChatApplyUpdate}
+                    />
+                  </div>
+                </>
+              ) : status === 'error' ? (
+                <div className="p-4">
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                    <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>
+                    <p className="text-sm text-red-600">
+                      {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
+                    </p>
+                  </div>
+                </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="mb-4 text-sm text-slate-500">Dokument zatím nebyl zpracován.</p>
                   {page && onRegenerate && (
                     <button
