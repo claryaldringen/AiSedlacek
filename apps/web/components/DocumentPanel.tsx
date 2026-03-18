@@ -312,7 +312,20 @@ export function DocumentPanel({
                   <div className={`h-full ${activeTab !== 'chat' ? 'hidden' : ''}`}>
                     <DocumentChat
                       documentId={result.id}
+                      currentFields={{
+                        transcription: result.transcription,
+                        translation: result.translation,
+                        context: result.context,
+                      }}
                       onApplyUpdate={handleChatApplyUpdate}
+                      onTokenUsage={(usage) => {
+                        onResultUpdate?.({
+                          ...result,
+                          chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
+                          chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
+                          chatModel: usage.model,
+                        });
+                      }}
                     />
                   </div>
                 </>

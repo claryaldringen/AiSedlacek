@@ -59,10 +59,11 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
 
         try {
-          // Fetch the page record
+          // Fetch the page record with collection context
           const page = await prisma.page.findUnique({
             where: { id: pageId },
             include: {
+              collection: { select: { context: true } },
               document: {
                 include: {
                   translations: { select: { language: true } },
@@ -150,11 +151,18 @@ export async function POST(request: NextRequest): Promise<Response> {
             }
           }
 
+          // Build prompt with optional collection context
+          const collectionContext = page.collection?.context;
+          let userPrompt = 'Přepiš text z tohoto rukopisu.';
+          if (collectionContext) {
+            userPrompt = `Kontext díla (použij pro lepší porozumění dokumentu):\n${collectionContext}\n\n---\n\nPřepiš text z tohoto rukopisu.`;
+          }
+
           // Run Claude OCR with streaming progress
           const { result, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
             await processWithClaude(
               imageBuffer,
-              'Přepiš text z tohoto rukopisu.',
+              userPrompt,
               (currentTokens, estTotal) => {
                 const tokenProgress = Math.min(currentTokens / estTotal, 0.95);
                 const pageBase = completed / total;

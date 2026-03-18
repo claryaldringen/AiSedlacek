@@ -32,6 +32,10 @@ export interface DocumentResult {
   translationModel?: string | null;
   translationInputTokens?: number | null;
   translationOutputTokens?: number | null;
+  // Chat accumulated cost
+  chatInputTokens?: number;
+  chatOutputTokens?: number;
+  chatModel?: string;
 }
 
 interface ResultViewerProps {
@@ -273,6 +277,10 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 label="Čas zpracování"
                 value={result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null}
               />
+              <MetadataRow
+                label="Cena"
+                value={formatCost(result.model, result.inputTokens, result.outputTokens)}
+              />
               <MetadataRow label="Vytvořeno" value={result.createdAt ? formatDate(result.createdAt) : null} />
               <MetadataRow label="Upraveno" value={result.updatedAt ? formatDate(result.updatedAt) : null} />
             </MetadataGroup>
@@ -289,8 +297,40 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                       : null
                   }
                 />
+                <MetadataRow
+                  label="Cena"
+                  value={formatCost(result.translationModel, result.translationInputTokens, result.translationOutputTokens)}
+                />
               </MetadataGroup>
             )}
+
+            {/* Chat */}
+            {(result.chatInputTokens ?? 0) > 0 && (
+              <MetadataGroup title="Chat">
+                <MetadataRow label="Model" value={result.chatModel} />
+                <MetadataRow
+                  label="Tokeny"
+                  value={`${result.chatInputTokens ?? 0} vstup / ${result.chatOutputTokens ?? 0} výstup`}
+                />
+                <MetadataRow
+                  label="Cena"
+                  value={formatCost(result.chatModel, result.chatInputTokens, result.chatOutputTokens)}
+                />
+              </MetadataGroup>
+            )}
+
+            {/* Total cost */}
+            {(() => {
+              const processCost = computeCostRaw(result.model, result.inputTokens, result.outputTokens);
+              const translationCost = computeCostRaw(result.translationModel, result.translationInputTokens, result.translationOutputTokens);
+              const chatCost = computeCostRaw(result.chatModel, result.chatInputTokens, result.chatOutputTokens);
+              const total = processCost + translationCost + chatCost;
+              return total > 0 ? (
+                <MetadataGroup title="Celkem">
+                  <MetadataRow label="Celková cena" value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`} />
+                </MetadataGroup>
+              ) : null;
+            })()}
 
             {/* Image / Page */}
             {(result.mimeType || result.width || result.hash) && (
@@ -355,6 +395,36 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Pricing per million tokens (USD), May 2025
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-6': { input: 15, output: 75 },
+  'claude-opus-4-20250514': { input: 15, output: 75 },
+  'claude-sonnet-4-6': { input: 3, output: 15 },
+  'claude-sonnet-4-20250514': { input: 3, output: 15 },
+};
+
+function computeCostRaw(
+  model: string | null | undefined,
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+): number {
+  if (!model || inputTokens == null || outputTokens == null) return 0;
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) return 0;
+  return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
+}
+
+function formatCost(
+  model: string | null | undefined,
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+): string | null {
+  const cost = computeCostRaw(model, inputTokens, outputTokens);
+  if (cost === 0) return null;
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(3)}`;
 }
 
 function formatDate(iso: string): string {

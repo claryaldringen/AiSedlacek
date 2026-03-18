@@ -6,6 +6,8 @@ export interface Collection {
   id: string;
   name: string;
   description: string;
+  context: string;
+  contextUrl: string | null;
   createdAt: string;
   _count: { pages: number };
 }

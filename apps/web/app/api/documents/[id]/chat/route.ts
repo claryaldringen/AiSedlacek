@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import sharp from 'sharp';
 import fs from 'fs/promises';
 import { prisma } from '@/lib/infrastructure/db';
+import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -69,16 +71,28 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return Response.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 
-  // Load the image for multimodal context
+  // Load the image for multimodal context (resize if > 5 MB)
   const filename = doc.page.imageUrl.replace('/api/images/', '');
   const imagePath = `tmp/uploads/${filename}`;
   let imageBase64: string | null = null;
   let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg';
   try {
-    const imageBuffer = await fs.readFile(imagePath);
+    let imageBuffer = await fs.readFile(imagePath);
+    const MAX_BYTES = 5 * 1024 * 1024;
+    if (imageBuffer.length > MAX_BYTES) {
+      imageBuffer = Buffer.from(await sharp(imageBuffer)
+        .resize({ width: 3000, withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer());
+      if (imageBuffer.length > MAX_BYTES) {
+        imageBuffer = Buffer.from(await sharp(imageBuffer)
+          .resize({ width: 2000, withoutEnlargement: true })
+          .jpeg({ quality: 75 })
+          .toBuffer());
+      }
+    }
     imageBase64 = imageBuffer.toString('base64');
-    if (doc.page.mimeType === 'image/png') mediaType = 'image/png';
-    else if (doc.page.mimeType === 'image/webp') mediaType = 'image/webp';
+    mediaType = detectMediaType(imageBuffer);
   } catch {
     // Image not available — continue without it
   }
@@ -142,8 +156,13 @@ ${glossaryText}`;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
         });
 
-        await anthropicStream.finalMessage();
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+        const finalMsg = await anthropicStream.finalMessage();
+        const usage = {
+          inputTokens: finalMsg.usage.input_tokens,
+          outputTokens: finalMsg.usage.output_tokens,
+          model: finalMsg.model,
+        };
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`));

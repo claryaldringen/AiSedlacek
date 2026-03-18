@@ -6,8 +6,9 @@ import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
 import { FileGrid, type PageItem } from '@/components/FileGrid';
 import { FileList } from '@/components/FileList';
-import { FileUploadZone, type UploadedPage } from '@/components/FileUploadZone';
+import { ImportDialog, type UploadedPage } from '@/components/ImportDialog';
 import { DocumentPanel } from '@/components/DocumentPanel';
+import { CollectionContextDialog } from '@/components/CollectionContextDialog';
 import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
@@ -28,8 +29,9 @@ export default function HomePage(): React.JSX.Element {
   // View mode
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Upload modal
+  // Dialogs
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [contextDialogOpen, setContextDialogOpen] = useState(false);
 
   // Processing
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
@@ -742,7 +744,7 @@ export default function HomePage(): React.JSX.Element {
         isProcessing={isProcessing}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        onUploadClick={() => setUploadOpen(true)}
+        onImportClick={() => setUploadOpen(true)}
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
         onCreateCollection={async (name) => {
@@ -757,6 +759,26 @@ export default function HomePage(): React.JSX.Element {
             handleCollectionSelect(data.id);
           }
         }}
+        onSortByName={async () => {
+          const sorted = [...pages].sort((a, b) => {
+            const nameA = (a.displayName || a.filename).toLowerCase();
+            const nameB = (b.displayName || b.filename).toLowerCase();
+            return nameA.localeCompare(nameB, 'cs', { numeric: true });
+          });
+          setPages(sorted);
+          // Persist new order
+          await Promise.all(
+            sorted.map((p, i) =>
+              fetch(`/api/pages/${p.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order: i }),
+              }),
+            ),
+          );
+        }}
+        onEditContext={() => setContextDialogOpen(true)}
+        hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}
         processingProgress={processingProgress}
       />
@@ -825,7 +847,7 @@ export default function HomePage(): React.JSX.Element {
             onDeselectAll={handleDeselectAll}
             onProcessSelected={() => void handleProcessSelected()}
             onDeleteSelected={() => void handleDeleteSelected()}
-            onUploadClick={() => setUploadOpen(true)}
+            onImportClick={() => setUploadOpen(true)}
             focusedItemId={focusedItemId}
             onColumnsChange={setColumnsCount}
           />
@@ -863,12 +885,30 @@ export default function HomePage(): React.JSX.Element {
       </div>
 
       {/* Upload modal */}
-      <FileUploadZone
+      <ImportDialog
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
-        onFilesUploaded={handleFilesUploaded}
+        onPagesImported={handleFilesUploaded}
         collectionId={selectedCollectionId}
       />
+
+      {/* Collection context dialog */}
+      {selectedCollection && (
+        <CollectionContextDialog
+          isOpen={contextDialogOpen}
+          onClose={() => setContextDialogOpen(false)}
+          collectionId={selectedCollection.id}
+          collectionName={selectedCollection.name}
+          initialContext={selectedCollection.context}
+          initialContextUrl={selectedCollection.contextUrl}
+          onSaved={(context, contextUrl) => {
+            setCollections((prev) =>
+              prev.map((c) => (c.id === selectedCollection.id ? { ...c, context, contextUrl } : c)),
+            );
+            setContextDialogOpen(false);
+          }}
+        />
+      )}
 
       {/* Document panel */}
       <DocumentPanel

@@ -10,11 +10,14 @@ interface ToolbarProps {
   isProcessing: boolean;
   viewMode: 'grid' | 'list';
   onViewModeChange: (mode: 'grid' | 'list') => void;
-  onUploadClick: () => void;
+  onImportClick: () => void;
   onProcessSelected: () => void;
   onDeleteSelected: () => void;
   onMoveSelected?: () => void;
   onCreateCollection?: (name: string) => void;
+  onSortByName?: () => void;
+  onEditContext?: () => void;
+  hasCollection?: boolean;
   processingStep?: string;
   processingProgress?: number;
 }
@@ -27,10 +30,13 @@ export function Toolbar({
   isProcessing,
   viewMode,
   onViewModeChange,
-  onUploadClick,
+  onImportClick,
   onProcessSelected,
   onDeleteSelected,
   onCreateCollection,
+  onSortByName,
+  onEditContext,
+  hasCollection,
   processingStep,
   processingProgress,
 }: ToolbarProps): React.JSX.Element {
@@ -41,25 +47,15 @@ export function Toolbar({
     <div className="flex flex-col border-b border-slate-200 bg-white">
       {/* Main toolbar row */}
       <div className="flex items-center gap-2 px-4 py-2.5">
-        {/* Upload button */}
+        {/* Import button */}
         <button
-          onClick={onUploadClick}
+          onClick={onImportClick}
           className="flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700"
         >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
-            />
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          Nahrát
+          Vložit
         </button>
 
         {/* New collection */}
@@ -182,6 +178,32 @@ export function Toolbar({
             <span className="ml-1 text-blue-600">· {selectedCount} vybráno</span>
           )}
         </span>
+
+        {/* Collection context */}
+        {hasCollection && onEditContext && (
+          <button
+            onClick={onEditContext}
+            title="Kontext díla"
+            className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+            </svg>
+          </button>
+        )}
+
+        {/* Sort by name */}
+        {onSortByName && (
+          <button
+            onClick={onSortByName}
+            title="Seřadit podle názvu"
+            className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+            </svg>
+          </button>
+        )}
 
         {/* View toggle */}
         <div className="flex overflow-hidden rounded border border-slate-200">

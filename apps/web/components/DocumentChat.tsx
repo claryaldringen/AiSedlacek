@@ -14,9 +14,17 @@ interface ProposedUpdate {
   applied: boolean;
 }
 
+export interface ChatTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  model: string;
+}
+
 interface DocumentChatProps {
   documentId: string;
+  currentFields: { transcription: string; translation: string; context: string };
   onApplyUpdate: (field: string, content: string) => void;
+  onTokenUsage?: (usage: ChatTokenUsage) => void;
 }
 
 function parseUpdates(text: string): { cleanText: string; updates: ProposedUpdate[] } {
@@ -37,7 +45,111 @@ const FIELD_LABELS: Record<string, string> = {
   context: 'Kontext',
 };
 
-export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): React.JSX.Element {
+// Simple word-level diff
+interface DiffSegment {
+  type: 'equal' | 'added' | 'removed';
+  text: string;
+}
+
+function computeWordDiff(oldText: string, newText: string): DiffSegment[] {
+  const oldWords = oldText.split(/(\s+)/);
+  const newWords = newText.split(/(\s+)/);
+
+  // Simple LCS-based diff for reasonable-sized texts
+  const m = oldWords.length;
+  const n = newWords.length;
+
+  // For very long texts, fall back to line-level diff
+  if (m * n > 500_000) {
+    return computeLineDiff(oldText, newText);
+  }
+
+  // Build LCS table
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0) as number[]);
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
+      } else {
+        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+      }
+    }
+  }
+
+  // Backtrack
+  const segments: DiffSegment[] = [];
+  let i = m;
+  let j = n;
+  const result: DiffSegment[] = [];
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      result.push({ type: 'equal', text: oldWords[i - 1]! });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
+      result.push({ type: 'added', text: newWords[j - 1]! });
+      j--;
+    } else {
+      result.push({ type: 'removed', text: oldWords[i - 1]! });
+      i--;
+    }
+  }
+
+  result.reverse();
+
+  // Merge adjacent segments of same type
+  for (const seg of result) {
+    const last = segments[segments.length - 1];
+    if (last && last.type === seg.type) {
+      last.text += seg.text;
+    } else {
+      segments.push({ ...seg });
+    }
+  }
+
+  return segments;
+}
+
+function computeLineDiff(oldText: string, newText: string): DiffSegment[] {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const segments: DiffSegment[] = [];
+
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+
+  // Simple: show removed lines, then added lines, then equal
+  // This is a rough approximation for very long texts
+  let oi = 0;
+  let ni = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
+      segments.push({ type: 'equal', text: oldLines[oi]! + '\n' });
+      oi++;
+      ni++;
+    } else if (oi < oldLines.length && !newSet.has(oldLines[oi]!)) {
+      segments.push({ type: 'removed', text: oldLines[oi]! + '\n' });
+      oi++;
+    } else if (ni < newLines.length && !oldSet.has(newLines[ni]!)) {
+      segments.push({ type: 'added', text: newLines[ni]! + '\n' });
+      ni++;
+    } else {
+      // Both present somewhere — advance the one that's "behind"
+      if (oi < oldLines.length) {
+        segments.push({ type: 'removed', text: oldLines[oi]! + '\n' });
+        oi++;
+      }
+      if (ni < newLines.length) {
+        segments.push({ type: 'added', text: newLines[ni]! + '\n' });
+        ni++;
+      }
+    }
+  }
+  return segments;
+}
+
+export function DocumentChat({ documentId, currentFields, onApplyUpdate, onTokenUsage }: DocumentChatProps): React.JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -54,7 +166,6 @@ export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): 
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Reset chat when document changes
   useEffect(() => {
     setMessages([]);
     setInput('');
@@ -106,7 +217,12 @@ export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): 
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6)) as { type: string; text?: string; error?: string };
+          const data = JSON.parse(line.slice(6)) as {
+            type: string;
+            text?: string;
+            error?: string;
+            usage?: { inputTokens: number; outputTokens: number; model: string };
+          };
 
           if (data.type === 'text' && data.text) {
             assistantText += data.text;
@@ -115,6 +231,8 @@ export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): 
               updated[updated.length - 1] = { role: 'assistant', content: assistantText };
               return updated;
             });
+          } else if (data.type === 'done' && data.usage) {
+            onTokenUsage?.(data.usage);
           } else if (data.type === 'error') {
             throw new Error(data.error ?? 'Neznámá chyba');
           }
@@ -131,7 +249,7 @@ export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): 
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, messages, documentId, streaming]);
+  }, [input, messages, documentId, streaming, onTokenUsage]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -176,6 +294,7 @@ export function DocumentChat({ documentId, onApplyUpdate }: DocumentChatProps): 
               msgIndex={msgIndex}
               appliedUpdates={appliedUpdates}
               onApplyUpdate={handleApplyUpdate}
+              currentFields={currentFields}
               streaming={streaming && msgIndex === messages.length - 1 && msg.role === 'assistant'}
             />
           ))}
@@ -223,12 +342,14 @@ function MessageBubble({
   msgIndex,
   appliedUpdates,
   onApplyUpdate,
+  currentFields,
   streaming,
 }: {
   message: ChatMessage;
   msgIndex: number;
   appliedUpdates: Set<string>;
   onApplyUpdate: (msgIndex: number, updateIndex: number, field: string, content: string) => void;
+  currentFields: { transcription: string; translation: string; context: string };
   streaming: boolean;
 }): React.JSX.Element {
   const isUser = message.role === 'user';
@@ -244,8 +365,6 @@ function MessageBubble({
   }
 
   const { cleanText, updates } = parseUpdates(message.content);
-
-  // Split text around %%UPDATE_N%% placeholders
   const parts = cleanText.split(/(%%UPDATE_\d+%%)/);
 
   return (
@@ -259,6 +378,9 @@ function MessageBubble({
             if (!update) return null;
             const key = `${msgIndex}-${updateIdx}`;
             const isApplied = appliedUpdates.has(key);
+            const original = currentFields[update.field] ?? '';
+            const diff = original ? computeWordDiff(original, update.content) : null;
+            const hasChanges = diff ? diff.some((s) => s.type !== 'equal') : true;
 
             return (
               <div
@@ -281,9 +403,23 @@ function MessageBubble({
                     {isApplied ? 'Použito' : 'Použít'}
                   </button>
                 </div>
-                <div className="prose prose-sm prose-stone max-w-none text-sm">
-                  <ReactMarkdown>{update.content}</ReactMarkdown>
-                </div>
+                {diff && hasChanges ? (
+                  <div className="max-h-80 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+                    {diff.map((seg, si) =>
+                      seg.type === 'equal' ? (
+                        <span key={si}>{seg.text}</span>
+                      ) : seg.type === 'added' ? (
+                        <span key={si} className="bg-green-200 text-green-900">{seg.text}</span>
+                      ) : (
+                        <span key={si} className="bg-red-200 text-red-800 line-through">{seg.text}</span>
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <div className="prose prose-sm prose-stone max-w-none text-sm">
+                    <ReactMarkdown>{update.content}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             );
           }

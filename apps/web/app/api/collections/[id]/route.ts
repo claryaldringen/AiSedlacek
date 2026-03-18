@@ -45,14 +45,22 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
   }
 
-  const { name, description } = body as { name?: unknown; description?: unknown };
+  const { name, description, context, contextUrl } = body as {
+    name?: unknown; description?: unknown; context?: unknown; contextUrl?: unknown;
+  };
 
-  const data: { name?: string; description?: string } = {};
+  const data: { name?: string; description?: string; context?: string; contextUrl?: string | null } = {};
   if (typeof name === 'string' && name.trim() !== '') {
     data.name = name.trim();
   }
   if (typeof description === 'string') {
     data.description = description.trim();
+  }
+  if (typeof context === 'string') {
+    data.context = context;
+  }
+  if ('contextUrl' in (body as object)) {
+    data.contextUrl = typeof contextUrl === 'string' && contextUrl.trim() !== '' ? contextUrl.trim() : null;
   }
 
   if (Object.keys(data).length === 0) {

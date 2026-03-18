@@ -11,6 +11,8 @@ model Collection {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
+  context     String   @default("")  // Markdown context about the manuscript/work
+  contextUrl  String?                // Source URL of the context
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   pages       Page[]

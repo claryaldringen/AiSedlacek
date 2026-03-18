@@ -49,7 +49,7 @@ interface FileGridProps {
   /** Delete selected pages */
   onDeleteSelected: () => void;
   /** Open upload dialog */
-  onUploadClick: () => void;
+  onImportClick: () => void;
   /** The item that currently has keyboard focus (shows focus ring) */
   focusedItemId?: string | null;
   /** Called whenever the actual column count of the grid changes */
@@ -315,7 +315,7 @@ export function FileGrid({
   onDeselectAll,
   onProcessSelected,
   onDeleteSelected,
-  onUploadClick,
+  onImportClick,
   focusedItemId,
   onColumnsChange,
 }: FileGridProps): React.JSX.Element {
@@ -333,6 +333,7 @@ export function FileGrid({
   const rubberBandRef = useRef<RubberBandRect | null>(null);
   const rubberBandCtrlRef = useRef(false);
   const rubberBandInitialSelectionRef = useRef<Set<string>>(new Set());
+  const rubberBandUsedRef = useRef(false);
 
   // Container ref for rubber band and item position tracking
   const containerRef = useRef<HTMLDivElement>(null);
@@ -490,10 +491,10 @@ export function FileGrid({
       {
         label: 'Nahrat',
         icon: <UploadIcon />,
-        onClick: onUploadClick,
+        onClick: onImportClick,
       },
     ];
-  }, [onSelectAll, onUploadClick]);
+  }, [onSelectAll, onImportClick]);
 
   // ---------- Right-click handler ----------
   const handleContextMenu = useCallback(
@@ -562,6 +563,7 @@ export function FileGrid({
       rubberBandInitialSelectionRef.current = rubberBandCtrlRef.current
         ? new Set(selected)
         : new Set<string>();
+      rubberBandUsedRef.current = false;
 
       // We start tracking but don't show the band until mouse moves a bit
       const handleMouseMove = (moveE: MouseEvent): void => {
@@ -576,6 +578,7 @@ export function FileGrid({
         const dist = Math.abs(band.currentX - band.startX) + Math.abs(band.currentY - band.startY);
 
         if (dist > 5) {
+          rubberBandUsedRef.current = true;
           setRubberBand({ ...band });
 
           // Compute which items intersect
@@ -615,6 +618,11 @@ export function FileGrid({
   // ---------- Click on empty space = deselect ----------
   const handleContainerClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>): void => {
+      // Don't deselect if we just finished a rubber band selection
+      if (rubberBandUsedRef.current) {
+        rubberBandUsedRef.current = false;
+        return;
+      }
       const target = e.target as HTMLElement;
       // Only deselect if clicking directly on the grid background
       if (target === containerRef.current || target.classList.contains('filegrid-bg')) {
