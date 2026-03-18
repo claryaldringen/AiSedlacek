@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { parseOcrJson } from '@/lib/adapters/ocr/claude-vision';
 import { createVersion } from '@/lib/infrastructure/versioning';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -10,14 +11,21 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Returns the updated document if successful, or 422 if parsing still fails.
  */
 export async function POST(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: { page: { select: { id: true } } },
+    include: { page: { select: { id: true, userId: true } } },
   });
 
-  if (!doc) {
+  if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -9,6 +10,13 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Saves the extracted context to the collection.
  */
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   let body: unknown;
@@ -24,7 +32,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   }
 
   const collection = await prisma.collection.findUnique({ where: { id } });
-  if (!collection) {
+  if (!collection || collection.userId !== userId) {
     return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
   }
 

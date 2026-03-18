@@ -2,10 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   let body: unknown;
@@ -23,9 +31,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: { translations: { where: { language: targetLang } } },
+    include: { translations: { where: { language: targetLang } }, page: { select: { userId: true } } },
   });
-  if (!doc) {
+  if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 

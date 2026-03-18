@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { processWithClaude } from '@/lib/adapters/ocr/claude-vision';
 import { createVersion } from '@/lib/infrastructure/versioning';
+import { requireUserId } from '@/lib/auth';
 
 function sendEvent(
   controller: ReadableStreamDefaultController,
@@ -15,6 +16,13 @@ function sendEvent(
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -30,6 +38,17 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
     return Response.json({ error: 'pageIds musí být neprázdné pole' }, { status: 400 });
+  }
+
+  // Verify all pages belong to the current user
+  const ownedPages = await prisma.page.findMany({
+    where: { id: { in: pageIds as string[] }, userId },
+    select: { id: true },
+  });
+  const ownedIds = new Set(ownedPages.map((p) => p.id));
+  const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
+  if (unauthorizedIds.length > 0) {
+    return Response.json({ error: 'Některé stránky nepatří přihlášenému uživateli' }, { status: 403 });
   }
 
   const targetLang =

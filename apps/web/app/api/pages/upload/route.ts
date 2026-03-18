@@ -3,11 +3,19 @@ import crypto from 'crypto';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { requireUserId } from '@/lib/auth';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -54,8 +62,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const buffer = Buffer.from(await file.arrayBuffer());
       const hash = crypto.createHash('sha256').update(buffer).digest('hex');
 
-      // Check for duplicate by hash
-      const existing = await prisma.page.findFirst({ where: { hash } });
+      // Check for duplicate by hash (scoped to user)
+      const existing = await prisma.page.findFirst({ where: { hash, userId } });
       if (existing) {
         // If assigning to a collection and existing page isn't in one, update it
         if (resolvedCollectionId && !existing.collectionId) {
@@ -94,6 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       const page = await prisma.page.create({
         data: {
+          userId,
           filename,
           hash,
           imageUrl: storageResult.url,

@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   const page = await prisma.page.findUnique({
@@ -19,7 +27,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     },
   });
 
-  if (!page) {
+  if (!page || page.userId !== userId) {
     return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
   }
 
@@ -27,7 +35,19 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
+
+  const page = await prisma.page.findUnique({ where: { id } });
+  if (!page || page.userId !== userId) {
+    return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+  }
 
   let body: unknown;
   try {
@@ -92,11 +112,18 @@ export async function DELETE(
   _request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   try {
     const page = await prisma.page.findUnique({ where: { id } });
-    if (!page) {
+    if (!page || page.userId !== userId) {
       return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
     }
 

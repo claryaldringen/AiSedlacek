@@ -2,6 +2,7 @@
 
 import { Sidebar, type Collection } from './Sidebar';
 import { Breadcrumbs } from './Breadcrumbs';
+import { UserMenu } from './UserMenu';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -43,8 +44,8 @@ export function AppShell({
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Version/info badge */}
-        <span className="text-xs text-slate-500">OCR + AI překlad</span>
+        {/* User menu */}
+        <UserMenu />
       </header>
 
       {/* Body: sidebar + content */}

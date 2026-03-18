@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
+import { requireUserId } from '@/lib/auth';
 
 export async function GET(): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const collections = await prisma.collection.findMany({
+    where: { userId },
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { pages: true } },
@@ -13,6 +22,13 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -32,6 +48,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const collection = await prisma.collection.create({
     data: {
+      userId,
       name: name.trim(),
       description: typeof description === 'string' ? description.trim() : '',
     },

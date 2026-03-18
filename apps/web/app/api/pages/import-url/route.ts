@@ -3,11 +3,19 @@ import crypto from 'crypto';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { requireUserId } from '@/lib/auth';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp', 'image/gif'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -73,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // Deduplicate by hash
   const hash = crypto.createHash('sha256').update(buffer).digest('hex');
-  const existing = await prisma.page.findFirst({ where: { hash } });
+  const existing = await prisma.page.findFirst({ where: { hash, userId } });
   if (existing) {
     return NextResponse.json(
       { error: 'Duplicitní obrázek – již existuje v knihovně', existingPageId: existing.id },
@@ -120,6 +128,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const page = await prisma.page.create({
     data: {
+      userId,
       filename: urlFilename,
       displayName: typeof displayName === 'string' && displayName.trim() !== '' ? displayName.trim() : urlFilename.replace(/\.[^.]+$/, ''),
       hash,

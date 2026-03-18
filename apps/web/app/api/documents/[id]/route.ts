@@ -1,18 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: { translations: true, glossary: true },
+    include: { translations: true, glossary: true, page: { select: { userId: true } } },
   });
 
-  if (!doc) {
+  if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 
@@ -20,6 +28,13 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   let body: unknown;
@@ -36,12 +51,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     context?: string;
   };
 
-  // Fetch current state for versioning
+  // Fetch current state for versioning and ownership check
   const current = await prisma.document.findUnique({
     where: { id },
-    include: { translations: true },
+    include: { translations: true, page: { select: { userId: true } } },
   });
-  if (!current) {
+  if (!current || current.page.userId !== userId) {
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 
@@ -85,7 +100,22 @@ export async function DELETE(
   _request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
+
+  const doc = await prisma.document.findUnique({
+    where: { id },
+    include: { page: { select: { userId: true } } },
+  });
+  if (!doc || doc.page.userId !== userId) {
+    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+  }
 
   try {
     await prisma.document.delete({ where: { id } });

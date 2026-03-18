@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import fs from 'fs/promises';
 import { prisma } from '@/lib/infrastructure/db';
 import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -43,6 +44,13 @@ Pokud uživatel žádá jen informaci (ne opravu), odpověz normálně bez updat
 Odpovídej v jazyce, kterým píše uživatel.`;
 
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<Response> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   let body: unknown;
@@ -63,11 +71,11 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     include: {
       translations: true,
       glossary: true,
-      page: { select: { imageUrl: true, mimeType: true } },
+      page: { select: { imageUrl: true, mimeType: true, userId: true } },
     },
   });
 
-  if (!doc) {
+  if (!doc || doc.page.userId !== userId) {
     return Response.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 

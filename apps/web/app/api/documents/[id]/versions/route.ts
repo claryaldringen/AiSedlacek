@@ -1,10 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
+
+  // Verify document ownership through page
+  const doc = await prisma.document.findUnique({
+    where: { id },
+    include: { page: { select: { userId: true } } },
+  });
+  if (!doc || doc.page.userId !== userId) {
+    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+  }
 
   const versions = await prisma.documentVersion.findMany({
     where: { documentId: id },

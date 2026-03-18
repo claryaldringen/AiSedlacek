@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
+import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
 
   const collection = await prisma.collection.findUnique({
@@ -24,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     },
   });
 
-  if (!collection) {
+  if (!collection || collection.userId !== userId) {
     return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
   }
 
@@ -32,7 +40,19 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
+
+  const collection = await prisma.collection.findUnique({ where: { id } });
+  if (!collection || collection.userId !== userId) {
+    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+  }
 
   let body: unknown;
   try {
@@ -82,7 +102,19 @@ export async function DELETE(
   _request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
   const { id } = await params;
+
+  const collection = await prisma.collection.findUnique({ where: { id } });
+  if (!collection || collection.userId !== userId) {
+    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+  }
 
   try {
     // Orphan pages: set collectionId to null (done by onDelete: SetNull in schema)
