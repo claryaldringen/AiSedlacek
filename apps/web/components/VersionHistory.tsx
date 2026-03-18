@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Version {
   id: string;
@@ -127,7 +128,7 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
                       <div className="border-t border-slate-100">
                         <div className="max-h-60 overflow-y-auto p-3">
                           <div className="prose prose-stone prose-xs max-w-none">
-                            <ReactMarkdown>{v.content}</ReactMarkdown>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{v.content}</ReactMarkdown>
                           </div>
                         </div>
                         {onRestore && (

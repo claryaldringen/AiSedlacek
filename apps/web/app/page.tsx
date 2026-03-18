@@ -12,6 +12,8 @@ import { CollectionContextDialog } from '@/components/CollectionContextDialog';
 import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
@@ -32,6 +34,8 @@ export default function HomePage(): React.JSX.Element {
   // Dialogs
   const [uploadOpen, setUploadOpen] = useState(false);
   const [contextDialogOpen, setContextDialogOpen] = useState(false);
+  const [fixingContexts, setFixingContexts] = useState(false);
+  const [fixingContextsProgress, setFixingContextsProgress] = useState<string | null>(null);
 
   // Processing
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
@@ -271,6 +275,39 @@ export default function HomePage(): React.JSX.Element {
   }, [loadPages, selectedCollectionId]);
 
   // ---- Collection navigation (URL-based for browser back/forward) ----
+  const fixDocumentContexts = useCallback(async (collectionId: string): Promise<void> => {
+    setFixingContexts(true);
+    setFixingContextsProgress(null);
+    try {
+      const res = await fetch(`/api/collections/${collectionId}/fix-document-contexts`, { method: 'POST' });
+      if (!res.ok || !res.body) {
+        setError('Oprava kontextů selhala');
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const eventStr of events) {
+          const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
+          if (!match) continue;
+          const data = JSON.parse(match[2]!) as { message?: string; progress?: number };
+          if (data.message) setFixingContextsProgress(data.message);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Chyba');
+    } finally {
+      setFixingContexts(false);
+      setFixingContextsProgress(null);
+    }
+  }, []);
+
   const handleCollectionSelect = useCallback(
     (id: string | null): void => {
       if (id === null) {
@@ -813,6 +850,44 @@ export default function HomePage(): React.JSX.Element {
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
       >
+        {/* Collection context card */}
+        {selectedCollection?.context && (
+          <div className="mx-4 mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <details>
+              <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                Kontext díla: {selectedCollection.name}
+              </summary>
+              <div className="border-t border-slate-100 px-4 py-3 prose prose-sm prose-stone max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedCollection.context}</ReactMarkdown>
+              </div>
+              <div className="border-t border-slate-100 px-4 py-2.5">
+                <button
+                  onClick={() => void fixDocumentContexts(selectedCollection.id)}
+                  disabled={fixingContexts}
+                  className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {fixingContexts ? (
+                    <>
+                      <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      {fixingContextsProgress ?? 'Opravuji…'}
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                      </svg>
+                      Opravit kontext dokumentů podle kontextu díla
+                    </>
+                  )}
+                </button>
+              </div>
+            </details>
+          </div>
+        )}
+
         {loadingPages ? (
           <div className="flex items-center justify-center py-20">
             <svg className="h-6 w-6 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">

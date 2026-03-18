@@ -60,14 +60,16 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   }
 
   // Use Claude to extract relevant manuscript context
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    messages: [
-      {
-        role: 'user',
-        content: `Z následujícího textu webové stránky extrahuj informace relevantní pro popis historického rukopisu nebo díla. Zaměř se na:
+  let response;
+  try {
+    const client = new Anthropic();
+    response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: `Z následujícího textu webové stránky extrahuj informace relevantní pro popis historického rukopisu nebo díla. Zaměř se na:
 
 - Název díla
 - Autor / původ
@@ -87,8 +89,12 @@ URL: ${url}
 Text stránky:
 ${pageContent}`,
       },
-    ],
-  });
+      ],
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Chyba AI';
+    return NextResponse.json({ error: `Extrakce kontextu selhala: ${message}` }, { status: 422 });
+  }
 
   const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
 

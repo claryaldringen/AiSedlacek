@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface CollectionContextDialogProps {
   isOpen: boolean;
@@ -67,7 +68,12 @@ export function CollectionContextDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: contextUrl.trim() }),
       });
-      const data = (await res.json()) as { context?: string; error?: string };
+      let data: { context?: string; error?: string };
+      try {
+        data = (await res.json()) as { context?: string; error?: string };
+      } catch {
+        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+      }
       if (!res.ok) throw new Error(data.error ?? 'Stahování selhalo');
       setContext(data.context ?? '');
       setEditing(false);
@@ -145,7 +151,7 @@ export function CollectionContextDialog({
             />
           ) : context ? (
             <div className="prose prose-sm prose-stone max-w-none">
-              <ReactMarkdown>{context}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{context}</ReactMarkdown>
             </div>
           ) : (
             <p className="text-center text-sm text-slate-400">Žádný kontext. Zadejte text nebo stáhněte z URL.</p>

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -417,7 +418,7 @@ function MessageBubble({
                   </div>
                 ) : (
                   <div className="prose prose-sm prose-stone max-w-none text-sm">
-                    <ReactMarkdown>{update.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{update.content}</ReactMarkdown>
                   </div>
                 )}
               </div>
@@ -430,7 +431,7 @@ function MessageBubble({
           return (
             <div key={i} className="rounded-lg bg-stone-100 px-4 py-2.5 text-sm text-stone-800">
               <div className="prose prose-sm prose-stone max-w-none">
-                <ReactMarkdown>{trimmed}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{trimmed}</ReactMarkdown>
               </div>
               {streaming && i === parts.length - 1 && (
                 <span className="inline-block h-4 w-1 animate-pulse bg-stone-400" />

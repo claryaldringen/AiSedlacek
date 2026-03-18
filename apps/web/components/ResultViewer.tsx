@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
 
@@ -117,7 +118,7 @@ function EditableSection({
         </div>
       ) : (
         <div className="prose prose-stone prose-sm max-w-none p-6">
-          <ReactMarkdown>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       )}
     </div>

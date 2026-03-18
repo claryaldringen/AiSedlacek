@@ -37,7 +37,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     response = await fetch(parsedUrl.toString(), {
       headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Nepodařilo se stáhnout';

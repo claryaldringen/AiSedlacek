@@ -158,7 +158,12 @@ export function ImportDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, collectionId, displayName }),
       });
-      const data = (await res.json()) as { page?: UploadedPage; error?: string };
+      let data: { page?: UploadedPage; error?: string };
+      try {
+        data = (await res.json()) as { page?: UploadedPage; error?: string };
+      } catch {
+        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+      }
       if (!res.ok) throw new Error(data.error ?? 'Import selhal');
       return (data.page as UploadedPage) ?? null;
     },
