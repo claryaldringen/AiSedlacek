@@ -311,9 +311,9 @@ export default function HomePage(): React.JSX.Element {
   const handleCollectionSelect = useCallback(
     (id: string | null): void => {
       if (id === null) {
-        router.push('/');
+        router.push('/workspace');
       } else {
-        router.push(`/?collection=${id}`);
+        router.push(`/workspace?collection=${id}`);
       }
       setPanelResult(null);
     },

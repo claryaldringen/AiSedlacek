@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 export default function LoginPage(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') ?? '/';
+  const callbackUrl = searchParams.get('callbackUrl') ?? '/workspace';
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
