@@ -5,7 +5,9 @@ export default auth((req: NextRequest & { auth: unknown }) => {
   const isPublic =
     req.nextUrl.pathname === '/' ||
     req.nextUrl.pathname.startsWith('/login') ||
-    req.nextUrl.pathname.startsWith('/api/auth');
+    req.nextUrl.pathname.startsWith('/view') ||
+    req.nextUrl.pathname.startsWith('/api/auth') ||
+    req.nextUrl.pathname.startsWith('/api/public');
   if (!req.auth && !isPublic) {
     const loginUrl = new URL('/login', req.nextUrl.origin);
     loginUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
