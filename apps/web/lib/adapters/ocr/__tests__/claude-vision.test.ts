@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectMediaType, parseOcrJson } from '../claude-vision.js';
+import { detectMediaType, parseOcrJson, parseOcrJsonBatch } from '../claude-vision.js';
 
 const VALID_JSON = {
   transcription: 'Starý text',
@@ -91,5 +91,65 @@ describe('parseOcrJson', () => {
     const result = parseOcrJson(raw);
     expect(result.transcription).toContain('Ahoj');
     expect(result.transcription).toContain('Sbohem');
+  });
+});
+
+describe('parseOcrJsonBatch', () => {
+  const makeResult = (index: number) => ({
+    imageIndex: index,
+    transcription: `text ${index}`,
+    detectedLanguage: 'la',
+    translation: `překlad ${index}`,
+    translationLanguage: 'cs',
+    context: `kontext ${index}`,
+    glossary: [{ term: 'foo', definition: 'bar' }],
+  });
+
+  it('parses valid JSONL with multiple lines', () => {
+    const input = `${JSON.stringify(makeResult(0))}\n${JSON.stringify(makeResult(1))}`;
+    const results = parseOcrJsonBatch(input);
+    expect(results).toHaveLength(2);
+    expect(results[0]!.index).toBe(0);
+    expect(results[1]!.index).toBe(1);
+    expect(results[0]!.result.transcription).toBe('text 0');
+  });
+
+  it('skips invalid lines and parses the rest', () => {
+    const input = `${JSON.stringify(makeResult(0))}\nNOT VALID JSON\n${JSON.stringify(makeResult(2))}`;
+    const results = parseOcrJsonBatch(input);
+    expect(results).toHaveLength(2);
+    expect(results[0]!.index).toBe(0);
+    expect(results[1]!.index).toBe(2);
+  });
+
+  it('falls back to positional index if imageIndex is missing', () => {
+    const noIndex = { transcription: 'text', detectedLanguage: 'la', translation: 'překlad', translationLanguage: 'cs', context: '', glossary: [] };
+    const input = `${JSON.stringify(noIndex)}\n${JSON.stringify(noIndex)}`;
+    const results = parseOcrJsonBatch(input);
+    expect(results[0]!.index).toBe(0);
+    expect(results[1]!.index).toBe(1);
+  });
+
+  it('handles markdown fences around JSONL', () => {
+    const input = '```json\n' + JSON.stringify(makeResult(0)) + '\n' + JSON.stringify(makeResult(1)) + '\n```';
+    const results = parseOcrJsonBatch(input);
+    expect(results).toHaveLength(2);
+  });
+
+  it('handles single result (1-page batch)', () => {
+    const input = JSON.stringify(makeResult(0));
+    const results = parseOcrJsonBatch(input);
+    expect(results).toHaveLength(1);
+  });
+
+  it('returns empty array for completely invalid input', () => {
+    const results = parseOcrJsonBatch('totally broken');
+    expect(results).toHaveLength(0);
+  });
+
+  it('truncates results to maxResults if more than expected', () => {
+    const input = `${JSON.stringify(makeResult(0))}\n${JSON.stringify(makeResult(1))}\n${JSON.stringify(makeResult(2))}`;
+    const results = parseOcrJsonBatch(input, 2);
+    expect(results).toHaveLength(2);
   });
 });

@@ -19,7 +19,7 @@ IMPORTANT: Return your response as valid JSON with this exact structure:
   "detectedLanguage": "ISO language code of the original, e.g. cs-old, de-old, la",
   "translation": "full translation in markdown (preserve structure, headings, line breaks matching the original)",
   "translationLanguage": "ISO code of translation language, e.g. cs, en, de",
-  "context": "brief contextual explanation in markdown",
+  "context": "page-specific context only: identify biblical quotes, literary references, named persons, places, or events mentioned on THIS page. Do NOT repeat general information about the work (author, date, genre) — that is already known from the collection context. Focus on what helps the reader understand this specific page.",
   "glossary": [
     {"term": "term", "definition": "definition"}
   ]
@@ -64,6 +64,47 @@ export function parseOcrJson(raw: string): StructuredOcrResult {
     const fixed = fixJsonString(jsonStr);
     return JSON.parse(fixed) as StructuredOcrResult;
   }
+}
+
+export function parseOcrJsonBatch(
+  raw: string,
+  maxResults?: number,
+): { index: number; result: StructuredOcrResult }[] {
+  let text = raw.trim();
+
+  // Strip markdown fences
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch) {
+    text = fenceMatch[1] ?? text;
+  }
+
+  const lines = text.split('\n').filter((line) => line.trim().length > 0);
+  const results: { index: number; result: StructuredOcrResult }[] = [];
+  let positionalIndex = 0;
+
+  for (const line of lines) {
+    if (maxResults !== undefined && results.length >= maxResults) break;
+    try {
+      const parsed = parseOcrJson(line);
+      // Try to extract imageIndex from raw JSON
+      let imageIndex: number | undefined;
+      try {
+        const rawObj = JSON.parse(line.trim().startsWith('{') ? line.trim() : '{}');
+        if (typeof rawObj.imageIndex === 'number') {
+          imageIndex = rawObj.imageIndex;
+        }
+      } catch {
+        // ignore — use positional fallback
+      }
+      results.push({ index: imageIndex ?? positionalIndex, result: parsed });
+      positionalIndex++;
+    } catch {
+      // Skip unparseable lines (e.g. extra text from model)
+      console.warn('[Claude Batch] Skipping unparseable JSONL line:', line.slice(0, 80));
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -185,6 +226,7 @@ export async function processWithClaude(
   const stream = client.messages.stream({
     model: 'claude-opus-4-6',
     max_tokens: 8192,
+    temperature: 0.3,
     system: SYSTEM_PROMPT,
     messages: [
       {
