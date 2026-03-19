@@ -38,6 +38,7 @@ export default function HomePage(): React.JSX.Element {
   const [fixingContextsProgress, setFixingContextsProgress] = useState<string | null>(null);
 
   // Processing
+  const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>('transcribe+translate');
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
   const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
@@ -381,7 +382,7 @@ export default function HomePage(): React.JSX.Element {
       const response = await fetch('/api/pages/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds, language: 'cs' }),
+        body: JSON.stringify({ pageIds, language: 'cs', mode: processingMode }),
       });
 
       if (!response.ok || !response.body) {
@@ -899,6 +900,8 @@ export default function HomePage(): React.JSX.Element {
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}
         processingProgress={processingProgress}
+        processingMode={processingMode}
+        onProcessingModeChange={setProcessingMode}
       />
 
       {/* Error banner */}

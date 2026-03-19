@@ -20,6 +20,8 @@ interface ToolbarProps {
   hasCollection?: boolean;
   processingStep?: string;
   processingProgress?: number;
+  processingMode: 'transcribe+translate' | 'translate';
+  onProcessingModeChange: (mode: 'transcribe+translate' | 'translate') => void;
 }
 
 export function Toolbar({
@@ -39,6 +41,8 @@ export function Toolbar({
   hasCollection,
   processingStep,
   processingProgress,
+  processingMode,
+  onProcessingModeChange,
 }: ToolbarProps): React.JSX.Element {
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
@@ -181,6 +185,16 @@ export function Toolbar({
         {/* Selected actions */}
         {selectedCount > 0 && (
           <>
+            <select
+              value={processingMode}
+              onChange={(e) => onProcessingModeChange(e.target.value as 'transcribe+translate' | 'translate')}
+              disabled={isProcessing}
+              className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-40"
+            >
+              <option value="transcribe+translate">Transkripce + Překlad</option>
+              <option value="translate">Pouze překlad</option>
+            </select>
+
             <button
               onClick={onProcessSelected}
               disabled={pendingSelectedCount === 0 || isProcessing}
