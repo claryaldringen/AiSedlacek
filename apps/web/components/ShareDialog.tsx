@@ -56,14 +56,13 @@ export function ShareDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPublic: newIsPublic }),
       });
+      const data = (await res.json()) as { error?: string; isPublic?: boolean; slug?: string | null };
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? 'Chyba při ukládání');
       }
-      const updated = (await res.json()) as { isPublic: boolean; slug: string | null };
-      setIsPublic(updated.isPublic);
-      setSlug(updated.slug ?? '');
-      onUpdate(updated.isPublic, updated.slug);
+      setIsPublic(data.isPublic ?? newIsPublic);
+      setSlug(data.slug ?? '');
+      onUpdate(data.isPublic ?? newIsPublic, data.slug ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chyba');
     } finally {
@@ -80,13 +79,12 @@ export function ShareDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug: slug.trim() }),
       });
+      const data = (await res.json()) as { error?: string; isPublic?: boolean; slug?: string | null };
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? 'Chyba při ukládání');
       }
-      const updated = (await res.json()) as { isPublic: boolean; slug: string | null };
-      setSlug(updated.slug ?? '');
-      onUpdate(updated.isPublic, updated.slug);
+      setSlug(data.slug ?? '');
+      onUpdate(data.isPublic ?? isPublic, data.slug ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chyba');
     } finally {
