@@ -28,10 +28,14 @@ Kombinace dvou strategií:
 ### Automatické dělení do dávek
 
 1. Uživatel vybere stránky (nebo celé kolekce) ke zpracování
-2. Aplikace seřadí stránky podle `order` v rámci kolekce
-3. Dávkovač odhadne tokeny per obrázek: `file_size_bytes / 750 + 258` (overhead)
-4. Plní dávku dokud nepřekročí **budget 150K input tokenů** (konzervativní limit pod 200K — prostor pro system prompt, kontext kolekce, textový kontext z předchozích dávek)
-5. Minimální dávka: 1 stránka, maximální: ~25–30 stránek (záleží na velikosti obrázků)
+2. Pre-filtering: odfiltrovat stránky s existujícím dokumentem (hash deduplication) — emitovat `page_done` s `cached: true`
+3. Aplikace seřadí zbývající stránky podle `order` v rámci kolekce; stránky bez kolekce se řadí dle `createdAt`
+4. Dávkovač odhadne tokeny per obrázek: `file_size_bytes / 750 + 258` (overhead). Toto je aproximace — skutečný token count závisí na rozlišení obrázku (tile-based). Pokud API vrátí context-length-exceeded error, dávka se rozpadne na menší (viz fallback)
+5. **Duální token budget:**
+   - Input budget: **150K tokenů** (konzervativní limit pod 200K — prostor pro system prompt, kontext kolekce, textový kontext z předchozích dávek)
+   - Output budget: `max_tokens / 2500` stránek (průměrný output per stránka ~2500 tokenů). Skutečný `max_tokens` závisí na API limitu modelu — ověřit při implementaci
+6. Velikost dávky = minimum z input budgetu a output budgetu
+7. Minimální dávka: 1 stránka
 
 ### Mezi-dávkový kontext
 
@@ -44,7 +48,9 @@ Kombinace dvou strategií:
 Pokud uživatel zpracovává 1 stránku a v kolekci existují dříve zpracované stránky s nižším `order`:
 - Vezmou se transkripce posledních **3 předchozích stránek** (dle `order`)
 - Přidají se do promptu jako `Kontext z předchozích stránek rukopisu: ...`
-- Platí i pro reparse (`/api/documents/[id]/reparse`)
+- Platí i pro regeneraci (smazání dokumentu + nové zpracování přes `/api/pages/process`)
+
+> **Poznámka:** Endpoint `/api/documents/[id]/reparse` pouze re-parsuje uložený `rawResponse` bez nového LLM volání — kontext se tam nepřidává. Kontext z předchozích stránek se uplatní pouze při novém zpracování (process/regenerate).
 
 ---
 
@@ -56,41 +62,55 @@ Rozšíření stávajícího adaptéru v `apps/web/lib/adapters/ocr/claude-visio
 
 ```typescript
 processWithClaudeBatch(
-  images: { buffer: Buffer; pageId: string }[],
+  images: { buffer: Buffer; pageId: string; index: number }[],
   userPrompt: string,
-  previousContext?: string,  // souhrn z předchozí dávky
-  onProgress?: (outputTokens: number, estimatedTotal: number) => void,
+  options?: {
+    collectionContext?: string,   // kontext díla (z Collection.context)
+    previousContext?: string,     // souhrn z předchozí dávky
+    onProgress?: (outputTokens: number, estimatedTotal: number) => void,
+  },
 )
 ```
 
-Stávající `processWithClaude` zůstane pro zpracování jednotlivých stránek a fallback.
+Stávající `processWithClaude` zůstane pro zpracování jednotlivých stránek a fallback. Získá nový volitelný parametr `previousContext` pro kontext z předchozích stránek.
 
 ### Struktura zprávy do Claude API
 
 ```
-system: paleografie expert prompt (stávající) + instrukce pro pole výsledků
+system: paleografie expert prompt (stávající) + instrukce pro JSONL výstup
 user: [
   image_1, image_2, ..., image_N,   // N obrázků jako content bloky
   text: "Kontext z předchozích stránek: ...",  // pokud existuje
   text: "Kontext díla: ...",                    // kolekce context
-  text: "Přepiš text z každého obrázku. Vrať pole JSON objektů, jeden per obrázek, ve stejném pořadí."
+  text: "Pro každý obrázek přepiš text. Výsledky vrať jako JSONL — jeden JSON objekt per řádek, ve stejném pořadí jako obrázky. Každý objekt musí obsahovat pole 'imageIndex' (0-based)."
 ]
 ```
 
-### Výstupní formát
+### Výstupní formát — JSONL (ne JSON pole)
 
-```json
-[
-  { "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [...] },
-  { "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [...] }
-]
+Místo JSON pole používáme **JSONL** (jeden JSON objekt per řádek). Výhody:
+- Odolné vůči truncation — parsování řádek po řádku, částečný výsledek se neztrácí
+- Každý řádek se parsuje nezávisle — jeden chybný řádek nepokazí ostatní
+
+```
+{"imageIndex": 0, "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [...]}
+{"imageIndex": 1, "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [...]}
 ```
 
-Stejná `StructuredOcrResult` struktura, zabalená v poli.
+### Nová funkce `parseOcrJsonBatch`
+
+```typescript
+parseOcrJsonBatch(raw: string): { index: number; result: StructuredOcrResult }[]
+```
+
+- Rozdělí výstup po řádcích
+- Každý řádek parsuje nezávisle přes stávající `parseOcrJson` + extrakce `imageIndex`
+- Chybné řádky přeskočí (loguje warning), úspěšné vrátí
+- Párování se stránkami přes `imageIndex`, s fallbackem na pozici pokud `imageIndex` chybí
 
 ### Dynamické `max_tokens`
 
-`8192 * počet_stránek`, maximum 32768 (API limit).
+`2500 * počet_stránek`, minimum 8192. Horní limit závisí na API limitu modelu — ověřit při implementaci.
 
 ---
 
@@ -107,17 +127,21 @@ Pokus o zpracování celé dávky
     ├─ Úspěch (N výsledků) → uložit, pokračovat
     │
     ├─ Částečný úspěch (M < N výsledků)
-    │   → uložit M úspěšných
+    │   → uložit M úspěšných (párovat přes imageIndex)
     │   → zbylé N-M stránek rozdělit na menší dávky → retry
     │
-    └─ Totální selhání (API error, JSON parse error)
+    ├─ Context-length-exceeded (API 400 error)
+    │   → rozdělit dávku na poloviny → retry
+    │
+    └─ Totální selhání (jiný API error, kompletní JSON parse error)
         → rozdělit dávku na poloviny → retry
         → pokud i poloviny selžou → zpracovat jednotlivě (stávající processWithClaude)
 ```
 
 ### Párování výsledků se stránkami
 
-- Párování podle pořadí (obrázek 1 = výsledek 1)
+- Primární párování přes `imageIndex` v JSONL výstupu
+- Fallback na pozici pokud `imageIndex` chybí
 - Méně výsledků než obrázků → spárovat co máme, zbytek do retry
 - Více výsledků než obrázků → oříznout na počet obrázků
 - **Výsledky z částečně úspěšné dávky se vždy uloží, nikdy se nezahazují**
@@ -133,7 +157,7 @@ Vztah Page → Document zůstává 1:1.
 ### Rozšíření
 
 - `Document.batchId: String?` — identifikátor dávky pro debug a audit
-- Stávající `model`, `inputTokens`, `outputTokens`, `processingTimeMs` se vyplní per dokument (tokeny z dávky se rozpočítají rovnoměrně)
+- Stávající `model`, `inputTokens`, `outputTokens`, `processingTimeMs` se vyplní per dokument (tokeny z dávky se rozpočítají: input tokeny dle odhadu velikosti obrázku, output tokeny dle délky JSONL řádku)
 
 ---
 
@@ -154,12 +178,14 @@ Aplikace rozhodne o velikosti dávek automaticky. Uživatel nemusí nic nastavov
 ### SSE eventy
 
 Stávající eventy zůstávají:
-- `page_progress` — průběh celé dávky (tokeny)
+- `batch_progress` — průběh aktuální dávky (celkové tokeny / odhad). Nahrazuje per-page `page_progress` v rámci dávky — během batch zpracování nelze určit, na které stránce model právě pracuje
 - `page_done` — emituje se per stránka po uložení do DB
 - `page_error` — per stránka při selhání
 
 Nový event:
-- `batch_info` — informace o rozdělení do dávek (číslo dávky, počet stránek) pro UI progress
+- `batch_info` — informace o rozdělení do dávek (číslo dávky, celkový počet dávek, počet stránek v dávce) pro UI progress
+
+Klient musí rozpoznat nové eventy `batch_info` a `batch_progress` a zobrazit odpovídající UI.
 
 ---
 
@@ -167,8 +193,26 @@ Nový event:
 
 - 1 stránka bez předchůdců v kolekci → stávající `processWithClaude` (bez batch overhead)
 - 1 stránka s předchůdci → stávající `processWithClaude` + textový kontext posledních 3 stránek
-- Reparse → stávající flow + textový kontext posledních 3 stránek
+- Regenerace (delete + process) → nové zpracování s textovým kontextem posledních 3 stránek
+- Reparse (`/api/documents/[id]/reparse`) → beze změn (re-parsuje uložený rawResponse)
 - Retranslace, chat → beze změn
+
+---
+
+## Prompt šablony
+
+Batch system prompt (přidá se do `packages/shared/src/prompts.ts`):
+
+```typescript
+export const BATCH_OCR_INSTRUCTION = `You will receive multiple manuscript page images. Process each one independently but use context from all pages to improve accuracy.
+
+Return results as JSONL (one JSON object per line), in the same order as the images. Each object MUST include an "imageIndex" field (0-based, matching the image order).
+
+Each line must be a valid JSON object with this structure:
+{"imageIndex": 0, "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [{"term": "...", "definition": "..."}]}
+
+Use \\n for newlines inside JSON strings. Return ONLY the JSONL lines, no markdown fences, no extra text.`;
+```
 
 ---
 
@@ -176,9 +220,8 @@ Nový event:
 
 | Soubor | Změna |
 |--------|-------|
-| `apps/web/lib/adapters/ocr/claude-vision.ts` | Nová `processWithClaudeBatch`, úprava `processWithClaude` pro přijetí `previousContext` |
-| `apps/web/app/api/pages/process/route.ts` | Batching logika, dělení stránek do dávek, mezi-dávkový kontext, nové SSE eventy |
-| `apps/web/app/api/documents/[id]/reparse/route.ts` | Přidání textového kontextu z předchozích stránek |
+| `apps/web/lib/adapters/ocr/claude-vision.ts` | Nová `processWithClaudeBatch`, `parseOcrJsonBatch`, úprava `processWithClaude` pro `previousContext` |
+| `apps/web/app/api/pages/process/route.ts` | Pre-filtering duplikátů, batching logika, dělení stránek do dávek, mezi-dávkový kontext, nové SSE eventy |
 | `apps/web/prisma/schema.prisma` | `Document.batchId` pole |
-| `apps/web/app/workspace/page.tsx` | UI zobrazení info o dávce nad progress barem |
-| `packages/shared/src/prompts.ts` | Prompt šablony pro batch zpracování |
+| `apps/web/app/workspace/page.tsx` | UI zobrazení info o dávce, handling `batch_info` a `batch_progress` eventů |
+| `packages/shared/src/prompts.ts` | `BATCH_OCR_INSTRUCTION` prompt šablona |
