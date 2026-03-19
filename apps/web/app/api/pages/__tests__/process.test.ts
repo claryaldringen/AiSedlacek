@@ -8,6 +8,7 @@ const mockDocFindUnique = vi.fn();
 const mockDocCreate = vi.fn();
 const mockPageFindUnique = vi.fn();
 const mockPageUpdate = vi.fn();
+const mockPageFindMany = vi.fn();
 const mockTranslationCreate = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
@@ -20,6 +21,7 @@ vi.mock('@/lib/infrastructure/db', () => ({
     page: {
       findUnique: (...args: unknown[]) => mockPageFindUnique(...args),
       update: (...args: unknown[]) => mockPageUpdate(...args),
+      findMany: (...args: unknown[]) => mockPageFindMany(...args),
     },
     translation: {
       create: (...args: unknown[]) => mockTranslationCreate(...args),
@@ -33,8 +35,20 @@ vi.mock('@/lib/infrastructure/versioning', () => ({
 }));
 
 const mockProcessWithClaude = vi.fn();
+const mockProcessWithClaudeBatch = vi.fn();
 vi.mock('@/lib/adapters/ocr/claude-vision', () => ({
   processWithClaude: (...args: unknown[]) => mockProcessWithClaude(...args),
+  processWithClaudeBatch: (...args: unknown[]) => mockProcessWithClaudeBatch(...args),
+}));
+
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('@/lib/batch-utils', () => ({
+  createBatches: vi.fn().mockImplementation((pages: { id: string }[]) => [pages]),
+  estimateImageTokens: vi.fn().mockReturnValue(500),
+  truncateContext: vi.fn().mockImplementation((text: string | undefined) => text),
 }));
 
 const mockReadFile = vi.fn();
@@ -86,6 +100,7 @@ const CLAUDE_RESULT = {
     context: 'Kontext dokumentu',
     glossary: [{ term: 'slovo', definition: 'význam' }],
   },
+  rawResponse: '{"transcription":"Starý text"}',
   processingTimeMs: 100,
   model: 'claude-opus-4-6',
   inputTokens: 500,
@@ -104,6 +119,18 @@ describe('POST /api/pages/process', () => {
     mockDocAggregate.mockResolvedValue({ _avg: { outputTokens: 1500 } });
     mockPageUpdate.mockResolvedValue({});
     mockCreateVersion.mockResolvedValue(undefined);
+    // Default: ownership check returns matching pages, other findMany calls return []
+    mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
+      const where = args?.where as Record<string, unknown> | undefined;
+      // Ownership check: has userId and id.in
+      if (where?.userId && where?.id) {
+        const idFilter = where.id as { in?: string[] };
+        if (idFilter.in) {
+          return Promise.resolve(idFilter.in.map((id: string) => ({ id })));
+        }
+      }
+      return Promise.resolve([]);
+    });
   });
 
   it('returns 400 when pageIds is missing', async () => {
@@ -421,5 +448,124 @@ describe('POST /api/pages/process', () => {
     const errorEvent = events.find((e) => e.event === 'page_error' && e.data.pageId === 123);
     expect(errorEvent).toBeDefined();
     expect(errorEvent!.data.error).toBe('Neplatné ID stránky');
+  });
+});
+
+// ── Batch processing tests ──────────────────────────────
+
+const BATCH_CLAUDE_RESULT = {
+  results: [
+    { index: 0, result: { transcription: 'Text 0', detectedLanguage: 'cs-old', translation: 'Překlad 0', translationLanguage: 'cs', context: 'Kontext 0', glossary: [{ term: 'slovo', definition: 'význam' }] } },
+    { index: 1, result: { transcription: 'Text 1', detectedLanguage: 'cs-old', translation: 'Překlad 1', translationLanguage: 'cs', context: 'Kontext 1', glossary: [] } },
+  ],
+  rawResponse: '{"imageIndex":0,...}\n{"imageIndex":1,...}',
+  processingTimeMs: 200,
+  model: 'claude-opus-4-6',
+  inputTokens: 1000,
+  outputTokens: 400,
+};
+
+describe('batch processing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocAggregate.mockResolvedValue({ _avg: { outputTokens: 1500 } });
+    mockPageUpdate.mockResolvedValue({});
+    mockCreateVersion.mockResolvedValue(undefined);
+    // Default: ownership check returns matching pages, other findMany calls return []
+    mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
+      const where = args?.where as Record<string, unknown> | undefined;
+      if (where?.userId && where?.id) {
+        const idFilter = where.id as { in?: string[] };
+        if (idFilter.in) {
+          return Promise.resolve(idFilter.in.map((id: string) => ({ id })));
+        }
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  it('sends batch_info event for multi-page batch', async () => {
+    mockPageFindUnique
+      .mockResolvedValueOnce({ id: 'p1', imageUrl: '/api/images/a.jpg', fileSize: 400000, document: null, collection: null })
+      .mockResolvedValueOnce({ id: 'p2', imageUrl: '/api/images/b.jpg', fileSize: 400000, document: null, collection: null });
+    mockReadFile.mockResolvedValue(Buffer.from('fake image'));
+    mockDocFindUnique.mockResolvedValue(null);
+    mockDocCreate
+      .mockResolvedValueOnce({ id: 'doc-1' })
+      .mockResolvedValueOnce({ id: 'doc-2' });
+    mockProcessWithClaudeBatch.mockResolvedValue(BATCH_CLAUDE_RESULT);
+
+    const res = await POST(makeRequest({ pageIds: ['p1', 'p2'] }));
+    const events = await consumeSSE(res);
+
+    const batchInfoEvent = events.find(e => e.event === 'batch_info');
+    expect(batchInfoEvent).toBeDefined();
+    expect(batchInfoEvent!.data.batchNumber).toBe(1);
+    expect(batchInfoEvent!.data.totalBatches).toBe(1);
+    expect(batchInfoEvent!.data.pageCount).toBe(2);
+
+    const pageDoneEvents = events.filter(e => e.event === 'page_done');
+    expect(pageDoneEvents).toHaveLength(2);
+  });
+
+  it('falls back to individual processing on batch failure', async () => {
+    mockPageFindUnique
+      .mockResolvedValueOnce({ id: 'p1', imageUrl: '/api/images/a.jpg', fileSize: 400000, document: null, collection: null })
+      .mockResolvedValueOnce({ id: 'p2', imageUrl: '/api/images/b.jpg', fileSize: 400000, document: null, collection: null });
+    mockReadFile.mockResolvedValue(Buffer.from('fake image'));
+    mockDocFindUnique.mockResolvedValue(null);
+    mockDocCreate
+      .mockResolvedValueOnce({ id: 'doc-1' })
+      .mockResolvedValueOnce({ id: 'doc-2' });
+    // Batch fails
+    mockProcessWithClaudeBatch.mockRejectedValue(new Error('API Error'));
+    // Individual succeeds
+    mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
+
+    const res = await POST(makeRequest({ pageIds: ['p1', 'p2'] }));
+    const events = await consumeSSE(res);
+
+    // Should have fallen back to individual processing
+    expect(mockProcessWithClaude).toHaveBeenCalledTimes(2);
+    const pageDoneEvents = events.filter(e => e.event === 'page_done');
+    expect(pageDoneEvents).toHaveLength(2);
+  });
+
+  it('adds previous page context for single-page processing', async () => {
+    mockPageFindUnique.mockResolvedValue({
+      id: 'p3', imageUrl: '/api/images/c.jpg', fileSize: 400000,
+      document: null, collection: { id: 'col-1', context: null },
+    });
+    mockReadFile.mockResolvedValue(Buffer.from('fake image'));
+    mockDocFindUnique.mockResolvedValue(null);
+    mockDocCreate.mockResolvedValue({ id: 'doc-3' });
+    mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
+    // Ownership check returns matching pages; context query returns previous pages
+    mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
+      const where = args?.where as Record<string, unknown> | undefined;
+      if (where?.userId && where?.id) {
+        const idFilter = where.id as { in?: string[] };
+        if (idFilter.in) {
+          return Promise.resolve(idFilter.in.map((id: string) => ({ id })));
+        }
+      }
+      // Context query: has collectionId and document.isNot
+      if (where?.collectionId) {
+        return Promise.resolve([
+          { id: 'prev-1', document: { transcription: 'Předchozí text stránky 1' } },
+          { id: 'prev-2', document: { transcription: 'Předchozí text stránky 2' } },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const res = await POST(makeRequest({ pageIds: ['p3'] }));
+    await consumeSSE(res);
+
+    // processWithClaude should have been called with previousContext (5th arg)
+    expect(mockProcessWithClaude).toHaveBeenCalled();
+    const callArgs = mockProcessWithClaude.mock.calls[0]!;
+    expect(callArgs[4]).toContain('Předchozí text stránky 1');
+    expect(callArgs[4]).toContain('Předchozí text stránky 2');
   });
 });
