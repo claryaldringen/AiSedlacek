@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
-import { BATCH_OCR_INSTRUCTION } from '@ai-sedlacek/shared';
+import { BATCH_OCR_INSTRUCTION, TRANSLATE_ONLY_SYSTEM_PROMPT } from '@ai-sedlacek/shared';
+
+export type ProcessingMode = 'transcribe+translate' | 'translate';
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
@@ -211,6 +213,7 @@ export async function processWithClaude(
   onProgress?: (outputTokens: number, estimatedTotal: number) => void,
   estimatedOutputTokens?: number,
   previousContext?: string,
+  mode: ProcessingMode = 'transcribe+translate',
 ): Promise<{
   result: StructuredOcrResult;
   rawResponse: string;
@@ -231,7 +234,7 @@ export async function processWithClaude(
     model: 'claude-opus-4-6',
     max_tokens: 8192,
     temperature: 0.3,
-    system: SYSTEM_PROMPT,
+    system: mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT,
     messages: [
       {
         role: 'user',
@@ -311,6 +314,7 @@ export async function processWithClaudeBatch(
     previousContext?: string;
     onProgress?: (outputTokens: number, estimatedTotal: number) => void;
     estimatedOutputTokens?: number;
+    mode?: ProcessingMode;
   },
 ): Promise<{
   results: { index: number; result: StructuredOcrResult }[];
@@ -373,7 +377,7 @@ export async function processWithClaudeBatch(
     model: 'claude-opus-4-6',
     max_tokens: maxTokens,
     temperature: 0.3,
-    system: SYSTEM_PROMPT + '\n\n' + BATCH_OCR_INSTRUCTION,
+    system: (options?.mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) + '\n\n' + BATCH_OCR_INSTRUCTION,
     messages: [{ role: 'user', content }],
   });
 

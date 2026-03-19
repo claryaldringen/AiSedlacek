@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { processWithClaude, processWithClaudeBatch } from '@/lib/adapters/ocr/claude-vision';
-import type { StructuredOcrResult } from '@/lib/adapters/ocr/claude-vision';
+import type { StructuredOcrResult, ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { requireUserId } from '@/lib/auth';
 import { createBatches, truncateContext } from '@/lib/batch-utils';
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: 'Chybí pageIds' }, { status: 400 });
   }
 
-  const { pageIds, language } = body as { pageIds: unknown; language?: unknown };
+  const { pageIds, language, mode: rawMode } = body as { pageIds: unknown; language?: unknown; mode?: unknown };
 
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
     return Response.json({ error: 'pageIds musí být neprázdné pole' }, { status: 400 });
@@ -165,6 +165,9 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const targetLang =
     typeof language === 'string' && language.trim() !== '' ? language.trim() : 'cs';
+
+  const processingMode: ProcessingMode =
+    rawMode === 'translate' ? 'translate' : 'transcribe+translate';
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -369,6 +372,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                 },
                 estimatedTokens,
                 previousContext,
+                processingMode,
               );
             console.log(
               `[BatchProcess] Page ${pp.pageId} done in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
@@ -442,6 +446,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               collectionContext: collectionCtx,
               previousContext,
               estimatedOutputTokens: estimatedTokens * batchPages.length,
+              mode: processingMode,
               onProgress: (currentTokens: number, estTotal: number) => {
                 const tokenProgress = Math.min(currentTokens / estTotal, 0.95);
                 const batchBase = completed / total;
@@ -572,6 +577,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                       });
                     },
                     estimatedTokens,
+                    undefined,
+                    processingMode,
                   );
                 console.log(
                   `[BatchProcess] Page ${pp.pageId} done in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens) [fallback]`,

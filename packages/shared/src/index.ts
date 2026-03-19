@@ -25,4 +25,5 @@ export {
   buildConsolidationPrompt,
   buildPolishPrompt,
   BATCH_OCR_INSTRUCTION,
+  TRANSLATE_ONLY_SYSTEM_PROMPT,
 } from './prompts';
