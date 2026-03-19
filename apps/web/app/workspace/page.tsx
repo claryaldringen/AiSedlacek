@@ -41,6 +41,13 @@ export default function HomePage(): React.JSX.Element {
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
   const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
+  const [batchInfo, setBatchInfo] = useState<{
+    batchNumber: number;
+    totalBatches: number;
+    pageCount: number;
+  } | null>(null);
+  const batchInfoRef = useRef(batchInfo);
+  batchInfoRef.current = batchInfo;
 
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
@@ -405,7 +412,10 @@ export default function HomePage(): React.JSX.Element {
               message: string;
               progress: number;
             };
-            setProcessingStep(data.message);
+            const bi = batchInfoRef.current;
+            const batchPrefix =
+              bi && bi.totalBatches > 1 ? `Dávka ${bi.batchNumber}/${bi.totalBatches} — ` : '';
+            setProcessingStep(batchPrefix + data.message);
             setProcessingProgress(data.progress);
           } else if (eventType === 'page_done') {
             const data = JSON.parse(dataStr) as {
@@ -456,7 +466,27 @@ export default function HomePage(): React.JSX.Element {
             setPages((prev) =>
               prev.map((p) => (p.id === data.pageId ? { ...p, status: 'error' } : p)),
             );
+          } else if (eventType === 'batch_info') {
+            const data = JSON.parse(dataStr) as {
+              batchNumber: number;
+              totalBatches: number;
+              pageCount: number;
+            };
+            setBatchInfo(data);
+            batchInfoRef.current = data;
+          } else if (eventType === 'batch_progress') {
+            const data = JSON.parse(dataStr) as {
+              batchNumber: number;
+              outputTokens: number;
+              estimatedTotal: number;
+            };
+            const bi = batchInfoRef.current;
+            const totalBatches = bi?.totalBatches ?? '?';
+            setProcessingStep(`Dávka ${data.batchNumber}/${totalBatches}`);
+            setProcessingProgress(Math.round((data.outputTokens / data.estimatedTotal) * 100));
           } else if (eventType === 'done') {
+            setBatchInfo(null);
+            batchInfoRef.current = null;
             setProcessingStep('Hotovo');
             setProcessingProgress(100);
           }
@@ -469,6 +499,8 @@ export default function HomePage(): React.JSX.Element {
       );
     } finally {
       setProcessingPageIds(new Set());
+      setBatchInfo(null);
+      batchInfoRef.current = null;
       setTimeout(() => {
         setProcessingStep(undefined);
         setProcessingProgress(undefined);
