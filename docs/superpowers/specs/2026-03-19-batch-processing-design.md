@@ -209,7 +209,9 @@ export const BATCH_OCR_INSTRUCTION = `You will receive multiple manuscript page 
 Return results as JSONL (one JSON object per line), in the same order as the images. Each object MUST include an "imageIndex" field (0-based, matching the image order).
 
 Each line must be a valid JSON object with this structure:
-{"imageIndex": 0, "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "...", "glossary": [{"term": "...", "definition": "..."}]}
+{"imageIndex": 0, "transcription": "...", "detectedLanguage": "...", "translation": "...", "translationLanguage": "...", "context": "page-specific context only (see below)", "glossary": [{"term": "...", "definition": "..."}]}
+
+The "context" field must contain ONLY information specific to that page: biblical quotes and their source, literary references, named persons, places, or events. Do NOT repeat general information about the work (author, date, genre) — that is already known from the collection context.
 
 Use \\n for newlines inside JSON strings. Return ONLY the JSONL lines, no markdown fences, no extra text.`;
 ```
