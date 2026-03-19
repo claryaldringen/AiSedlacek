@@ -9,6 +9,7 @@ import { FileList } from '@/components/FileList';
 import { ImportDialog, type UploadedPage } from '@/components/ImportDialog';
 import { DocumentPanel } from '@/components/DocumentPanel';
 import { CollectionContextDialog } from '@/components/CollectionContextDialog';
+import { ShareDialog } from '@/components/ShareDialog';
 import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
@@ -37,8 +38,22 @@ export default function HomePage(): React.JSX.Element {
   const [fixingContexts, setFixingContexts] = useState(false);
   const [fixingContextsProgress, setFixingContextsProgress] = useState<string | null>(null);
 
+  // Share dialog
+  const [shareTarget, setShareTarget] = useState<{
+    id: string;
+    type: 'collection' | 'page';
+    name: string;
+    isPublic: boolean;
+    slug: string | null;
+  } | null>(null);
+
+  // Blank detection
+  const [detectingBlank, setDetectingBlank] = useState(false);
+
   // Processing
-  const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>('transcribe+translate');
+  const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>(
+    'transcribe+translate',
+  );
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
   const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
@@ -362,17 +377,153 @@ export default function HomePage(): React.JSX.Element {
   );
 
   // ---- Processing ----
+
+  /** Read an SSE stream from a Response and dispatch events to state. */
+  const consumeProcessingStream = useCallback(async (response: Response): Promise<void> => {
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() ?? '';
+
+      for (const eventStr of events) {
+        const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
+        if (!match) continue;
+        const eventType = match[1];
+        const dataStr = match[2];
+        if (!eventType || !dataStr) continue;
+
+        if (eventType === 'page_progress') {
+          const data = JSON.parse(dataStr) as {
+            pageId: string;
+            message: string;
+            progress: number;
+          };
+          const bi = batchInfoRef.current;
+          const batchPrefix =
+            bi && bi.totalBatches > 1 ? `Dávka ${bi.batchNumber}/${bi.totalBatches} — ` : '';
+          setProcessingStep(batchPrefix + data.message);
+          setProcessingProgress(data.progress);
+        } else if (eventType === 'page_done') {
+          const data = JSON.parse(dataStr) as {
+            pageId: string;
+            documentId: string;
+            cached: boolean;
+            progress: number;
+          };
+          setProcessingProgress(data.progress);
+          setProcessingPageIds((prev) => {
+            const next = new Set(prev);
+            next.delete(data.pageId);
+            return next;
+          });
+          setPages((prev) =>
+            prev.map((p) => (p.id === data.pageId ? { ...p, status: 'done' } : p)),
+          );
+          void (async () => {
+            try {
+              const res = await fetch(`/api/pages/${data.pageId}`);
+              if (res.ok) {
+                const updated = (await res.json()) as PageItem;
+                setPages((prev) => prev.map((p) => (p.id === data.pageId ? updated : p)));
+              }
+            } catch {
+              // ignore
+            }
+          })();
+        } else if (eventType === 'page_skipped') {
+          const data = JSON.parse(dataStr) as { pageId: string; progress: number };
+          setProcessingProgress(data.progress);
+          setProcessingPageIds((prev) => {
+            const next = new Set(prev);
+            next.delete(data.pageId);
+            return next;
+          });
+        } else if (eventType === 'page_error') {
+          const data = JSON.parse(dataStr) as {
+            pageId: string;
+            error: string;
+            progress: number;
+          };
+          setProcessingPageIds((prev) => {
+            const next = new Set(prev);
+            next.delete(data.pageId);
+            return next;
+          });
+          setPages((prev) =>
+            prev.map((p) => (p.id === data.pageId ? { ...p, status: 'error' } : p)),
+          );
+        } else if (eventType === 'batch_info') {
+          const data = JSON.parse(dataStr) as {
+            batchNumber: number;
+            totalBatches: number;
+            pageCount: number;
+          };
+          setBatchInfo(data);
+          batchInfoRef.current = data;
+        } else if (eventType === 'batch_progress') {
+          const data = JSON.parse(dataStr) as {
+            batchNumber: number;
+            message?: string;
+            outputTokens?: number;
+            estimatedTotal?: number;
+            progress?: number;
+          };
+          const bi = batchInfoRef.current;
+          const totalBatches = bi?.totalBatches ?? '?';
+          if (data.message) {
+            setProcessingStep(`Dávka ${data.batchNumber}/${totalBatches} — ${data.message}`);
+          }
+          if (data.progress != null) {
+            setProcessingProgress(data.progress);
+          } else if (data.outputTokens != null && data.estimatedTotal) {
+            setProcessingProgress(Math.round((data.outputTokens / data.estimatedTotal) * 100));
+          }
+        } else if (eventType === 'done') {
+          setBatchInfo(null);
+          batchInfoRef.current = null;
+          setProcessingStep('Hotovo');
+          setProcessingProgress(100);
+        } else if (eventType === 'cancelled') {
+          setBatchInfo(null);
+          batchInfoRef.current = null;
+          setProcessingStep('Zrušeno');
+          setProcessingProgress(undefined);
+        }
+      }
+    }
+  }, []);
+
   const handleProcessSelected = useCallback(async (): Promise<void> => {
     // Expand selected collections into their page IDs
     const selectedIds = Array.from(selected);
     const collectionIds = new Set(collections.map((c) => c.id));
     const expandedPageIds = new Set<string>();
+    // Track pages we already know about locally
+    const knownPages = new Map(pages.map((p) => [p.id, p]));
 
     for (const id of selectedIds) {
       if (collectionIds.has(id)) {
-        // It's a collection — add all its pages
-        for (const p of pages) {
-          if (p.collectionId === id) expandedPageIds.add(p.id);
+        // Fetch pages for this collection (they may not be in `pages` array in root view)
+        try {
+          const res = await fetch(`/api/collections/${id}`);
+          if (res.ok) {
+            const col = (await res.json()) as { pages: PageItem[] };
+            for (const p of col.pages) {
+              expandedPageIds.add(p.id);
+              knownPages.set(p.id, p);
+            }
+          }
+        } catch {
+          // ignore
         }
       } else {
         expandedPageIds.add(id);
@@ -380,13 +531,13 @@ export default function HomePage(): React.JSX.Element {
     }
 
     const pageIds = Array.from(expandedPageIds).filter((id) => {
-      const p = pages.find((pg) => pg.id === id);
+      const p = knownPages.get(id);
       return p && (p.status === 'pending' || p.status === 'error');
     });
     if (pageIds.length === 0) return;
 
     setProcessingPageIds(new Set(pageIds));
-    setProcessingStep('Spoustim zpracovani...');
+    setProcessingStep('Spouštím zpracování…');
     setProcessingProgress(0);
     setError(null);
 
@@ -406,116 +557,9 @@ export default function HomePage(): React.JSX.Element {
         throw new Error(data.error ?? `HTTP ${response.status}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop() ?? '';
-
-        for (const eventStr of events) {
-          const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
-          if (!match) continue;
-          const eventType = match[1];
-          const dataStr = match[2];
-          if (!eventType || !dataStr) continue;
-
-          if (eventType === 'page_progress') {
-            const data = JSON.parse(dataStr) as {
-              pageId: string;
-              message: string;
-              progress: number;
-            };
-            const bi = batchInfoRef.current;
-            const batchPrefix =
-              bi && bi.totalBatches > 1 ? `Dávka ${bi.batchNumber}/${bi.totalBatches} — ` : '';
-            setProcessingStep(batchPrefix + data.message);
-            setProcessingProgress(data.progress);
-          } else if (eventType === 'page_done') {
-            const data = JSON.parse(dataStr) as {
-              pageId: string;
-              documentId: string;
-              cached: boolean;
-              progress: number;
-            };
-            setProcessingProgress(data.progress);
-            setProcessingPageIds((prev) => {
-              const next = new Set(prev);
-              next.delete(data.pageId);
-              return next;
-            });
-            setPages((prev) =>
-              prev.map((p) => (p.id === data.pageId ? { ...p, status: 'done' } : p)),
-            );
-            void (async () => {
-              try {
-                const res = await fetch(`/api/pages/${data.pageId}`);
-                if (res.ok) {
-                  const updated = (await res.json()) as PageItem;
-                  setPages((prev) => prev.map((p) => (p.id === data.pageId ? updated : p)));
-                }
-              } catch {
-                // ignore
-              }
-            })();
-          } else if (eventType === 'page_skipped') {
-            const data = JSON.parse(dataStr) as { pageId: string; progress: number };
-            setProcessingProgress(data.progress);
-            setProcessingPageIds((prev) => {
-              const next = new Set(prev);
-              next.delete(data.pageId);
-              return next;
-            });
-          } else if (eventType === 'page_error') {
-            const data = JSON.parse(dataStr) as {
-              pageId: string;
-              error: string;
-              progress: number;
-            };
-            setProcessingPageIds((prev) => {
-              const next = new Set(prev);
-              next.delete(data.pageId);
-              return next;
-            });
-            setPages((prev) =>
-              prev.map((p) => (p.id === data.pageId ? { ...p, status: 'error' } : p)),
-            );
-          } else if (eventType === 'batch_info') {
-            const data = JSON.parse(dataStr) as {
-              batchNumber: number;
-              totalBatches: number;
-              pageCount: number;
-            };
-            setBatchInfo(data);
-            batchInfoRef.current = data;
-          } else if (eventType === 'batch_progress') {
-            const data = JSON.parse(dataStr) as {
-              batchNumber: number;
-              outputTokens: number;
-              estimatedTotal: number;
-            };
-            const bi = batchInfoRef.current;
-            const totalBatches = bi?.totalBatches ?? '?';
-            setProcessingStep(`Dávka ${data.batchNumber}/${totalBatches}`);
-            setProcessingProgress(Math.round((data.outputTokens / data.estimatedTotal) * 100));
-          } else if (eventType === 'done') {
-            setBatchInfo(null);
-            batchInfoRef.current = null;
-            setProcessingStep('Hotovo');
-            setProcessingProgress(100);
-          }
-        }
-      }
+      await consumeProcessingStream(response);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznama chyba');
-      setPages((prev) =>
-        prev.map((p) => (processingPageIds.has(p.id) ? { ...p, status: 'error' } : p)),
-      );
+      setError(err instanceof Error ? err.message : 'Neznámá chyba');
     } finally {
       setProcessingPageIds(new Set());
       setBatchInfo(null);
@@ -525,7 +569,121 @@ export default function HomePage(): React.JSX.Element {
         setProcessingProgress(undefined);
       }, 2000);
     }
-  }, [selected, pages, collections, processingPageIds]);
+  }, [selected, pages, collections, processingMode, consumeProcessingStream]);
+
+  /** Reconnect to an already-running processing job (e.g. after page refresh). */
+  const hasProcessingPages = pages.some((p) => p.status === 'processing');
+  const reconnectedRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasProcessingPages) {
+      reconnectedRef.current = false;
+      return;
+    }
+    // Don't reconnect if we're already tracking a job or already reconnected
+    if (reconnectedRef.current) return;
+    reconnectedRef.current = true;
+
+    const reconnect = async (): Promise<void> => {
+      const processingPages = pagesRef.current.filter((p) => p.status === 'processing');
+      try {
+        const response = await fetch('/api/pages/process');
+
+        // If server returns JSON (no active job), the pages are stale — reload them
+        const ct = response.headers.get('content-type') ?? '';
+        if (ct.includes('application/json')) {
+          // No active job — pages stuck in 'processing' need a status refresh
+          for (const p of processingPages) {
+            try {
+              const res = await fetch(`/api/pages/${p.id}`);
+              if (res.ok) {
+                const updated = (await res.json()) as PageItem;
+                setPages((prev) => prev.map((pg) => (pg.id === p.id ? updated : pg)));
+              }
+            } catch {
+              // ignore
+            }
+          }
+          return;
+        }
+
+        // Active job found — resume monitoring
+        setProcessingPageIds(new Set(processingPages.map((p) => p.id)));
+        setProcessingStep('Zpracovávám…');
+        setProcessingProgress(0);
+
+        await consumeProcessingStream(response);
+
+        setProcessingPageIds(new Set());
+        setBatchInfo(null);
+        batchInfoRef.current = null;
+        setTimeout(() => {
+          setProcessingStep(undefined);
+          setProcessingProgress(undefined);
+        }, 2000);
+      } catch {
+        // ignore reconnection errors
+      }
+    };
+    void reconnect();
+  }, [hasProcessingPages, consumeProcessingStream]);
+
+  const handleCancelProcessing = useCallback(async (): Promise<void> => {
+    try {
+      await fetch('/api/pages/process/cancel', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleToggleBlank = useCallback(
+    async (pageIds: string[], blank: boolean): Promise<void> => {
+      const newStatus = blank ? 'blank' : 'pending';
+      setPages((prev) =>
+        prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: newStatus } : p)),
+      );
+      await Promise.all(
+        pageIds.map((id) =>
+          fetch(`/api/pages/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus }),
+          }).catch(() => {
+            // Revert on error
+            void loadPages(selectedCollectionId);
+          }),
+        ),
+      );
+    },
+    [selectedCollectionId, loadPages],
+  );
+
+  const handleDetectBlank = useCallback(async (): Promise<void> => {
+    const pendingPages = pages.filter((p) => p.status === 'pending');
+    if (pendingPages.length === 0) return;
+
+    setDetectingBlank(true);
+    try {
+      const res = await fetch('/api/pages/detect-blank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageIds: pendingPages.map((p) => p.id) }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          results: { pageId: string; blank: boolean }[];
+        };
+        const blankIds = new Set(data.results.filter((r) => r.blank).map((r) => r.pageId));
+        if (blankIds.size > 0) {
+          setPages((prev) => prev.map((p) => (blankIds.has(p.id) ? { ...p, status: 'blank' } : p)));
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDetectingBlank(false);
+    }
+  }, [pages]);
 
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
@@ -850,21 +1008,25 @@ export default function HomePage(): React.JSX.Element {
     const selectedIds = Array.from(selected);
     const collectionIds = new Set(collections.map((c) => c.id));
     const expandedPageIds = new Set<string>();
+    let collectionPageEstimate = 0;
 
     for (const id of selectedIds) {
       if (collectionIds.has(id)) {
-        for (const p of pages) {
-          if (p.collectionId === id) expandedPageIds.add(p.id);
-        }
+        // In root view, pages of this collection are NOT in `pages` array.
+        // Use _count as estimate so the button is enabled.
+        const col = collections.find((c) => c.id === id);
+        if (col) collectionPageEstimate += col._count.pages;
       } else {
         expandedPageIds.add(id);
       }
     }
 
-    return Array.from(expandedPageIds).filter((id) => {
+    const localPending = Array.from(expandedPageIds).filter((id) => {
       const p = pages.find((pg) => pg.id === id);
       return p && (p.status === 'pending' || p.status === 'error');
     }).length;
+
+    return localPending + collectionPageEstimate;
   }, [selected, collections, pages]);
   const doneCount = pages.filter((p) => p.status === 'done').length;
 
@@ -876,6 +1038,45 @@ export default function HomePage(): React.JSX.Element {
       setUploadOpen(true);
     }
   }, []);
+
+  // ---- Share item ----
+  const handleShareItem = useCallback(
+    (id: string, type: 'collection' | 'page'): void => {
+      if (type === 'collection') {
+        const col = collections.find((c) => c.id === id);
+        if (!col) return;
+        setShareTarget({ id, type, name: col.name, isPublic: col.isPublic ?? false, slug: col.slug ?? null });
+      } else {
+        const page = pages.find((p) => p.id === id);
+        if (!page) return;
+        setShareTarget({
+          id,
+          type,
+          name: page.displayName ?? page.filename,
+          isPublic: page.isPublic ?? false,
+          slug: page.slug ?? null,
+        });
+      }
+    },
+    [collections, pages],
+  );
+
+  const handleShareUpdate = useCallback(
+    (isPublic: boolean, slug: string | null): void => {
+      if (!shareTarget) return;
+      if (shareTarget.type === 'collection') {
+        setCollections((prev) =>
+          prev.map((c) => (c.id === shareTarget.id ? { ...c, isPublic, slug } : c)),
+        );
+      } else {
+        setPages((prev) =>
+          prev.map((p) => (p.id === shareTarget.id ? { ...p, isPublic, slug } : p)),
+        );
+      }
+      setShareTarget((prev) => (prev ? { ...prev, isPublic, slug } : null));
+    },
+    [shareTarget],
+  );
 
   return (
     <AppShell
@@ -934,6 +1135,9 @@ export default function HomePage(): React.JSX.Element {
         processingProgress={processingProgress}
         processingMode={processingMode}
         onProcessingModeChange={setProcessingMode}
+        onCancelProcessing={isProcessing ? handleCancelProcessing : undefined}
+        onDetectBlank={() => void handleDetectBlank()}
+        detectingBlank={detectingBlank}
       />
 
       {/* Error banner */}
@@ -1064,6 +1268,8 @@ export default function HomePage(): React.JSX.Element {
             onImportClick={() => setUploadOpen(true)}
             focusedItemId={focusedItemId}
             onColumnsChange={setColumnsCount}
+            onToggleBlank={(ids, blank) => void handleToggleBlank(ids, blank)}
+            onShareItem={handleShareItem}
           />
         ) : (
           <FileList
@@ -1114,13 +1320,29 @@ export default function HomePage(): React.JSX.Element {
           collectionId={selectedCollection.id}
           collectionName={selectedCollection.name}
           initialContext={selectedCollection.context}
-          initialContextUrl={selectedCollection.contextUrl}
-          onSaved={(context, contextUrl) => {
+          initialContextUrls={selectedCollection.contextUrls}
+          onSaved={(context, contextUrls) => {
             setCollections((prev) =>
-              prev.map((c) => (c.id === selectedCollection.id ? { ...c, context, contextUrl } : c)),
+              prev.map((c) =>
+                c.id === selectedCollection.id ? { ...c, context, contextUrls } : c,
+              ),
             );
             setContextDialogOpen(false);
           }}
+        />
+      )}
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          isOpen={true}
+          onClose={() => setShareTarget(null)}
+          itemId={shareTarget.id}
+          itemType={shareTarget.type}
+          itemName={shareTarget.name}
+          currentIsPublic={shareTarget.isPublic}
+          currentSlug={shareTarget.slug}
+          onUpdate={handleShareUpdate}
         />
       )}
 

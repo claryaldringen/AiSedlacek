@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, memo } from 'react';
 import type { Collection } from './Sidebar';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 
@@ -9,6 +9,7 @@ export interface PageItem {
   filename: string;
   displayName?: string | null;
   imageUrl: string;
+  thumbnailUrl?: string | null;
   status: string;
   order: number;
   collectionId: string | null;
@@ -18,6 +19,8 @@ export interface PageItem {
   fileSize?: number | null;
   width?: number | null;
   height?: number | null;
+  isPublic?: boolean;
+  slug?: string | null;
   document?: {
     id: string;
     detectedLanguage: string;
@@ -54,6 +57,10 @@ interface FileGridProps {
   focusedItemId?: string | null;
   /** Called whenever the actual column count of the grid changes */
   onColumnsChange?: (columns: number) => void;
+  /** Toggle blank status for selected pages */
+  onToggleBlank?: (pageIds: string[], blank: boolean) => void;
+  /** Open share dialog for a page or collection */
+  onShareItem?: (id: string, type: 'page' | 'collection') => void;
 }
 
 function cleanFilename(raw: string): string {
@@ -116,6 +123,23 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
             strokeWidth={3}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+          </svg>
+        </span>
+      );
+    case 'blank':
+      return (
+        <span
+          title="Prázdná stránka"
+          className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 shadow"
+        >
+          <svg
+            className="h-3 w-3 text-white"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
           </svg>
         </span>
       );
@@ -194,6 +218,20 @@ function MoveIcon(): React.JSX.Element {
   );
 }
 
+function BlankIcon(): React.JSX.Element {
+  return (
+    <svg
+      className="h-4 w-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+    </svg>
+  );
+}
+
 function DeleteIcon(): React.JSX.Element {
   return (
     <svg
@@ -266,6 +304,194 @@ function RenameIcon(): React.JSX.Element {
   );
 }
 
+function ShareIcon(): React.JSX.Element {
+  return (
+    <svg
+      className="h-4 w-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+      />
+    </svg>
+  );
+}
+
+// ---------- Memoized page card ----------
+interface PageCardProps {
+  page: PageItem;
+  isSelected: boolean;
+  isFocused: boolean;
+  effectiveStatus: string;
+  selectionModeTouch: boolean;
+  onItemClick: (id: string, e: React.MouseEvent) => void;
+  onPageDoubleClick: (page: PageItem) => void;
+  onContextMenu: (e: React.MouseEvent, type: 'page', item: PageItem) => void;
+  onDragStart: (e: React.DragEvent<HTMLDivElement>, page: PageItem, isSelected: boolean) => void;
+  onTouchStart: (id: string) => void;
+  onTouchEnd: () => void;
+  onTouchMove: () => void;
+  registerRef: (id: string, el: HTMLElement | null) => void;
+}
+
+const PageCard = memo(function PageCard({
+  page,
+  isSelected,
+  isFocused,
+  effectiveStatus,
+  selectionModeTouch,
+  onItemClick,
+  onPageDoubleClick,
+  onContextMenu,
+  onDragStart,
+  onTouchStart,
+  onTouchEnd,
+  onTouchMove,
+  registerRef,
+}: PageCardProps): React.JSX.Element {
+  return (
+    <div
+      ref={(el) => registerRef(page.id, el)}
+      draggable
+      onDragStart={(e) => onDragStart(e, page, isSelected)}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (selectionModeTouch) {
+          onItemClick(page.id, { ...e, metaKey: true } as React.MouseEvent);
+        } else {
+          onItemClick(page.id, e);
+        }
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onPageDoubleClick(page);
+      }}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+        onContextMenu(e, 'page', page);
+      }}
+      onTouchStart={() => onTouchStart(page.id)}
+      onTouchEnd={onTouchEnd}
+      onTouchMove={onTouchMove}
+      className={[
+        'group relative cursor-pointer rounded-lg border-2 transition-colors duration-75',
+        isSelected
+          ? 'border-blue-500 bg-blue-50/60 shadow-md shadow-blue-100'
+          : 'border-transparent hover:border-slate-300 hover:shadow-sm',
+        'dragging:opacity-50',
+        isFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
+      ].join(' ')}
+      style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
+    >
+      {/* Thumbnail */}
+      <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-slate-100">
+        <img
+          src={page.thumbnailUrl ?? page.imageUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+          draggable={false}
+        />
+
+        {/* Blank page overlay */}
+        {effectiveStatus === 'blank' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-amber-50/60">
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+              Prázdná
+            </span>
+          </div>
+        )}
+
+        {/* Public share badge (top-right) */}
+        {page.isPublic === true && (
+          <div
+            className="absolute right-1.5 top-1.5"
+            title="Veřejně sdíleno"
+          >
+            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
+              <svg
+                className="h-3 w-3 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+                />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Processing overlay */}
+        {effectiveStatus === 'processing' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <svg className="h-8 w-8 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+          </div>
+        )}
+
+        {/* Selection indicator (blue check icon, top-left, no checkbox) */}
+        {isSelected && (
+          <div className="absolute left-1.5 top-1.5">
+            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 shadow">
+              <svg
+                className="h-3 w-3 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={3}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Status badge (bottom-right) */}
+        <div className="absolute bottom-1.5 right-1.5">
+          <StatusBadge status={effectiveStatus} />
+        </div>
+      </div>
+
+      {/* Filename */}
+      <div className="px-1 pb-2 pt-1.5">
+        <p className="truncate text-xs text-slate-700" title={cleanFilename(page.filename)}>
+          {cleanFilename(page.filename)}
+        </p>
+        {page.document && (
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            {page.document.detectedLanguage}
+            {page.document.translations.length > 0 &&
+              ` \u2192 ${page.document.translations[0]?.language ?? ''}`}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+});
+
 // ---------- Rubber band selection ----------
 interface RubberBandRect {
   startX: number;
@@ -318,6 +544,8 @@ export function FileGrid({
   onImportClick,
   focusedItemId,
   onColumnsChange,
+  onToggleBlank,
+  onShareItem,
 }: FileGridProps): React.JSX.Element {
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
 
@@ -427,6 +655,17 @@ export function FileGrid({
         disabled: isDone,
       });
 
+      if (onToggleBlank) {
+        const isBlank = page.status === 'blank';
+        const selectedPageIds = Array.from(selected).length > 0 ? Array.from(selected) : [page.id];
+        items.push({
+          label: isBlank ? 'Zrušit prázdné' : 'Označit jako prázdné',
+          icon: <BlankIcon />,
+          onClick: () => onToggleBlank(selectedPageIds, !isBlank),
+          disabled: isDone,
+        });
+      }
+
       items.push({
         label: 'Presunout do...',
         icon: <MoveIcon />,
@@ -435,6 +674,15 @@ export function FileGrid({
         },
         disabled: true,
       });
+
+      if (onShareItem) {
+        items.push({ type: 'divider' });
+        items.push({
+          label: page.isPublic ? 'Nastavení sdílení' : 'Sdílet veřejně',
+          icon: <ShareIcon />,
+          onClick: () => onShareItem(page.id, 'page'),
+        });
+      }
 
       items.push({ type: 'divider' });
 
@@ -447,12 +695,12 @@ export function FileGrid({
 
       return items;
     },
-    [selected.size, onPageDoubleClick, onProcessSelected, onDeleteSelected],
+    [selected, onPageDoubleClick, onProcessSelected, onDeleteSelected, onToggleBlank, onShareItem],
   );
 
   const buildCollectionContextMenu = useCallback(
     (col: Collection): ContextMenuEntry[] => {
-      return [
+      const items: ContextMenuEntry[] = [
         {
           label: 'Otevrit',
           icon: <OpenIcon />,
@@ -466,19 +714,31 @@ export function FileGrid({
           },
           disabled: true,
         },
-        { type: 'divider' },
-        {
-          label: 'Smazat',
-          icon: <DeleteIcon />,
-          onClick: () => {
-            // Placeholder for collection delete
-          },
-          variant: 'danger',
-          disabled: true,
-        },
       ];
+
+      if (onShareItem) {
+        items.push({ type: 'divider' });
+        items.push({
+          label: col.isPublic ? 'Nastavení sdílení' : 'Sdílet veřejně',
+          icon: <ShareIcon />,
+          onClick: () => onShareItem(col.id, 'collection'),
+        });
+      }
+
+      items.push({ type: 'divider' });
+      items.push({
+        label: 'Smazat',
+        icon: <DeleteIcon />,
+        onClick: () => {
+          // Placeholder for collection delete
+        },
+        variant: 'danger',
+        disabled: true,
+      });
+
+      return items;
     },
-    [onCollectionDoubleClick],
+    [onCollectionDoubleClick, onShareItem],
   );
 
   const buildEmptyContextMenu = useCallback((): ContextMenuEntry[] => {
@@ -668,6 +928,28 @@ export function FileGrid({
     };
   }, []);
 
+  // Stable drag handler for PageCard
+  const handlePageDragStart = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, page: PageItem, isPageSelected: boolean): void => {
+      if (!isPageSelected) {
+        onSetSelected(new Set([page.id]));
+      }
+      const ids = isPageSelected ? Array.from(selected) : [page.id];
+      e.dataTransfer.setData('application/x-page-ids', JSON.stringify(ids));
+      e.dataTransfer.effectAllowed = 'move';
+      if (ids.length > 1) {
+        const ghost = document.createElement('div');
+        ghost.textContent = `${ids.length.toString()} stranek`;
+        ghost.style.cssText =
+          'position:fixed;top:-9999px;background:#3b82f6;color:white;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600;';
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, 0, 0);
+        setTimeout(() => document.body.removeChild(ghost), 0);
+      }
+    },
+    [selected, onSetSelected],
+  );
+
   if (pages.length === 0 && collections.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -767,6 +1049,28 @@ export function FileGrid({
                     <span className="absolute bottom-2 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 shadow-sm">
                       {col._count.pages} str.
                     </span>
+                    {col.isPublic && (
+                      <div
+                        className="absolute right-1.5 top-1.5"
+                        title="Veřejně sdíleno"
+                      >
+                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
+                          <svg
+                            className="h-3 w-3 text-white"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+                            />
+                          </svg>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="px-1 pb-2 pt-1.5">
                     <p className="truncate text-xs font-medium text-slate-700">{col.name}</p>
@@ -790,149 +1094,24 @@ export function FileGrid({
             ref={pagesGridRef}
             className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
           >
-            {pages.map((page) => {
-              const isSelected = selected.has(page.id);
-              const isFocused = focusedItemId === page.id;
-              const effectiveStatus = processingPageIds.has(page.id) ? 'processing' : page.status;
-
-              const handleDragStart = (e: React.DragEvent<HTMLDivElement>): void => {
-                // Drag from unselected item: select only that item first
-                if (!isSelected) {
-                  onSetSelected(new Set([page.id]));
-                }
-                // If this page is selected, drag all selected; otherwise drag just this one
-                const ids = isSelected ? Array.from(selected) : [page.id];
-                e.dataTransfer.setData('application/x-page-ids', JSON.stringify(ids));
-                e.dataTransfer.effectAllowed = 'move';
-                // Show count badge if multiple
-                if (ids.length > 1) {
-                  const ghost = document.createElement('div');
-                  ghost.textContent = `${ids.length.toString()} stranek`;
-                  ghost.style.cssText =
-                    'position:fixed;top:-9999px;background:#3b82f6;color:white;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600;';
-                  document.body.appendChild(ghost);
-                  e.dataTransfer.setDragImage(ghost, 0, 0);
-                  setTimeout(() => document.body.removeChild(ghost), 0);
-                }
-              };
-
-              return (
-                <div
-                  key={page.id}
-                  ref={(el) => registerItemRef(page.id, el)}
-                  draggable
-                  onDragStart={handleDragStart}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (selectionModeTouch) {
-                      // In touch selection mode, taps toggle selection
-                      onItemClick(page.id, { ...e, metaKey: true } as React.MouseEvent);
-                    } else {
-                      onItemClick(page.id, e);
-                    }
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    onPageDoubleClick(page);
-                  }}
-                  onContextMenu={(e) => {
-                    e.stopPropagation();
-                    handleContextMenu(e, 'page', page);
-                  }}
-                  onTouchStart={() => handleTouchStart(page.id)}
-                  onTouchEnd={handleTouchEnd}
-                  onTouchMove={handleTouchMove}
-                  className={[
-                    'group relative cursor-pointer rounded-lg border-2 transition-all',
-                    isSelected
-                      ? 'border-blue-500 bg-blue-50/60 shadow-md shadow-blue-100'
-                      : 'border-transparent hover:border-slate-300 hover:shadow-sm',
-                    'dragging:opacity-50',
-                    isFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
-                  ].join(' ')}
-                  style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
-                >
-                  {/* Thumbnail */}
-                  <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-slate-100">
-                    <img
-                      src={page.imageUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                      draggable={false}
-                    />
-
-                    {/* Processing overlay */}
-                    {effectiveStatus === 'processing' && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                        <svg
-                          className="h-8 w-8 animate-spin text-white"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                      </div>
-                    )}
-
-                    {/* Selection indicator (blue check icon, top-left, no checkbox) */}
-                    {isSelected && (
-                      <div className="absolute left-1.5 top-1.5">
-                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 shadow">
-                          <svg
-                            className="h-3 w-3 text-white"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={3}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="m4.5 12.75 6 6 9-13.5"
-                            />
-                          </svg>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Status badge (bottom-right) */}
-                    <div className="absolute bottom-1.5 right-1.5">
-                      <StatusBadge status={effectiveStatus} />
-                    </div>
-                  </div>
-
-                  {/* Filename */}
-                  <div className="px-1 pb-2 pt-1.5">
-                    <p
-                      className="truncate text-xs text-slate-700"
-                      title={cleanFilename(page.filename)}
-                    >
-                      {cleanFilename(page.filename)}
-                    </p>
-                    {page.document && (
-                      <p className="mt-0.5 text-[10px] text-slate-400">
-                        {page.document.detectedLanguage}
-                        {page.document.translations.length > 0 &&
-                          ` \u2192 ${page.document.translations[0]?.language ?? ''}`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {pages.map((page) => (
+              <PageCard
+                key={page.id}
+                page={page}
+                isSelected={selected.has(page.id)}
+                isFocused={focusedItemId === page.id}
+                effectiveStatus={processingPageIds.has(page.id) ? 'processing' : page.status}
+                selectionModeTouch={selectionModeTouch}
+                onItemClick={onItemClick}
+                onPageDoubleClick={onPageDoubleClick}
+                onContextMenu={handleContextMenu}
+                onDragStart={handlePageDragStart}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+                onTouchMove={handleTouchMove}
+                registerRef={registerItemRef}
+              />
+            ))}
           </div>
         </div>
       )}

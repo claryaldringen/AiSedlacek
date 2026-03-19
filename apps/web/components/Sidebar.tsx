@@ -7,8 +7,10 @@ export interface Collection {
   name: string;
   description: string;
   context: string;
-  contextUrl: string | null;
+  contextUrls: string[];
   createdAt: string;
+  isPublic: boolean;
+  slug: string | null;
   _count: { pages: number };
 }
 
@@ -129,6 +131,23 @@ export function Sidebar({
                 <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 12h-15a4.483 4.483 0 0 0-3 1.146Z" />
               </svg>
               <span className="flex-1 truncate">{col.name}</span>
+              {col.isPublic && (
+                <svg
+                  className="h-3 w-3 shrink-0 text-blue-400"
+                  aria-label="Veřejně sdíleno"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <title>Veřejně sdíleno</title>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+                  />
+                </svg>
+              )}
               <span className="shrink-0 text-xs opacity-60">{col._count.pages}</span>
             </button>
           ))
