@@ -67,10 +67,12 @@ model Collection {
   name        String
   description String   @default("")
   context     String   @default("")
-  contextUrl  String?
+  contextUrls String[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   pages       Page[]
+  isPublic    Boolean  @default(false)
+  slug        String?  @unique
 
   @@index([userId])
 }
@@ -85,6 +87,7 @@ model Page {
   displayName  String?
   hash         String
   imageUrl     String
+  thumbnailUrl String?
   order        Int         @default(0)
   status       String      @default("pending")
   errorMessage String?
@@ -96,6 +99,8 @@ model Page {
   fileSize  Int?     // bytes
   width     Int?     // pixels
   height    Int?     // pixels
+  isPublic  Boolean  @default(false)
+  slug      String?  @unique
 
   @@index([userId])
   @@index([collectionId])
@@ -158,6 +163,13 @@ model DocumentVersion {
 
   @@index([documentId])
   @@unique([documentId, version])
+}
+
+model PublicSlug {
+  slug       String   @id
+  targetType String   // "collection" | "page"
+  targetId   String   @unique
+  createdAt  DateTime @default(now())
 }
 
 model GlossaryEntry {
