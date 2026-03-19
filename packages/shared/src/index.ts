@@ -24,4 +24,5 @@ export {
   OCR_TRANSCRIPTION_PROMPT,
   buildConsolidationPrompt,
   buildPolishPrompt,
+  BATCH_OCR_INSTRUCTION,
 } from './prompts';
