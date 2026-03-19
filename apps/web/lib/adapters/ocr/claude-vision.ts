@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
+import { BATCH_OCR_INSTRUCTION } from '@ai-sedlacek/shared';
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
 
@@ -282,6 +283,115 @@ export async function processWithClaude(
 
   return {
     result: parsed,
+    rawResponse: text,
+    processingTimeMs: Date.now() - startTime,
+    model: finalMessage.model,
+    inputTokens: finalMessage.usage.input_tokens,
+    outputTokens: finalMessage.usage.output_tokens,
+  };
+}
+
+export async function processWithClaudeBatch(
+  images: { buffer: Buffer; pageId: string; index: number }[],
+  userPrompt: string,
+  options?: {
+    collectionContext?: string;
+    previousContext?: string;
+    onProgress?: (outputTokens: number, estimatedTotal: number) => void;
+    estimatedOutputTokens?: number;
+  },
+): Promise<{
+  results: { index: number; result: StructuredOcrResult }[];
+  rawResponse: string;
+  processingTimeMs: number;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}> {
+  const startTime = Date.now();
+  const client = new Anthropic();
+
+  // Prepare all images in parallel
+  const preparedImages = await Promise.all(
+    images.map(async (img) => {
+      const { buffer, mediaType } = await prepareImage(img.buffer);
+      return { ...img, buffer, mediaType };
+    }),
+  );
+
+  // Build content blocks: images first, then text contexts, then prompt
+  const content: Array<
+    | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } }
+    | { type: 'text'; text: string }
+  > = [];
+
+  for (const img of preparedImages) {
+    content.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: img.mediaType,
+        data: img.buffer.toString('base64'),
+      },
+    });
+  }
+
+  if (options?.previousContext) {
+    content.push({
+      type: 'text',
+      text: `Kontext z předchozích stránek rukopisu:\n${options.previousContext}`,
+    });
+  }
+
+  if (options?.collectionContext) {
+    content.push({
+      type: 'text',
+      text: `Kontext díla (použij pro lepší porozumění dokumentu):\n${options.collectionContext}`,
+    });
+  }
+
+  content.push({ type: 'text', text: userPrompt });
+
+  const estimated = options?.estimatedOutputTokens ?? 2500 * images.length;
+  let currentTokens = 0;
+  let fullText = '';
+  const maxTokens = Math.min(Math.max(8192, 2500 * images.length), 128_000);
+
+  const stream = client.messages.stream({
+    model: 'claude-opus-4-6',
+    max_tokens: maxTokens,
+    temperature: 0.3,
+    system: SYSTEM_PROMPT + '\n\n' + BATCH_OCR_INSTRUCTION,
+    messages: [{ role: 'user', content }],
+  });
+
+  stream.on('text', (text) => {
+    fullText += text;
+    currentTokens = Math.round(fullText.length / 4);
+    options?.onProgress?.(currentTokens, estimated);
+  });
+
+  const finalMessage = await stream.finalMessage();
+
+  console.log(
+    '[Claude Batch] Done:',
+    JSON.stringify({
+      id: finalMessage.id,
+      model: finalMessage.model,
+      usage: finalMessage.usage,
+      stop_reason: finalMessage.stop_reason,
+      imageCount: images.length,
+    }),
+  );
+
+  const text =
+    fullText ||
+    (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
+
+  const results = parseOcrJsonBatch(text, images.length);
+
+  return {
+    results,
     rawResponse: text,
     processingTimeMs: Date.now() - startTime,
     model: finalMessage.model,
