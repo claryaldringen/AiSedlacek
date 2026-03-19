@@ -23,6 +23,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 // ── Import after mocks ──────────────────────────────
 import { processWithClaudeBatch } from '../claude-vision';
+import { processWithClaude } from '../claude-vision';
 
 // ── Helpers ─────────────────────────────────────────
 function setupMockStream(jsonlOutput: string) {
@@ -100,5 +101,47 @@ describe('processWithClaudeBatch', () => {
     const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
     const result = await processWithClaudeBatch(images, 'Přepiš text.');
     expect(result.results).toHaveLength(0);
+  });
+});
+
+describe('processWithClaude with previousContext', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('includes previousContext in the message content when provided', async () => {
+    const singleResult = { transcription: 'text', detectedLanguage: 'la', translation: 'tr', translationLanguage: 'cs', context: '', glossary: [] };
+    setupMockStream(JSON.stringify(singleResult));
+
+    await processWithClaude(
+      Buffer.from([0xff, 0xd8, 0x00]),
+      'Přepiš text.',
+      undefined, // onProgress
+      undefined, // estimatedOutputTokens
+      '[Stránka 1]\nPředchozí transkripce...',
+    );
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
+    const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];
+    const textBlocks = messages[0]!.content.filter((b) => b.type === 'text');
+    const texts = textBlocks.map((b) => b.text).join('\n');
+    expect(texts).toContain('Kontext z předchozích stránek');
+    expect(texts).toContain('Předchozí transkripce...');
+  });
+
+  it('does not include previousContext when not provided', async () => {
+    const singleResult = { transcription: 'text', detectedLanguage: 'la', translation: 'tr', translationLanguage: 'cs', context: '', glossary: [] };
+    setupMockStream(JSON.stringify(singleResult));
+
+    await processWithClaude(
+      Buffer.from([0xff, 0xd8, 0x00]),
+      'Přepiš text.',
+    );
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
+    const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];
+    const textBlocks = messages[0]!.content.filter((b) => b.type === 'text');
+    const texts = textBlocks.map((b) => b.text).join('\n');
+    expect(texts).not.toContain('Kontext z předchozích stránek');
   });
 });

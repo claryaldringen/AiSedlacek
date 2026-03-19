@@ -208,6 +208,7 @@ export async function processWithClaude(
   userPrompt: string,
   onProgress?: (outputTokens: number, estimatedTotal: number) => void,
   estimatedOutputTokens?: number,
+  previousContext?: string,
 ): Promise<{
   result: StructuredOcrResult;
   rawResponse: string;
@@ -241,6 +242,9 @@ export async function processWithClaude(
               data: imageToSend.toString('base64'),
             },
           },
+          ...(previousContext
+            ? [{ type: 'text' as const, text: `Kontext z předchozích stránek rukopisu:\n${previousContext}` }]
+            : []),
           {
             type: 'text',
             text: userPrompt,
