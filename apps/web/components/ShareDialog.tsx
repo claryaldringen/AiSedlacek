@@ -56,7 +56,13 @@ export function ShareDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isPublic: newIsPublic }),
       });
-      const data = (await res.json()) as { error?: string; isPublic?: boolean; slug?: string | null };
+      const text = await res.text();
+      let data: { error?: string; isPublic?: boolean; slug?: string | null };
+      try {
+        data = JSON.parse(text) as typeof data;
+      } catch {
+        throw new Error(`Server vrátil neplatnou odpověď (${res.status})`);
+      }
       if (!res.ok) {
         throw new Error(data.error ?? 'Chyba při ukládání');
       }
@@ -79,7 +85,13 @@ export function ShareDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug: slug.trim() }),
       });
-      const data = (await res.json()) as { error?: string; isPublic?: boolean; slug?: string | null };
+      const text = await res.text();
+      let data: { error?: string; isPublic?: boolean; slug?: string | null };
+      try {
+        data = JSON.parse(text) as typeof data;
+      } catch {
+        throw new Error(`Server vrátil neplatnou odpověď (${res.status})`);
+      }
       if (!res.ok) {
         throw new Error(data.error ?? 'Chyba při ukládání');
       }
