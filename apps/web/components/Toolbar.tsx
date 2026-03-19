@@ -167,7 +167,7 @@ export function Toolbar({
         )}
 
         {/* Share collection */}
-        {hasCollection && onShareCollection && (
+        {onShareCollection && (
           <button
             onClick={onShareCollection}
             title={isCollectionPublic ? 'Nastavení sdílení' : 'Sdílet veřejně'}

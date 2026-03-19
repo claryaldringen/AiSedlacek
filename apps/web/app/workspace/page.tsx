@@ -352,6 +352,17 @@ export default function HomePage(): React.JSX.Element {
       ? (collections.find((c) => c.id === selectedCollectionId) ?? null)
       : null;
 
+  // When on "all" view, detect if exactly one collection is selected in the grid
+  const selectedGridCollection = useMemo(() => {
+    if (selectedCollectionId !== null) return null;
+    const collectionIds = new Set(collections.map((c) => c.id));
+    const selectedCols = [...selected].filter((id) => collectionIds.has(id));
+    if (selectedCols.length === 1) {
+      return collections.find((c) => c.id === selectedCols[0]) ?? null;
+    }
+    return null;
+  }, [selectedCollectionId, collections, selected]);
+
   // ---- Upload ----
   const handleFilesUploaded = useCallback(
     (uploadedPages: UploadedPage[]): void => {
@@ -1141,12 +1152,14 @@ export default function HomePage(): React.JSX.Element {
         onShareCollection={
           selectedCollectionId
             ? () => handleShareItem(selectedCollectionId, 'collection')
-            : undefined
+            : selectedGridCollection
+              ? () => handleShareItem(selectedGridCollection.id, 'collection')
+              : undefined
         }
         isCollectionPublic={
           selectedCollectionId
             ? (collections.find((c) => c.id === selectedCollectionId)?.isPublic ?? false)
-            : false
+            : (selectedGridCollection?.isPublic ?? false)
         }
       />
 
