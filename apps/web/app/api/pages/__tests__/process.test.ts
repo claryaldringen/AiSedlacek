@@ -455,8 +455,28 @@ describe('POST /api/pages/process', () => {
 
 const BATCH_CLAUDE_RESULT = {
   results: [
-    { index: 0, result: { transcription: 'Text 0', detectedLanguage: 'cs-old', translation: 'Překlad 0', translationLanguage: 'cs', context: 'Kontext 0', glossary: [{ term: 'slovo', definition: 'význam' }] } },
-    { index: 1, result: { transcription: 'Text 1', detectedLanguage: 'cs-old', translation: 'Překlad 1', translationLanguage: 'cs', context: 'Kontext 1', glossary: [] } },
+    {
+      index: 0,
+      result: {
+        transcription: 'Text 0',
+        detectedLanguage: 'cs-old',
+        translation: 'Překlad 0',
+        translationLanguage: 'cs',
+        context: 'Kontext 0',
+        glossary: [{ term: 'slovo', definition: 'význam' }],
+      },
+    },
+    {
+      index: 1,
+      result: {
+        transcription: 'Text 1',
+        detectedLanguage: 'cs-old',
+        translation: 'Překlad 1',
+        translationLanguage: 'cs',
+        context: 'Kontext 1',
+        glossary: [],
+      },
+    },
   ],
   rawResponse: '{"imageIndex":0,...}\n{"imageIndex":1,...}',
   processingTimeMs: 200,
@@ -486,37 +506,57 @@ describe('batch processing', () => {
 
   it('sends batch_info event for multi-page batch', async () => {
     mockPageFindUnique
-      .mockResolvedValueOnce({ id: 'p1', imageUrl: '/api/images/a.jpg', fileSize: 400000, document: null, collection: null })
-      .mockResolvedValueOnce({ id: 'p2', imageUrl: '/api/images/b.jpg', fileSize: 400000, document: null, collection: null });
+      .mockResolvedValueOnce({
+        id: 'p1',
+        imageUrl: '/api/images/a.jpg',
+        fileSize: 400000,
+        document: null,
+        collection: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'p2',
+        imageUrl: '/api/images/b.jpg',
+        fileSize: 400000,
+        document: null,
+        collection: null,
+      });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockDocFindUnique.mockResolvedValue(null);
-    mockDocCreate
-      .mockResolvedValueOnce({ id: 'doc-1' })
-      .mockResolvedValueOnce({ id: 'doc-2' });
+    mockDocCreate.mockResolvedValueOnce({ id: 'doc-1' }).mockResolvedValueOnce({ id: 'doc-2' });
     mockProcessWithClaudeBatch.mockResolvedValue(BATCH_CLAUDE_RESULT);
 
     const res = await POST(makeRequest({ pageIds: ['p1', 'p2'] }));
     const events = await consumeSSE(res);
 
-    const batchInfoEvent = events.find(e => e.event === 'batch_info');
+    const batchInfoEvent = events.find((e) => e.event === 'batch_info');
     expect(batchInfoEvent).toBeDefined();
     expect(batchInfoEvent!.data.batchNumber).toBe(1);
     expect(batchInfoEvent!.data.totalBatches).toBe(1);
     expect(batchInfoEvent!.data.pageCount).toBe(2);
 
-    const pageDoneEvents = events.filter(e => e.event === 'page_done');
+    const pageDoneEvents = events.filter((e) => e.event === 'page_done');
     expect(pageDoneEvents).toHaveLength(2);
   });
 
   it('falls back to individual processing on batch failure', async () => {
     mockPageFindUnique
-      .mockResolvedValueOnce({ id: 'p1', imageUrl: '/api/images/a.jpg', fileSize: 400000, document: null, collection: null })
-      .mockResolvedValueOnce({ id: 'p2', imageUrl: '/api/images/b.jpg', fileSize: 400000, document: null, collection: null });
+      .mockResolvedValueOnce({
+        id: 'p1',
+        imageUrl: '/api/images/a.jpg',
+        fileSize: 400000,
+        document: null,
+        collection: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'p2',
+        imageUrl: '/api/images/b.jpg',
+        fileSize: 400000,
+        document: null,
+        collection: null,
+      });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockDocFindUnique.mockResolvedValue(null);
-    mockDocCreate
-      .mockResolvedValueOnce({ id: 'doc-1' })
-      .mockResolvedValueOnce({ id: 'doc-2' });
+    mockDocCreate.mockResolvedValueOnce({ id: 'doc-1' }).mockResolvedValueOnce({ id: 'doc-2' });
     // Batch fails
     mockProcessWithClaudeBatch.mockRejectedValue(new Error('API Error'));
     // Individual succeeds
@@ -527,14 +567,17 @@ describe('batch processing', () => {
 
     // Should have fallen back to individual processing
     expect(mockProcessWithClaude).toHaveBeenCalledTimes(2);
-    const pageDoneEvents = events.filter(e => e.event === 'page_done');
+    const pageDoneEvents = events.filter((e) => e.event === 'page_done');
     expect(pageDoneEvents).toHaveLength(2);
   });
 
   it('adds previous page context for single-page processing', async () => {
     mockPageFindUnique.mockResolvedValue({
-      id: 'p3', imageUrl: '/api/images/c.jpg', fileSize: 400000,
-      document: null, collection: { id: 'col-1', context: null },
+      id: 'p3',
+      imageUrl: '/api/images/c.jpg',
+      fileSize: 400000,
+      document: null,
+      collection: { id: 'col-1', context: null },
     });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockDocFindUnique.mockResolvedValue(null);

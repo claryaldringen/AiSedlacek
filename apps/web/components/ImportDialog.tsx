@@ -85,10 +85,14 @@ export function ImportDialog({
         (file) =>
           new Promise<FileStatus>((resolve) => {
             const error = validateFile(file);
-            if (error) { resolve({ file, state: 'error', error }); return; }
+            if (error) {
+              resolve({ file, state: 'error', error });
+              return;
+            }
             if (file.type.startsWith('image/')) {
               const reader = new FileReader();
-              reader.onload = (e) => resolve({ file, state: 'pending', preview: e.target?.result as string });
+              reader.onload = (e) =>
+                resolve({ file, state: 'pending', preview: e.target?.result as string });
               reader.readAsDataURL(file);
             } else {
               resolve({ file, state: 'pending' });
@@ -105,7 +109,10 @@ export function ImportDialog({
       setIsUploading(true);
 
       const validFiles = statuses.filter((s) => s.state !== 'error');
-      if (validFiles.length === 0) { setIsUploading(false); return; }
+      if (validFiles.length === 0) {
+        setIsUploading(false);
+        return;
+      }
 
       setFileStatuses((prev) =>
         prev.map((s) => (s.state === 'pending' ? { ...s, state: 'uploading' as const } : s)),
@@ -141,7 +148,9 @@ export function ImportDialog({
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';
         setFileStatuses((prev) =>
-          prev.map((s) => (s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s)),
+          prev.map((s) =>
+            s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s,
+          ),
         );
       } finally {
         setIsUploading(false);
@@ -212,18 +221,23 @@ export function ImportDialog({
           if (data.type === 'source' && data.label && data.thumbnailUrl) {
             // Update the entered URL (first item) with proper label/thumbnail
             setDiscovered((prev) =>
-              prev.map((d, i) => (i === 0 ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! } : d)),
+              prev.map((d, i) =>
+                i === 0 ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! } : d,
+              ),
             );
           } else if (data.type === 'found' && data.url && data.label && data.thumbnailUrl) {
             setDiscovered((prev) => {
               if (prev.some((d) => d.url === data.url)) return prev;
-              return [...prev, {
-                url: data.url!,
-                label: data.label!,
-                thumbnailUrl: data.thumbnailUrl!,
-                selected: true,
-                state: 'pending' as const,
-              }];
+              return [
+                ...prev,
+                {
+                  url: data.url!,
+                  label: data.label!,
+                  thumbnailUrl: data.thumbnailUrl!,
+                  selected: true,
+                  state: 'pending' as const,
+                },
+              ];
             });
           }
         }
@@ -245,9 +259,15 @@ export function ImportDialog({
     setIsDiscovering(false);
     const url = urlInput.trim();
     if (!url) return;
-    try { new URL(url); } catch { return; }
+    try {
+      new URL(url);
+    } catch {
+      return;
+    }
     const enteredFilename = decodeURIComponent(url.split('/').pop() ?? 'unknown');
-    setDiscovered([{ url, label: enteredFilename, thumbnailUrl: url, selected: true, state: 'pending' }]);
+    setDiscovered([
+      { url, label: enteredFilename, thumbnailUrl: url, selected: true, state: 'pending' },
+    ]);
     discoverTimeoutRef.current = setTimeout(() => {
       void discoverRelated(url);
     }, 500);
@@ -276,7 +296,9 @@ export function ImportDialog({
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Chyba';
         setDiscovered((prev) =>
-          prev.map((d) => (d.url === item.url ? { ...d, state: 'error' as const, error: message } : d)),
+          prev.map((d) =>
+            d.url === item.url ? { ...d, state: 'error' as const, error: message } : d,
+          ),
         );
       }
     }
@@ -324,7 +346,13 @@ export function ImportDialog({
             onClick={onClose}
             className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
           >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
@@ -336,18 +364,38 @@ export function ImportDialog({
             <>
               {/* Drop zone */}
               <div
-                onDrop={(e) => { e.preventDefault(); setIsDragOver(false); if (e.dataTransfer.files.length > 0) void uploadFiles(Array.from(e.dataTransfer.files)); }}
-                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(false);
+                  if (e.dataTransfer.files.length > 0)
+                    void uploadFiles(Array.from(e.dataTransfer.files));
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(true);
+                }}
                 onDragLeave={() => setIsDragOver(false)}
                 onClick={() => !isUploading && inputRef.current?.click()}
                 className={[
                   'flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center transition-colors',
-                  isDragOver ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50',
+                  isDragOver
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50',
                   isUploading ? 'pointer-events-none opacity-60' : '',
                 ].join(' ')}
               >
-                <svg className="mb-3 h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                <svg
+                  className="mb-3 h-10 w-10 text-slate-300"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                  />
                 </svg>
                 {isUploading ? (
                   <p className="text-slate-600">Nahrávám…</p>
@@ -359,13 +407,25 @@ export function ImportDialog({
                 ) : (
                   <>
                     <p className="text-slate-600">
-                      Přetáhněte soubory sem nebo <span className="font-medium text-blue-600">vyberte ze zařízení</span>
+                      Přetáhněte soubory sem nebo{' '}
+                      <span className="font-medium text-blue-600">vyberte ze zařízení</span>
                     </p>
-                    <p className="mt-2 text-xs text-slate-400">JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB</p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB
+                    </p>
                   </>
                 )}
               </div>
-              <input ref={inputRef} type="file" accept={ALLOWED_TYPES.join(',')} multiple onChange={(e) => { if (e.target.files?.length) void uploadFiles(Array.from(e.target.files)); }} className="sr-only" />
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ALLOWED_TYPES.join(',')}
+                multiple
+                onChange={(e) => {
+                  if (e.target.files?.length) void uploadFiles(Array.from(e.target.files));
+                }}
+                className="sr-only"
+              />
 
               {/* File list */}
               {fileStatuses.length > 0 && (
@@ -385,7 +445,11 @@ export function ImportDialog({
                 <input
                   type="url"
                   value={urlInput}
-                  onChange={(e) => { setUrlInput(e.target.value); setUrlError(null); setUrlSuccess(null); }}
+                  onChange={(e) => {
+                    setUrlInput(e.target.value);
+                    setUrlError(null);
+                    setUrlSuccess(null);
+                  }}
                   onKeyDown={(e) => e.stopPropagation()}
                   placeholder="https://… (přímý odkaz na obrázek)"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
@@ -398,8 +462,19 @@ export function ImportDialog({
               {isDiscovering && (
                 <div className="flex items-center gap-2 text-sm text-slate-500">
                   <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                   Hledám další stránky…
                 </div>
@@ -413,13 +488,17 @@ export function ImportDialog({
                     </p>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setDiscovered((prev) => prev.map((d) => ({ ...d, selected: true })))}
+                        onClick={() =>
+                          setDiscovered((prev) => prev.map((d) => ({ ...d, selected: true })))
+                        }
                         className="text-xs text-blue-600 hover:underline"
                       >
                         Vše
                       </button>
                       <button
-                        onClick={() => setDiscovered((prev) => prev.map((d) => ({ ...d, selected: false })))}
+                        onClick={() =>
+                          setDiscovered((prev) => prev.map((d) => ({ ...d, selected: false })))
+                        }
                         className="text-xs text-slate-400 hover:underline"
                       >
                         Nic
@@ -433,7 +512,9 @@ export function ImportDialog({
                         onClick={() =>
                           d.state === 'pending' &&
                           setDiscovered((prev) =>
-                            prev.map((x) => (x.url === d.url ? { ...x, selected: !x.selected } : x)),
+                            prev.map((x) =>
+                              x.url === d.url ? { ...x, selected: !x.selected } : x,
+                            ),
                           )
                         }
                         disabled={d.state !== 'pending'}
@@ -458,29 +539,66 @@ export function ImportDialog({
                         </div>
                         {d.state === 'pending' && d.selected && (
                           <div className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500">
-                            <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            <svg
+                              className="h-2.5 w-2.5 text-white"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={3}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="m4.5 12.75 6 6 9-13.5"
+                              />
                             </svg>
                           </div>
                         )}
                         {d.state === 'importing' && (
                           <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <svg className="h-5 w-5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            <svg
+                              className="h-5 w-5 animate-spin text-white"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                              />
                             </svg>
                           </div>
                         )}
                         {d.state === 'done' && (
                           <div className="absolute inset-0 flex items-center justify-center bg-green-500/20">
-                            <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            <svg
+                              className="h-6 w-6 text-green-600"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2.5}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="m4.5 12.75 6 6 9-13.5"
+                              />
                             </svg>
                           </div>
                         )}
                         {d.state === 'error' && (
                           <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
-                            <span className="rounded bg-red-600 px-1 text-[9px] text-white">Chyba</span>
+                            <span className="rounded bg-red-600 px-1 text-[9px] text-white">
+                              Chyba
+                            </span>
                           </div>
                         )}
                       </button>
@@ -491,7 +609,8 @@ export function ImportDialog({
                       onClick={() => void handleImportDiscovered()}
                       className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                     >
-                      Importovat vybrané ({discovered.filter((d) => d.selected && d.state === 'pending').length})
+                      Importovat vybrané (
+                      {discovered.filter((d) => d.selected && d.state === 'pending').length})
                     </button>
                   )}
                 </div>
@@ -521,12 +640,29 @@ function FileStatusRow({ status: s }: { status: FileStatus }): React.JSX.Element
       <span className="flex-1 truncate text-slate-700">{s.file.name}</span>
       {s.state === 'uploading' && (
         <svg className="h-4 w-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+          />
         </svg>
       )}
       {s.state === 'done' && (
-        <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <svg
+          className="h-4 w-4 text-green-500"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
         </svg>
       )}

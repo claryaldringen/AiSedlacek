@@ -67,7 +67,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     displayName?: unknown;
   };
 
-  const data: { collectionId?: string | null; order?: number; status?: string; displayName?: string | null } = {};
+  const data: {
+    collectionId?: string | null;
+    order?: number;
+    status?: string;
+    displayName?: string | null;
+  } = {};
 
   if ('collectionId' in (body as object)) {
     data.collectionId =
@@ -88,9 +93,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   if ('displayName' in (body as object)) {
     data.displayName =
-      typeof displayName === 'string' && displayName.trim() !== ''
-        ? displayName.trim()
-        : null;
+      typeof displayName === 'string' && displayName.trim() !== '' ? displayName.trim() : null;
   }
 
   if (Object.keys(data).length === 0) {

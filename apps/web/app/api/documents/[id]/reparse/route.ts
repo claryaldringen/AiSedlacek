@@ -42,7 +42,13 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
   }
 
   // Save old transcription as version
-  await createVersion(id, 'transcription', doc.transcription, 'ai_regenerate', doc.model ?? undefined);
+  await createVersion(
+    id,
+    'transcription',
+    doc.transcription,
+    'ai_regenerate',
+    doc.model ?? undefined,
+  );
 
   // Update document with re-parsed data
   await prisma.document.update({
@@ -60,7 +66,13 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
     where: { documentId_language: { documentId: id, language: lang } },
   });
   if (existingTranslation) {
-    await createVersion(id, `translation:${lang}`, existingTranslation.text, 'ai_regenerate', doc.model ?? undefined);
+    await createVersion(
+      id,
+      `translation:${lang}`,
+      existingTranslation.text,
+      'ai_regenerate',
+      doc.model ?? undefined,
+    );
   }
   await prisma.translation.upsert({
     where: { documentId_language: { documentId: id, language: lang } },

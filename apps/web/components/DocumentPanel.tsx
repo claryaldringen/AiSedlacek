@@ -64,7 +64,8 @@ export function DocumentPanel({
     (e: KeyboardEvent): void => {
       // Don't capture arrows when typing in chat input or title
       const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable;
+      const isInput =
+        target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable;
 
       if (e.key === 'Escape' && !isInput) onClose();
       if (!isInput && e.key === 'ArrowLeft' && hasPrevious) onPrevious?.();
@@ -84,7 +85,10 @@ export function DocumentPanel({
       void fetch(`/api/documents/${result.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: content, ...(field === 'translation' ? { translationLanguage: result.translationLanguage } : {}) }),
+        body: JSON.stringify({
+          [field]: content,
+          ...(field === 'translation' ? { translationLanguage: result.translationLanguage } : {}),
+        }),
       });
       const updated = { ...result, [field]: content };
       onResultUpdate?.(updated);
@@ -139,8 +143,18 @@ export function DocumentPanel({
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                 aria-label="Předchozí"
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15.75 19.5 8.25 12l7.5-7.5"
+                  />
                 </svg>
               </button>
               <button
@@ -149,8 +163,18 @@ export function DocumentPanel({
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                 aria-label="Další"
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                  />
                 </svg>
               </button>
             </div>
@@ -196,12 +220,33 @@ export function DocumentPanel({
               >
                 {isRegenerating ? (
                   <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                 ) : (
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
+                    />
                   </svg>
                 )}
                 {isRegenerating ? 'Generuji…' : 'Přegenerovat'}
@@ -212,7 +257,13 @@ export function DocumentPanel({
               className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
               aria-label="Zavřít"
             >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
             </button>
@@ -228,11 +279,7 @@ export function DocumentPanel({
                 <span className="text-xs font-medium text-slate-500">Originál</span>
               </div>
               <div className="flex-1 overflow-auto p-4">
-                <img
-                  src={page.imageUrl}
-                  alt={title}
-                  className="w-full rounded shadow-sm"
-                />
+                <img src={page.imageUrl} alt={title} className="w-full rounded shadow-sm" />
               </div>
             </div>
           )}
@@ -274,11 +321,28 @@ export function DocumentPanel({
               {isRegenerating || status === 'processing' ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="w-full max-w-xs space-y-3 text-center">
-                    <svg className="mx-auto h-8 w-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <svg
+                      className="mx-auto h-8 w-8 animate-spin text-blue-500"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
                     </svg>
-                    <p className="text-sm text-slate-600">{regenerateStep ?? 'Zpracovávám dokument…'}</p>
+                    <p className="text-sm text-slate-600">
+                      {regenerateStep ?? 'Zpracovávám dokument…'}
+                    </p>
                     {regenerateProgress != null && (
                       <div className="space-y-1">
                         <div className="h-2 overflow-hidden rounded-full bg-slate-100">
@@ -295,9 +359,24 @@ export function DocumentPanel({
               ) : isLoading ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="text-center">
-                    <svg className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <svg
+                      className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
                     </svg>
                     <p className="text-sm text-slate-500">Načítám…</p>
                   </div>
@@ -305,7 +384,9 @@ export function DocumentPanel({
               ) : status === 'done' && result ? (
                 <>
                   {/* Result tab */}
-                  <div className={`h-full overflow-y-auto p-4 ${activeTab !== 'result' ? 'hidden' : ''}`}>
+                  <div
+                    className={`h-full overflow-y-auto p-4 ${activeTab !== 'result' ? 'hidden' : ''}`}
+                  >
                     <ResultViewer result={result} onUpdate={onResultUpdate} />
                   </div>
                   {/* Chat tab */}

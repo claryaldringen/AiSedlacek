@@ -23,15 +23,19 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { language, previousTranslation } = (body as {
-    language?: string;
-    previousTranslation?: string;
-  }) ?? {};
+  const { language, previousTranslation } =
+    (body as {
+      language?: string;
+      previousTranslation?: string;
+    }) ?? {};
   const targetLang = typeof language === 'string' ? language : 'cs';
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: { translations: { where: { language: targetLang } }, page: { select: { userId: true } } },
+    include: {
+      translations: { where: { language: targetLang } },
+      page: { select: { userId: true } },
+    },
   });
   if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
@@ -69,15 +73,21 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,
+    temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  const translatedText =
-    response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const translatedText = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
   // Save old translation as version before overwriting
   if (existingTranslation) {
-    await createVersion(id, `translation:${targetLang}`, existingTranslation, 'ai_retranslate', response.model);
+    await createVersion(
+      id,
+      `translation:${targetLang}`,
+      existingTranslation,
+      'ai_retranslate',
+      response.model,
+    );
   }
 
   await prisma.translation.upsert({

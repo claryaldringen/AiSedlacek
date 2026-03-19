@@ -123,7 +123,14 @@ describe('parseOcrJsonBatch', () => {
   });
 
   it('falls back to positional index if imageIndex is missing', () => {
-    const noIndex = { transcription: 'text', detectedLanguage: 'la', translation: 'překlad', translationLanguage: 'cs', context: '', glossary: [] };
+    const noIndex = {
+      transcription: 'text',
+      detectedLanguage: 'la',
+      translation: 'překlad',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
     const input = `${JSON.stringify(noIndex)}\n${JSON.stringify(noIndex)}`;
     const results = parseOcrJsonBatch(input);
     expect(results[0]!.index).toBe(0);
@@ -131,7 +138,8 @@ describe('parseOcrJsonBatch', () => {
   });
 
   it('handles markdown fences around JSONL', () => {
-    const input = '```json\n' + JSON.stringify(makeResult(0)) + '\n' + JSON.stringify(makeResult(1)) + '\n```';
+    const input =
+      '```json\n' + JSON.stringify(makeResult(0)) + '\n' + JSON.stringify(makeResult(1)) + '\n```';
     const results = parseOcrJsonBatch(input);
     expect(results).toHaveLength(2);
   });

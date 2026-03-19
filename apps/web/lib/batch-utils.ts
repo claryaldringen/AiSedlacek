@@ -17,10 +17,7 @@ interface BatchOptions {
   avgOutputPerPage: number;
 }
 
-export function createBatches<T extends BatchablePage>(
-  pages: T[],
-  options: BatchOptions,
-): T[][] {
+export function createBatches<T extends BatchablePage>(pages: T[], options: BatchOptions): T[][] {
   if (pages.length === 0) return [];
 
   const { inputTokenBudget, maxOutputTokens, avgOutputPerPage } = options;
@@ -32,7 +29,8 @@ export function createBatches<T extends BatchablePage>(
 
   for (const page of pages) {
     const pageTokens = estimateImageTokens(page.fileSize);
-    const wouldExceedInput = currentBatch.length > 0 && currentInputTokens + pageTokens > inputTokenBudget;
+    const wouldExceedInput =
+      currentBatch.length > 0 && currentInputTokens + pageTokens > inputTokenBudget;
     const wouldExceedOutput = currentBatch.length >= maxPagesByOutput;
 
     if (wouldExceedInput || wouldExceedOutput) {
@@ -56,10 +54,7 @@ export function createBatches<T extends BatchablePage>(
  * Truncate context text to an approximate token limit.
  * Uses ~4 chars/token heuristic. Returns undefined for empty input.
  */
-export function truncateContext(
-  text: string | undefined,
-  maxTokens: number,
-): string | undefined {
+export function truncateContext(text: string | undefined, maxTokens: number): string | undefined {
   if (!text || text.trim().length === 0) return undefined;
   const maxChars = maxTokens * CHARS_PER_TOKEN;
   if (text.length <= maxChars) return text;

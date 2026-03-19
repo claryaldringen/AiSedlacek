@@ -37,7 +37,10 @@ async function getPreviousPageContext(
   if (previousPages.length === 0) return undefined;
   const text = previousPages
     .reverse()
-    .map((p: { document?: { transcription: string } | null }, i: number) => `[Stránka ${i + 1}]\n${p.document?.transcription ?? ''}`)
+    .map(
+      (p: { document?: { transcription: string } | null }, i: number) =>
+        `[Stránka ${i + 1}]\n${p.document?.transcription ?? ''}`,
+    )
     .join('\n\n---\n\n');
   return truncateContext(text, 500);
 }
@@ -95,7 +98,13 @@ async function saveDocumentResult(
   });
 
   await createVersion(doc.id, 'transcription', result.transcription, 'ai_initial', metadata.model);
-  await createVersion(doc.id, `translation:${result.translationLanguage || targetLang}`, result.translation, 'ai_initial', metadata.model);
+  await createVersion(
+    doc.id,
+    `translation:${result.translationLanguage || targetLang}`,
+    result.translation,
+    'ai_initial',
+    metadata.model,
+  );
   await createVersion(doc.id, 'context', result.context, 'ai_initial', metadata.model);
 
   return doc;
@@ -106,7 +115,7 @@ interface PreparedPage {
   page: {
     id: string;
     imageUrl: string;
-    fileSize?: number;
+    fileSize?: number | null;
     document: { id: string } | null;
     collection?: { id: string; context: string | null } | null;
   };
@@ -148,7 +157,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   const ownedIds = new Set(ownedPages.map((p) => p.id));
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
   if (unauthorizedIds.length > 0) {
-    return Response.json({ error: 'Některé stránky nepatří přihlášenému uživateli' }, { status: 403 });
+    return Response.json(
+      { error: 'Některé stránky nepatří přihlášenému uživateli' },
+      { status: 403 },
+    );
   }
 
   const targetLang =
@@ -363,7 +375,11 @@ export async function POST(request: NextRequest): Promise<Response> {
             );
 
             const doc = await saveDocumentResult(
-              pp.pageId, pp.page.document, pp.imageHash, result, rawResponse,
+              pp.pageId,
+              pp.page.document,
+              pp.imageHash,
+              result,
+              rawResponse,
               { model, inputTokens, outputTokens, processingTimeMs },
               targetLang,
             );
@@ -473,7 +489,11 @@ export async function POST(request: NextRequest): Promise<Response> {
               try {
                 const rawLine = rawLines[i] ?? batchResult.rawResponse;
                 const doc = await saveDocumentResult(
-                  pp.pageId, pp.page.document, pp.imageHash, resultEntry.result, rawLine,
+                  pp.pageId,
+                  pp.page.document,
+                  pp.imageHash,
+                  resultEntry.result,
+                  rawLine,
                   {
                     model: batchResult.model,
                     inputTokens: Math.round(batchResult.inputTokens / batchPages.length),
@@ -519,7 +539,9 @@ export async function POST(request: NextRequest): Promise<Response> {
             batchSuccess = true;
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Neznámá chyba';
-            console.warn(`[BatchProcess] Batch ${batchNumber} failed: ${message}, falling back to individual processing`);
+            console.warn(
+              `[BatchProcess] Batch ${batchNumber} failed: ${message}, falling back to individual processing`,
+            );
             batchSuccess = false;
           }
 
@@ -540,7 +562,9 @@ export async function POST(request: NextRequest): Promise<Response> {
                       const tokenProgress = Math.min(currentTokens / estTotal, 0.95);
                       const pageBase = completed / total;
                       const pageSlice = 1 / total;
-                      const overallProgress = Math.round((pageBase + pageSlice * tokenProgress) * 100);
+                      const overallProgress = Math.round(
+                        (pageBase + pageSlice * tokenProgress) * 100,
+                      );
                       sendEvent(controller, encoder, 'page_progress', {
                         pageId: pp.pageId,
                         message: `Generuji text… (${currentTokens}/${estTotal} tokenů)`,
@@ -554,7 +578,11 @@ export async function POST(request: NextRequest): Promise<Response> {
                 );
 
                 const doc = await saveDocumentResult(
-                  pp.pageId, pp.page.document, pp.imageHash, result, rawResponse,
+                  pp.pageId,
+                  pp.page.document,
+                  pp.imageHash,
+                  result,
+                  rawResponse,
                   { model, inputTokens, outputTokens, processingTimeMs },
                   targetLang,
                 );

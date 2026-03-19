@@ -54,8 +54,24 @@ describe('processWithClaudeBatch', () => {
   });
 
   it('sends multiple images and returns parsed JSONL results', async () => {
-    const result0 = { imageIndex: 0, transcription: 'text0', detectedLanguage: 'la', translation: 'tr0', translationLanguage: 'cs', context: '', glossary: [] };
-    const result1 = { imageIndex: 1, transcription: 'text1', detectedLanguage: 'la', translation: 'tr1', translationLanguage: 'cs', context: '', glossary: [] };
+    const result0 = {
+      imageIndex: 0,
+      transcription: 'text0',
+      detectedLanguage: 'la',
+      translation: 'tr0',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
+    const result1 = {
+      imageIndex: 1,
+      transcription: 'text1',
+      detectedLanguage: 'la',
+      translation: 'tr1',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
     setupMockStream(JSON.stringify(result0) + '\n' + JSON.stringify(result1));
 
     const images = [
@@ -74,7 +90,15 @@ describe('processWithClaudeBatch', () => {
   });
 
   it('includes collectionContext and previousContext in the request', async () => {
-    const result0 = { imageIndex: 0, transcription: 'text0', detectedLanguage: 'la', translation: 'tr0', translationLanguage: 'cs', context: '', glossary: [] };
+    const result0 = {
+      imageIndex: 0,
+      transcription: 'text0',
+      detectedLanguage: 'la',
+      translation: 'tr0',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
     setupMockStream(JSON.stringify(result0));
 
     const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
@@ -110,7 +134,14 @@ describe('processWithClaude with previousContext', () => {
   });
 
   it('includes previousContext in the message content when provided', async () => {
-    const singleResult = { transcription: 'text', detectedLanguage: 'la', translation: 'tr', translationLanguage: 'cs', context: '', glossary: [] };
+    const singleResult = {
+      transcription: 'text',
+      detectedLanguage: 'la',
+      translation: 'tr',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
     setupMockStream(JSON.stringify(singleResult));
 
     await processWithClaude(
@@ -130,13 +161,17 @@ describe('processWithClaude with previousContext', () => {
   });
 
   it('does not include previousContext when not provided', async () => {
-    const singleResult = { transcription: 'text', detectedLanguage: 'la', translation: 'tr', translationLanguage: 'cs', context: '', glossary: [] };
+    const singleResult = {
+      transcription: 'text',
+      detectedLanguage: 'la',
+      translation: 'tr',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
     setupMockStream(JSON.stringify(singleResult));
 
-    await processWithClaude(
-      Buffer.from([0xff, 0xd8, 0x00]),
-      'Přepiš text.',
-    );
+    await processWithClaude(Buffer.from([0xff, 0xd8, 0x00]), 'Přepiš text.');
 
     const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
     const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];

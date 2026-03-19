@@ -186,7 +186,9 @@ async function prepareImage(image: Buffer): Promise<{ buffer: Buffer; mediaType:
   let imageToSend = image;
 
   if (image.length > MAX_BYTES) {
-    console.log(`[Claude] Image too large (${(image.length / 1024 / 1024).toFixed(1)} MB), resizing…`);
+    console.log(
+      `[Claude] Image too large (${(image.length / 1024 / 1024).toFixed(1)} MB), resizing…`,
+    );
     imageToSend = await sharp(image)
       .resize({ width: 3000, withoutEnlargement: true })
       .jpeg({ quality: 85 })
@@ -243,7 +245,12 @@ export async function processWithClaude(
             },
           },
           ...(previousContext
-            ? [{ type: 'text' as const, text: `Kontext z předchozích stránek rukopisu:\n${previousContext}` }]
+            ? [
+                {
+                  type: 'text' as const,
+                  text: `Kontext z předchozích stránek rukopisu:\n${previousContext}`,
+                },
+              ]
             : []),
           {
             type: 'text',
@@ -273,7 +280,8 @@ export async function processWithClaude(
     }),
   );
 
-  const text = fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
+  const text =
+    fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
   let parsed: StructuredOcrResult;
   try {
@@ -389,8 +397,7 @@ export async function processWithClaudeBatch(
   );
 
   const text =
-    fullText ||
-    (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
+    fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
   const results = parseOcrJsonBatch(text, images.length);
 

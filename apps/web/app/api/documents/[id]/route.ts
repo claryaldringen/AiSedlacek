@@ -77,9 +77,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   // Update translation if provided
   if (typeof translation === 'string' && typeof translationLanguage === 'string') {
-    const existingTranslation = current.translations.find((t) => t.language === translationLanguage);
+    const existingTranslation = current.translations.find(
+      (t) => t.language === translationLanguage,
+    );
     if (existingTranslation && existingTranslation.text !== translation) {
-      await createVersion(id, `translation:${translationLanguage}`, existingTranslation.text, 'manual_edit');
+      await createVersion(
+        id,
+        `translation:${translationLanguage}`,
+        existingTranslation.text,
+        'manual_edit',
+      );
     }
     await prisma.translation.upsert({
       where: { documentId_language: { documentId: id, language: translationLanguage } },

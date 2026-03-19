@@ -42,9 +42,7 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
     return Response.json({ error: 'Svazek nemá kontext' }, { status: 422 });
   }
 
-  const documents = collection.pages
-    .filter((p) => p.document !== null)
-    .map((p) => p.document!);
+  const documents = collection.pages.filter((p) => p.document !== null).map((p) => p.document!);
 
   if (documents.length === 0) {
     return Response.json({ error: 'Žádné zpracované dokumenty' }, { status: 422 });

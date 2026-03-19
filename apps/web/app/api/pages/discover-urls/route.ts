@@ -25,7 +25,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: unknown): void => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: event, ...data as Record<string, unknown> })}\n\n`));
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: event, ...(data as Record<string, unknown>) })}\n\n`,
+          ),
+        );
       };
 
       try {
@@ -48,7 +52,10 @@ export async function POST(request: NextRequest): Promise<Response> {
           const MAX_CONSECUTIVE_MISSES = 10;
           let count = 0;
 
-          const buildCandidateUrl = (n: number, side: string): { candidateStr: string; candidate: string; newSegments: string[] } => {
+          const buildCandidateUrl = (
+            n: number,
+            side: string,
+          ): { candidateStr: string; candidate: string; newSegments: string[] } => {
             const candidate = `${prefix}${String(n).padStart(pad, '0')}${side}`;
             const newSegments = [...segments];
             newSegments[index] = candidate;
@@ -83,7 +90,11 @@ export async function POST(request: NextRequest): Promise<Response> {
               else misses = 0;
             }
             misses = 0;
-            for (let n = num - 1; n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES; n--) {
+            for (
+              let n = num - 1;
+              n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES;
+              n--
+            ) {
               let anyFound = false;
               for (const s of ['R', 'V']) {
                 if (await tryAdd(n, s)) anyFound = true;
@@ -98,16 +109,20 @@ export async function POST(request: NextRequest): Promise<Response> {
               else misses++;
             }
             misses = 0;
-            for (let n = num - 1; n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES; n--) {
+            for (
+              let n = num - 1;
+              n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES;
+              n--
+            ) {
               if (await tryAdd(n, '')) misses = 0;
               else misses++;
             }
           }
         }
 
-        send('done', { });
+        send('done', {});
       } catch {
-        send('done', { });
+        send('done', {});
       } finally {
         controller.close();
       }
@@ -122,7 +137,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     },
   });
 }
-
 
 interface PageSegment {
   index: number;
@@ -166,8 +180,6 @@ function findPageSegment(segments: string[]): PageSegment | null {
   return null;
 }
 
-
-
 /**
  * Extract a human-readable page label from the segment.
  * "ID0009V" → "9v", "folio_003r" → "3r", "page_042" → "42"
@@ -193,8 +205,8 @@ function formatPageLabel(segment: string, prefix: string): string {
 function buildThumbnailUrl(fullUrl: string, parsed: URL, segments: string[]): string {
   // IIIF pattern: .../identifier/region/size/rotation/quality.format
   // Replace size segment "full" with "150," for thumbnail
-  const sizeIndex = segments.findIndex((s, i) =>
-    s === 'full' && i > 0 && segments[i - 1] === 'full',
+  const sizeIndex = segments.findIndex(
+    (s, i) => s === 'full' && i > 0 && segments[i - 1] === 'full',
   );
   if (sizeIndex > 0) {
     const thumbSegments = [...segments];

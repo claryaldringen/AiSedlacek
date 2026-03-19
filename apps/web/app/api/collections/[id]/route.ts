@@ -66,10 +66,18 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   const { name, description, context, contextUrl } = body as {
-    name?: unknown; description?: unknown; context?: unknown; contextUrl?: unknown;
+    name?: unknown;
+    description?: unknown;
+    context?: unknown;
+    contextUrl?: unknown;
   };
 
-  const data: { name?: string; description?: string; context?: string; contextUrl?: string | null } = {};
+  const data: {
+    name?: string;
+    description?: string;
+    context?: string;
+    contextUrl?: string | null;
+  } = {};
   if (typeof name === 'string' && name.trim() !== '') {
     data.name = name.trim();
   }
@@ -80,7 +88,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     data.context = context;
   }
   if ('contextUrl' in (body as object)) {
-    data.contextUrl = typeof contextUrl === 'string' && contextUrl.trim() !== '' ? contextUrl.trim() : null;
+    data.contextUrl =
+      typeof contextUrl === 'string' && contextUrl.trim() !== '' ? contextUrl.trim() : null;
   }
 
   if (Object.keys(data).length === 0) {

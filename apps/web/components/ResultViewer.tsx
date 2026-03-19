@@ -110,11 +110,7 @@ function EditableSection({
       </div>
       {editing ? (
         <div className="p-2">
-          <MarkdownEditor
-            ref={editorRef}
-            initialValue={content}
-            onChange={setDraft}
-          />
+          <MarkdownEditor ref={editorRef} initialValue={content} onChange={setDraft} />
         </div>
       ) : (
         <div className="prose prose-stone prose-sm max-w-none p-6">
@@ -183,8 +179,19 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
       {retranslating && (
         <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
           <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
           </svg>
           Překlad se aktualizuje na základě upravené transkripce…
         </div>
@@ -276,14 +283,22 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
               />
               <MetadataRow
                 label="Čas zpracování"
-                value={result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null}
+                value={
+                  result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
+                }
               />
               <MetadataRow
                 label="Cena"
                 value={formatCost(result.model, result.inputTokens, result.outputTokens)}
               />
-              <MetadataRow label="Vytvořeno" value={result.createdAt ? formatDate(result.createdAt) : null} />
-              <MetadataRow label="Upraveno" value={result.updatedAt ? formatDate(result.updatedAt) : null} />
+              <MetadataRow
+                label="Vytvořeno"
+                value={result.createdAt ? formatDate(result.createdAt) : null}
+              />
+              <MetadataRow
+                label="Upraveno"
+                value={result.updatedAt ? formatDate(result.updatedAt) : null}
+              />
             </MetadataGroup>
 
             {/* Translation */}
@@ -300,7 +315,11 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 />
                 <MetadataRow
                   label="Cena"
-                  value={formatCost(result.translationModel, result.translationInputTokens, result.translationOutputTokens)}
+                  value={formatCost(
+                    result.translationModel,
+                    result.translationInputTokens,
+                    result.translationOutputTokens,
+                  )}
                 />
               </MetadataGroup>
             )}
@@ -315,20 +334,39 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 />
                 <MetadataRow
                   label="Cena"
-                  value={formatCost(result.chatModel, result.chatInputTokens, result.chatOutputTokens)}
+                  value={formatCost(
+                    result.chatModel,
+                    result.chatInputTokens,
+                    result.chatOutputTokens,
+                  )}
                 />
               </MetadataGroup>
             )}
 
             {/* Total cost */}
             {(() => {
-              const processCost = computeCostRaw(result.model, result.inputTokens, result.outputTokens);
-              const translationCost = computeCostRaw(result.translationModel, result.translationInputTokens, result.translationOutputTokens);
-              const chatCost = computeCostRaw(result.chatModel, result.chatInputTokens, result.chatOutputTokens);
+              const processCost = computeCostRaw(
+                result.model,
+                result.inputTokens,
+                result.outputTokens,
+              );
+              const translationCost = computeCostRaw(
+                result.translationModel,
+                result.translationInputTokens,
+                result.translationOutputTokens,
+              );
+              const chatCost = computeCostRaw(
+                result.chatModel,
+                result.chatInputTokens,
+                result.chatOutputTokens,
+              );
               const total = processCost + translationCost + chatCost;
               return total > 0 ? (
                 <MetadataGroup title="Celkem">
-                  <MetadataRow label="Celková cena" value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`} />
+                  <MetadataRow
+                    label="Celková cena"
+                    value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
+                  />
                 </MetadataGroup>
               ) : null;
             })()}
@@ -339,13 +377,18 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 <MetadataRow label="Formát" value={result.mimeType} />
                 <MetadataRow
                   label="Rozměry"
-                  value={result.width && result.height ? `${result.width} × ${result.height} px` : null}
+                  value={
+                    result.width && result.height ? `${result.width} × ${result.height} px` : null
+                  }
                 />
                 <MetadataRow
                   label="Velikost"
                   value={result.fileSize != null ? formatFileSize(result.fileSize) : null}
                 />
-                <MetadataRow label="Nahráno" value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null} />
+                <MetadataRow
+                  label="Nahráno"
+                  value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null}
+                />
                 <MetadataRow label="SHA-256" value={result.hash} mono />
               </MetadataGroup>
             )}
@@ -356,10 +399,18 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
   );
 }
 
-function MetadataGroup({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+function MetadataGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
     <div className="px-4 py-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">{title}</h3>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">
+        {title}
+      </h3>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">{children}</dl>
     </div>
   );
@@ -378,7 +429,9 @@ function MetadataRow({
   return (
     <>
       <dt className="text-stone-500">{label}</dt>
-      <dd className={`text-stone-800 ${mono ? 'truncate font-mono text-xs leading-5' : ''}`}>{value}</dd>
+      <dd className={`text-stone-800 ${mono ? 'truncate font-mono text-xs leading-5' : ''}`}>
+        {value}
+      </dd>
     </>
   );
 }

@@ -286,7 +286,9 @@ export default function HomePage(): React.JSX.Element {
     setFixingContexts(true);
     setFixingContextsProgress(null);
     try {
-      const res = await fetch(`/api/collections/${collectionId}/fix-document-contexts`, { method: 'POST' });
+      const res = await fetch(`/api/collections/${collectionId}/fix-document-contexts`, {
+        method: 'POST',
+      });
       if (!res.ok || !res.body) {
         setError('Oprava kontextů selhala');
         return;
@@ -593,7 +595,13 @@ export default function HomePage(): React.JSX.Element {
           detectedLanguage: string;
           context: string;
           hash: string;
-          translations: { language: string; text: string; model?: string; inputTokens?: number; outputTokens?: number }[];
+          translations: {
+            language: string;
+            text: string;
+            model?: string;
+            inputTokens?: number;
+            outputTokens?: number;
+          }[];
           glossary: { term: string; definition: string }[];
           model?: string;
           inputTokens?: number;
@@ -642,7 +650,12 @@ export default function HomePage(): React.JSX.Element {
       try {
         const res = await fetch(`/api/pages/${page.id}`);
         if (res.ok) {
-          const fullPage = (await res.json()) as PageItem & { width?: number; height?: number; fileSize?: number; errorMessage?: string };
+          const fullPage = (await res.json()) as PageItem & {
+            width?: number;
+            height?: number;
+            fileSize?: number;
+            errorMessage?: string;
+          };
           setPanelPage(fullPage);
         }
       } catch {
@@ -654,129 +667,165 @@ export default function HomePage(): React.JSX.Element {
   handlePageDoubleClickRef.current = handlePageDoubleClick;
 
   // ---- Regenerate document ----
-  const handleRegenerate = useCallback(async (pageId: string): Promise<void> => {
-    setRegenerating(true);
-    setRegenerateStep('Připravuji…');
-    setRegenerateProgress(0);
-    setPanelResult(null);
-    try {
-      // Try re-parsing from stored rawResponse first (free, no API call)
-      const page = pages.find((p) => p.id === pageId);
-      if (page?.document) {
-        setRegenerateStep('Zkouším opravit parsování…');
-        const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, { method: 'POST' });
-        if (reparseRes.ok) {
-          // Re-parse succeeded — reload document
-          const pageRes = await fetch(`/api/pages/${pageId}`);
-          if (pageRes.ok) {
-            const updatedPage = (await pageRes.json()) as PageItem;
-            setPanelPage(updatedPage);
-            setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-            if (updatedPage.document) {
-              const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
-              if (docRes.ok) {
-                const doc = (await docRes.json()) as {
-                  id: string; transcription: string; detectedLanguage: string; context: string; hash: string;
-                  translations: { language: string; text: string; model?: string; inputTokens?: number; outputTokens?: number }[];
-                  glossary: { term: string; definition: string }[];
-                  model?: string; inputTokens?: number; outputTokens?: number; processingTimeMs?: number;
-                  createdAt?: string; updatedAt?: string;
-                };
-                const translation = doc.translations[0];
-                setPanelResult({
-                  id: doc.id, transcription: doc.transcription, detectedLanguage: doc.detectedLanguage,
-                  translation: translation?.text ?? '', translationLanguage: translation?.language ?? '',
-                  context: doc.context, glossary: doc.glossary, cached: false,
-                  model: doc.model, inputTokens: doc.inputTokens, outputTokens: doc.outputTokens,
-                  processingTimeMs: doc.processingTimeMs, createdAt: doc.createdAt, updatedAt: doc.updatedAt,
-                  hash: doc.hash, mimeType: page.mimeType, fileSize: page.fileSize,
-                  width: page.width, height: page.height, pageCreatedAt: page.createdAt,
-                  translationModel: translation?.model, translationInputTokens: translation?.inputTokens,
-                  translationOutputTokens: translation?.outputTokens,
-                });
+  const handleRegenerate = useCallback(
+    async (pageId: string): Promise<void> => {
+      setRegenerating(true);
+      setRegenerateStep('Připravuji…');
+      setRegenerateProgress(0);
+      setPanelResult(null);
+      try {
+        // Try re-parsing from stored rawResponse first (free, no API call)
+        const page = pages.find((p) => p.id === pageId);
+        if (page?.document) {
+          setRegenerateStep('Zkouším opravit parsování…');
+          const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, {
+            method: 'POST',
+          });
+          if (reparseRes.ok) {
+            // Re-parse succeeded — reload document
+            const pageRes = await fetch(`/api/pages/${pageId}`);
+            if (pageRes.ok) {
+              const updatedPage = (await pageRes.json()) as PageItem;
+              setPanelPage(updatedPage);
+              setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+              if (updatedPage.document) {
+                const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+                if (docRes.ok) {
+                  const doc = (await docRes.json()) as {
+                    id: string;
+                    transcription: string;
+                    detectedLanguage: string;
+                    context: string;
+                    hash: string;
+                    translations: {
+                      language: string;
+                      text: string;
+                      model?: string;
+                      inputTokens?: number;
+                      outputTokens?: number;
+                    }[];
+                    glossary: { term: string; definition: string }[];
+                    model?: string;
+                    inputTokens?: number;
+                    outputTokens?: number;
+                    processingTimeMs?: number;
+                    createdAt?: string;
+                    updatedAt?: string;
+                  };
+                  const translation = doc.translations[0];
+                  setPanelResult({
+                    id: doc.id,
+                    transcription: doc.transcription,
+                    detectedLanguage: doc.detectedLanguage,
+                    translation: translation?.text ?? '',
+                    translationLanguage: translation?.language ?? '',
+                    context: doc.context,
+                    glossary: doc.glossary,
+                    cached: false,
+                    model: doc.model,
+                    inputTokens: doc.inputTokens,
+                    outputTokens: doc.outputTokens,
+                    processingTimeMs: doc.processingTimeMs,
+                    createdAt: doc.createdAt,
+                    updatedAt: doc.updatedAt,
+                    hash: doc.hash,
+                    mimeType: page.mimeType,
+                    fileSize: page.fileSize,
+                    width: page.width,
+                    height: page.height,
+                    pageCreatedAt: page.createdAt,
+                    translationModel: translation?.model,
+                    translationInputTokens: translation?.inputTokens,
+                    translationOutputTokens: translation?.outputTokens,
+                  });
+                }
               }
             }
+            return; // Done — no API call needed
           }
-          return; // Done — no API call needed
+          // Re-parse failed — fall through to full regeneration
+          console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
+          await fetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
         }
-        // Re-parse failed — fall through to full regeneration
-        console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
-        await fetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
-      }
-      // Reset page status
-      await fetch(`/api/pages/${pageId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
-      // Process again with full API call
-      setRegenerateStep('Volám model…');
-      const response = await fetch('/api/pages/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds: [pageId], language: 'cs' }),
-      });
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop() ?? '';
-          for (const eventStr of events) {
-            const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
-            if (!match) continue;
-            const eventType = match[1];
-            const dataStr = match[2];
-            if (!eventType || !dataStr) continue;
-            if (eventType === 'page_progress') {
-              const data = JSON.parse(dataStr) as { message: string; progress: number };
-              setRegenerateStep(data.message);
-              setRegenerateProgress(data.progress);
-            } else if (eventType === 'page_done') {
-              // Reload the document
-              const pageRes = await fetch(`/api/pages/${pageId}`);
-              if (pageRes.ok) {
-                const updatedPage = (await pageRes.json()) as PageItem;
-                setPanelPage(updatedPage);
-                setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-                if (updatedPage.document) {
-                  const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
-                  if (docRes.ok) {
-                    const doc = (await docRes.json()) as {
-                      id: string; transcription: string; detectedLanguage: string; context: string;
-                      translations: { language: string; text: string }[];
-                      glossary: { term: string; definition: string }[];
-                    };
-                    const translation = doc.translations[0];
-                    setPanelResult({
-                      id: doc.id,
-                      transcription: doc.transcription,
-                      detectedLanguage: doc.detectedLanguage,
-                      translation: translation?.text ?? '',
-                      translationLanguage: translation?.language ?? '',
-                      context: doc.context,
-                      glossary: doc.glossary,
-                      cached: false,
-                    });
+        // Reset page status
+        await fetch(`/api/pages/${pageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'pending' }),
+        });
+        // Process again with full API call
+        setRegenerateStep('Volám model…');
+        const response = await fetch('/api/pages/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageIds: [pageId], language: 'cs' }),
+        });
+        if (response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const events = buffer.split('\n\n');
+            buffer = events.pop() ?? '';
+            for (const eventStr of events) {
+              const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
+              if (!match) continue;
+              const eventType = match[1];
+              const dataStr = match[2];
+              if (!eventType || !dataStr) continue;
+              if (eventType === 'page_progress') {
+                const data = JSON.parse(dataStr) as { message: string; progress: number };
+                setRegenerateStep(data.message);
+                setRegenerateProgress(data.progress);
+              } else if (eventType === 'page_done') {
+                // Reload the document
+                const pageRes = await fetch(`/api/pages/${pageId}`);
+                if (pageRes.ok) {
+                  const updatedPage = (await pageRes.json()) as PageItem;
+                  setPanelPage(updatedPage);
+                  setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+                  if (updatedPage.document) {
+                    const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+                    if (docRes.ok) {
+                      const doc = (await docRes.json()) as {
+                        id: string;
+                        transcription: string;
+                        detectedLanguage: string;
+                        context: string;
+                        translations: { language: string; text: string }[];
+                        glossary: { term: string; definition: string }[];
+                      };
+                      const translation = doc.translations[0];
+                      setPanelResult({
+                        id: doc.id,
+                        transcription: doc.transcription,
+                        detectedLanguage: doc.detectedLanguage,
+                        translation: translation?.text ?? '',
+                        translationLanguage: translation?.language ?? '',
+                        context: doc.context,
+                        glossary: doc.glossary,
+                        cached: false,
+                      });
+                    }
                   }
                 }
               }
             }
           }
         }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
+      } finally {
+        setRegenerating(false);
+        setRegenerateStep(undefined);
+        setRegenerateProgress(undefined);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
-    } finally {
-      setRegenerating(false);
-      setRegenerateStep(undefined);
-      setRegenerateProgress(undefined);
-    }
-  }, [pages]);
+    },
+    [pages],
+  );
 
   // ---- Derived values ----
   const isProcessing = processingPageIds.size > 0;
@@ -890,7 +939,9 @@ export default function HomePage(): React.JSX.Element {
                 Kontext díla: {selectedCollection.name}
               </summary>
               <div className="border-t border-slate-100 px-4 py-3 prose prose-sm prose-stone max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedCollection.context}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {selectedCollection.context}
+                </ReactMarkdown>
               </div>
               <div className="border-t border-slate-100 px-4 py-2.5">
                 <button
@@ -901,15 +952,36 @@ export default function HomePage(): React.JSX.Element {
                   {fixingContexts ? (
                     <>
                       <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
                       </svg>
                       {fixingContextsProgress ?? 'Opravuji…'}
                     </>
                   ) : (
                     <>
-                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
+                        />
                       </svg>
                       Opravit kontext dokumentů podle kontextu díla
                     </>

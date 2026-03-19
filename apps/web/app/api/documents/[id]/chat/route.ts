@@ -88,15 +88,19 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     let imageBuffer = await fs.readFile(imagePath);
     const MAX_BYTES = 5 * 1024 * 1024;
     if (imageBuffer.length > MAX_BYTES) {
-      imageBuffer = Buffer.from(await sharp(imageBuffer)
-        .resize({ width: 3000, withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer());
+      imageBuffer = Buffer.from(
+        await sharp(imageBuffer)
+          .resize({ width: 3000, withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer(),
+      );
       if (imageBuffer.length > MAX_BYTES) {
-        imageBuffer = Buffer.from(await sharp(imageBuffer)
-          .resize({ width: 2000, withoutEnlargement: true })
-          .jpeg({ quality: 75 })
-          .toBuffer());
+        imageBuffer = Buffer.from(
+          await sharp(imageBuffer)
+            .resize({ width: 2000, withoutEnlargement: true })
+            .jpeg({ quality: 75 })
+            .toBuffer(),
+        );
       }
     }
     imageBase64 = imageBuffer.toString('base64');
@@ -107,9 +111,10 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   // Build context message
   const translation = doc.translations[0];
-  const glossaryText = doc.glossary.length > 0
-    ? doc.glossary.map((g) => `${g.term}: ${g.definition}`).join('\n')
-    : '(žádný)';
+  const glossaryText =
+    doc.glossary.length > 0
+      ? doc.glossary.map((g) => `${g.term}: ${g.definition}`).join('\n')
+      : '(žádný)';
 
   const contextText = `=== AKTUÁLNÍ TRANSKRIPCE ===
 ${doc.transcription}
@@ -125,7 +130,9 @@ ${glossaryText}`;
 
   // Build messages for Claude
   type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
-  type ContentBlock = { type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } };
+  type ContentBlock =
+    | { type: 'text'; text: string }
+    | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } };
 
   const firstUserContent: ContentBlock[] = [];
   if (imageBase64) {
@@ -156,6 +163,7 @@ ${glossaryText}`;
         const anthropicStream = client.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 8192,
+          temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: claudeMessages,
         });
@@ -173,7 +181,9 @@ ${glossaryText}`;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`));
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`),
+        );
       } finally {
         controller.close();
       }

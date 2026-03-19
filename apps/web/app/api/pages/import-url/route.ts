@@ -23,7 +23,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { url, collectionId, displayName } = (body as { url?: string; collectionId?: string; displayName?: string }) ?? {};
+  const { url, collectionId, displayName } =
+    (body as { url?: string; collectionId?: string; displayName?: string }) ?? {};
 
   if (typeof url !== 'string' || url.trim() === '') {
     return NextResponse.json({ error: 'Chybí url' }, { status: 400 });
@@ -34,7 +35,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     parsedUrl = new URL(url.trim());
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      return NextResponse.json({ error: 'URL musí začínat http:// nebo https://' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'URL musí začínat http:// nebo https://' },
+        { status: 400 },
+      );
     }
   } catch {
     return NextResponse.json({ error: 'Neplatná URL' }, { status: 400 });
@@ -63,7 +67,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
   if (!ALLOWED_TYPES.includes(contentType)) {
     return NextResponse.json(
-      { error: `Nepodporovaný formát: ${contentType || 'neznámý'}. Povolené: JPEG, PNG, TIFF, WebP` },
+      {
+        error: `Nepodporovaný formát: ${contentType || 'neznámý'}. Povolené: JPEG, PNG, TIFF, WebP`,
+      },
       { status: 422 },
     );
   }
@@ -74,7 +80,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (buffer.length > MAX_SIZE_MB * 1024 * 1024) {
     return NextResponse.json(
-      { error: `Obrázek je příliš velký (${(buffer.length / 1024 / 1024).toFixed(1)} MB, max ${MAX_SIZE_MB} MB)` },
+      {
+        error: `Obrázek je příliš velký (${(buffer.length / 1024 / 1024).toFixed(1)} MB, max ${MAX_SIZE_MB} MB)`,
+      },
       { status: 422 },
     );
   }
@@ -92,11 +100,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Extract filename from URL — for IIIF URLs find the page identifier segment
   // e.g. .../ID0009V/full/full/0/default.jpg → ID0009V.jpg
   const pathParts = parsedUrl.pathname.split('/');
-  const SKIP_SEGMENTS = new Set(['', 'full', 'default', 'max', 'native', 'color', 'gray', 'bitonal']);
+  const SKIP_SEGMENTS = new Set([
+    '',
+    'full',
+    'default',
+    'max',
+    'native',
+    'color',
+    'gray',
+    'bitonal',
+  ]);
   const ext = (pathParts[pathParts.length - 1] ?? '').match(/\.[a-zA-Z]+$/)?.[0] ?? '.jpg';
-  const pageIdSegment = [...pathParts].reverse().find(
-    (seg) => !SKIP_SEGMENTS.has(seg.toLowerCase()) && !/^\d$/.test(seg) && !/\.[a-z]{2,4}$/i.test(seg) && /\d/.test(seg),
-  );
+  const pageIdSegment = [...pathParts]
+    .reverse()
+    .find(
+      (seg) =>
+        !SKIP_SEGMENTS.has(seg.toLowerCase()) &&
+        !/^\d$/.test(seg) &&
+        !/\.[a-z]{2,4}$/i.test(seg) &&
+        /\d/.test(seg),
+    );
   const urlFilename = pageIdSegment
     ? decodeURIComponent(pageIdSegment) + ext
     : decodeURIComponent(pathParts[pathParts.length - 1] ?? 'import.jpg');
@@ -130,7 +153,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: {
       userId,
       filename: urlFilename,
-      displayName: typeof displayName === 'string' && displayName.trim() !== '' ? displayName.trim() : urlFilename.replace(/\.[^.]+$/, ''),
+      displayName:
+        typeof displayName === 'string' && displayName.trim() !== ''
+          ? displayName.trim()
+          : urlFilename.replace(/\.[^.]+$/, ''),
       hash,
       imageUrl: storageResult.url,
       collectionId: resolvedCollectionId,

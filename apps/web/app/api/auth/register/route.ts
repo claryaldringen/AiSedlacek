@@ -10,7 +10,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { name, email, password } = (body as { name?: string; email?: string; password?: string }) ?? {};
+  const { name, email, password } =
+    (body as { name?: string; email?: string; password?: string }) ?? {};
 
   if (!email || !password) {
     return NextResponse.json({ error: 'Email a heslo jsou povinné' }, { status: 400 });

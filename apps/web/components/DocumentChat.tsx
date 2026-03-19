@@ -33,7 +33,11 @@ function parseUpdates(text: string): { cleanText: string; updates: ProposedUpdat
   const cleanText = text.replace(
     /<update field="(transcription|translation|context)">\n?([\s\S]*?)\n?<\/update>/g,
     (_match, field: string, content: string) => {
-      updates.push({ field: field as ProposedUpdate['field'], content: content.trim(), applied: false });
+      updates.push({
+        field: field as ProposedUpdate['field'],
+        content: content.trim(),
+        applied: false,
+      });
       return `%%UPDATE_${updates.length - 1}%%`;
     },
   );
@@ -150,7 +154,12 @@ function computeLineDiff(oldText: string, newText: string): DiffSegment[] {
   return segments;
 }
 
-export function DocumentChat({ documentId, currentFields, onApplyUpdate, onTokenUsage }: DocumentChatProps): React.JSX.Element {
+export function DocumentChat({
+  documentId,
+  currentFields,
+  onApplyUpdate,
+  onTokenUsage,
+}: DocumentChatProps): React.JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -323,12 +332,33 @@ export function DocumentChat({ documentId, currentFields, onApplyUpdate, onToken
           >
             {streaming ? (
               <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
               </svg>
             ) : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"
+                />
               </svg>
             )}
           </button>
@@ -410,9 +440,13 @@ function MessageBubble({
                       seg.type === 'equal' ? (
                         <span key={si}>{seg.text}</span>
                       ) : seg.type === 'added' ? (
-                        <span key={si} className="bg-green-200 text-green-900">{seg.text}</span>
+                        <span key={si} className="bg-green-200 text-green-900">
+                          {seg.text}
+                        </span>
                       ) : (
-                        <span key={si} className="bg-red-200 text-red-800 line-through">{seg.text}</span>
+                        <span key={si} className="bg-red-200 text-red-800 line-through">
+                          {seg.text}
+                        </span>
                       ),
                     )}
                   </div>
