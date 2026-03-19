@@ -268,6 +268,7 @@ vercel --prod                            # Nebo automaticky z Git push
 - **Commity v češtině**, konvenční formát: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`.
 - **Žádné hardcoded API klíče.** Vše přes proměnné prostředí.
 - **Loguj každý krok pipeline** – model, čas zpracování, tokeny.
+- **Migrace musí být bezstrátové.** Nikdy nepoužívej `prisma migrate reset`. Každé zpracování stojí peníze za API volání — data se nesmí ztratit. Vždy používej inkrementální migrace (`prisma migrate dev`), které zachovají existující data.
 
 ### Clean Architecture
 

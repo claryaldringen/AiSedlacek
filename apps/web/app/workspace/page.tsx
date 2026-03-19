@@ -363,7 +363,23 @@ export default function HomePage(): React.JSX.Element {
 
   // ---- Processing ----
   const handleProcessSelected = useCallback(async (): Promise<void> => {
-    const pageIds = Array.from(selected).filter((id) => {
+    // Expand selected collections into their page IDs
+    const selectedIds = Array.from(selected);
+    const collectionIds = new Set(collections.map((c) => c.id));
+    const expandedPageIds = new Set<string>();
+
+    for (const id of selectedIds) {
+      if (collectionIds.has(id)) {
+        // It's a collection — add all its pages
+        for (const p of pages) {
+          if (p.collectionId === id) expandedPageIds.add(p.id);
+        }
+      } else {
+        expandedPageIds.add(id);
+      }
+    }
+
+    const pageIds = Array.from(expandedPageIds).filter((id) => {
       const p = pages.find((pg) => pg.id === id);
       return p && (p.status === 'pending' || p.status === 'error');
     });
@@ -509,7 +525,7 @@ export default function HomePage(): React.JSX.Element {
         setProcessingProgress(undefined);
       }, 2000);
     }
-  }, [selected, pages, processingPageIds]);
+  }, [selected, pages, collections, processingPageIds]);
 
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
@@ -830,10 +846,26 @@ export default function HomePage(): React.JSX.Element {
 
   // ---- Derived values ----
   const isProcessing = processingPageIds.size > 0;
-  const pendingSelectedCount = Array.from(selected).filter((id) => {
-    const p = pages.find((pg) => pg.id === id);
-    return p && (p.status === 'pending' || p.status === 'error');
-  }).length;
+  const pendingSelectedCount = useMemo(() => {
+    const selectedIds = Array.from(selected);
+    const collectionIds = new Set(collections.map((c) => c.id));
+    const expandedPageIds = new Set<string>();
+
+    for (const id of selectedIds) {
+      if (collectionIds.has(id)) {
+        for (const p of pages) {
+          if (p.collectionId === id) expandedPageIds.add(p.id);
+        }
+      } else {
+        expandedPageIds.add(id);
+      }
+    }
+
+    return Array.from(expandedPageIds).filter((id) => {
+      const p = pages.find((pg) => pg.id === id);
+      return p && (p.status === 'pending' || p.status === 'error');
+    }).length;
+  }, [selected, collections, pages]);
   const doneCount = pages.filter((p) => p.status === 'done').length;
 
   // Drag-and-drop on content area to open upload

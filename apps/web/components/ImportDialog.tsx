@@ -65,6 +65,7 @@ export function ImportDialog({
   const [urlSuccess, setUrlSuccess] = useState<string | null>(null);
   const [discovered, setDiscovered] = useState<DiscoveredImage[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isImportingDiscovered, setIsImportingDiscovered] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -279,7 +280,8 @@ export function ImportDialog({
 
   const handleImportDiscovered = useCallback(async () => {
     const toImport = discovered.filter((d) => d.selected && d.state === 'pending');
-    if (toImport.length === 0) return;
+    if (toImport.length === 0 || isImportingDiscovered) return;
+    setIsImportingDiscovered(true);
 
     const allImported: UploadedPage[] = [];
 
@@ -304,7 +306,8 @@ export function ImportDialog({
     }
 
     if (allImported.length > 0) onPagesImported(allImported);
-  }, [discovered, importSingleUrl, onPagesImported]);
+    setIsImportingDiscovered(false);
+  }, [discovered, isImportingDiscovered, importSingleUrl, onPagesImported]);
 
   if (!isOpen) return null;
 
@@ -607,10 +610,10 @@ export function ImportDialog({
                   {discovered.some((d) => d.selected && d.state === 'pending') && (
                     <button
                       onClick={() => void handleImportDiscovered()}
-                      className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                      disabled={isImportingDiscovered}
+                      className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Importovat vybrané (
-                      {discovered.filter((d) => d.selected && d.state === 'pending').length})
+                      {isImportingDiscovered ? 'Importuji…' : `Importovat vybrané (${discovered.filter((d) => d.selected && d.state === 'pending').length})`}
                     </button>
                   )}
                 </div>
