@@ -22,6 +22,11 @@ interface ToolbarProps {
   processingProgress?: number;
   processingMode: 'transcribe+translate' | 'translate';
   onProcessingModeChange: (mode: 'transcribe+translate' | 'translate') => void;
+  onCancelProcessing?: () => void;
+  onDetectBlank?: () => void;
+  detectingBlank?: boolean;
+  onShareCollection?: () => void;
+  isCollectionPublic?: boolean;
 }
 
 export function Toolbar({
@@ -43,6 +48,11 @@ export function Toolbar({
   processingProgress,
   processingMode,
   onProcessingModeChange,
+  onCancelProcessing,
+  onDetectBlank,
+  detectingBlank,
+  onShareCollection,
+  isCollectionPublic,
 }: ToolbarProps): React.JSX.Element {
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
@@ -156,6 +166,34 @@ export function Toolbar({
           </button>
         )}
 
+        {/* Share collection */}
+        {hasCollection && onShareCollection && (
+          <button
+            onClick={onShareCollection}
+            title={isCollectionPublic ? 'Nastavení sdílení' : 'Sdílet veřejně'}
+            className={[
+              'rounded p-1.5 transition-colors',
+              isCollectionPublic
+                ? 'text-blue-500 hover:bg-blue-50 hover:text-blue-600'
+                : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
+            ].join(' ')}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+              />
+            </svg>
+          </button>
+        )}
+
         {/* Sort by name */}
         {onSortByName && (
           <button
@@ -179,6 +217,48 @@ export function Toolbar({
           </button>
         )}
 
+        {/* Detect blank pages */}
+        {onDetectBlank && (
+          <button
+            onClick={onDetectBlank}
+            disabled={detectingBlank || isProcessing}
+            title="Detekovat prázdné stránky"
+            className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {detectingBlank ? (
+              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                />
+              </svg>
+            )}
+          </button>
+        )}
+
         {/* Divider */}
         <div className="h-5 w-px bg-slate-200" />
 
@@ -187,7 +267,9 @@ export function Toolbar({
           <>
             <select
               value={processingMode}
-              onChange={(e) => onProcessingModeChange(e.target.value as 'transcribe+translate' | 'translate')}
+              onChange={(e) =>
+                onProcessingModeChange(e.target.value as 'transcribe+translate' | 'translate')
+              }
               disabled={isProcessing}
               className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-40"
             >
@@ -328,6 +410,14 @@ export function Toolbar({
             <span className="flex-1 text-sm text-blue-700">{processingStep ?? 'Zpracovávám…'}</span>
             {processingProgress != null && (
               <span className="text-xs text-blue-600">{Math.round(processingProgress)}%</span>
+            )}
+            {onCancelProcessing && (
+              <button
+                onClick={onCancelProcessing}
+                className="rounded border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+              >
+                Zrušit
+              </button>
             )}
           </div>
           {processingProgress != null && (

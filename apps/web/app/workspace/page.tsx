@@ -1138,6 +1138,16 @@ export default function HomePage(): React.JSX.Element {
         onCancelProcessing={isProcessing ? handleCancelProcessing : undefined}
         onDetectBlank={() => void handleDetectBlank()}
         detectingBlank={detectingBlank}
+        onShareCollection={
+          selectedCollectionId
+            ? () => handleShareItem(selectedCollectionId, 'collection')
+            : undefined
+        }
+        isCollectionPublic={
+          selectedCollectionId
+            ? (collections.find((c) => c.id === selectedCollectionId)?.isPublic ?? false)
+            : false
+        }
       />
 
       {/* Error banner */}
