@@ -8,6 +8,23 @@ const mockCreate = vi.fn();
 const mockFindUnique = vi.fn();
 const mockUpdate = vi.fn();
 const mockDelete = vi.fn();
+const mockPublicSlugDeleteMany = vi.fn();
+
+// tx object passed into $transaction callback
+const txMock = {
+  collection: {
+    update: (...args: unknown[]) => mockUpdate(...args),
+    delete: (...args: unknown[]) => mockDelete(...args),
+  },
+  publicSlug: {
+    deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
+    create: vi.fn().mockResolvedValue({}),
+  },
+};
+
+const mockTransaction = vi.fn().mockImplementation(async (cb: (tx: typeof txMock) => unknown) => {
+  return cb(txMock);
+});
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
@@ -18,7 +35,28 @@ vi.mock('@/lib/infrastructure/db', () => ({
       update: (...args: unknown[]) => mockUpdate(...args),
       delete: (...args: unknown[]) => mockDelete(...args),
     },
+    publicSlug: {
+      deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
+    },
+    $transaction: (...args: unknown[]) => mockTransaction(...args),
   },
+}));
+
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('next-auth', () => ({
+  default: vi.fn(() => ({
+    handlers: {},
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    auth: vi.fn(),
+  })),
+}));
+
+vi.mock('@auth/prisma-adapter', () => ({
+  PrismaAdapter: vi.fn(),
 }));
 
 // -- Helpers --------------------------------------------------------------
@@ -46,6 +84,7 @@ const routeContext = { params: Promise.resolve({ id: 'col-1' }) };
 
 const FAKE_COLLECTION = {
   id: 'col-1',
+  userId: 'test-user-id',
   name: 'Testovaci svazek',
   description: 'Popis svazku',
   createdAt: new Date().toISOString(),
@@ -84,6 +123,7 @@ describe('GET /api/collections', () => {
     expect(json[1].name).toBe('Druhy svazek');
 
     expect(mockFindMany).toHaveBeenCalledWith({
+      where: { userId: 'test-user-id' },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { pages: true } } },
     });
@@ -120,6 +160,7 @@ describe('POST /api/collections', () => {
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
+        userId: 'test-user-id',
         name: 'Testovaci svazek',
         description: 'Popis svazku',
       },
@@ -138,6 +179,7 @@ describe('POST /api/collections', () => {
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
+        userId: 'test-user-id',
         name: 'Jen nazev',
         description: '',
       },
@@ -155,6 +197,7 @@ describe('POST /api/collections', () => {
 
     expect(mockCreate).toHaveBeenCalledWith({
       data: {
+        userId: 'test-user-id',
         name: 'Trimmed name',
         description: 'Trimmed desc',
       },
@@ -256,6 +299,8 @@ describe('GET /api/collections/[id]', () => {
 describe('PATCH /api/collections/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: collection found and owned by test user
+    mockFindUnique.mockResolvedValue(FAKE_COLLECTION);
   });
 
   it('updates collection name', async () => {
@@ -333,7 +378,7 @@ describe('PATCH /api/collections/[id]', () => {
   });
 
   it('returns 404 when collection does not exist', async () => {
-    mockUpdate.mockRejectedValue(new Error('Record not found'));
+    mockFindUnique.mockResolvedValue(null);
 
     const req = makeRequest('http://localhost/api/collections/col-1', 'PATCH', {
       name: 'Novy nazev',
@@ -349,11 +394,14 @@ describe('PATCH /api/collections/[id]', () => {
 describe('DELETE /api/collections/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: collection found and owned by test user
+    mockFindUnique.mockResolvedValue(FAKE_COLLECTION);
+    mockPublicSlugDeleteMany.mockResolvedValue({ count: 0 });
+    mockDelete.mockResolvedValue(FAKE_COLLECTION);
+    mockTransaction.mockImplementation(async (cb: (tx: typeof txMock) => unknown) => cb(txMock));
   });
 
   it('deletes collection and returns ok', async () => {
-    mockDelete.mockResolvedValue(FAKE_COLLECTION);
-
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',
     });
@@ -363,11 +411,13 @@ describe('DELETE /api/collections/[id]', () => {
     const json = await res.json();
     expect(json.ok).toBe(true);
 
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'col-1' } });
     expect(mockDelete).toHaveBeenCalledWith({ where: { id: 'col-1' } });
   });
 
   it('returns 404 when collection does not exist', async () => {
-    mockDelete.mockRejectedValue(new Error('Record not found'));
+    mockFindUnique.mockResolvedValue(null);
 
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',

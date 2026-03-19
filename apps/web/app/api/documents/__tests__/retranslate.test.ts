@@ -27,6 +27,23 @@ vi.mock('@anthropic-ai/sdk', () => {
   };
 });
 
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('next-auth', () => ({
+  default: vi.fn(() => ({
+    handlers: {},
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    auth: vi.fn(),
+  })),
+}));
+
+vi.mock('@auth/prisma-adapter', () => ({
+  PrismaAdapter: vi.fn(),
+}));
+
 // ── Helpers ──────────────────────────────────────────────
 
 function makeRequest(body: unknown): NextRequest {
@@ -51,6 +68,7 @@ const FAKE_DOC = {
   id: 'doc-1',
   transcription: 'Starý text z roku 1420',
   translations: [],
+  page: { userId: 'test-user-id' },
 };
 
 // ── Import route handler (after mocks) ──────────────────
@@ -144,7 +162,10 @@ describe('POST /api/documents/[id]/retranslate', () => {
     // Verify findUnique was called looking for 'cs' translations
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
-      include: { translations: { where: { language: 'cs' } } },
+      include: {
+        translations: { where: { language: 'cs' } },
+        page: { select: { userId: true } },
+      },
     });
   });
 

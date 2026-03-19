@@ -3,12 +3,31 @@ import { NextRequest } from 'next/server';
 
 // ── Mocks ────────────────────────────────────────────────
 
+const mockDocFindUnique = vi.fn();
 const mockFindMany = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
+    document: { findUnique: (...args: unknown[]) => mockDocFindUnique(...args) },
     documentVersion: { findMany: (...args: unknown[]) => mockFindMany(...args) },
   },
+}));
+
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('next-auth', () => ({
+  default: vi.fn(() => ({
+    handlers: {},
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    auth: vi.fn(),
+  })),
+}));
+
+vi.mock('@auth/prisma-adapter', () => ({
+  PrismaAdapter: vi.fn(),
 }));
 
 // ── Helpers ──────────────────────────────────────────────
@@ -27,9 +46,13 @@ import { GET } from '@/app/api/documents/[id]/versions/route';
 
 // ── Tests ────────────────────────────────────────────────
 
+const FAKE_DOC_STUB = { id: 'doc-1', page: { userId: 'test-user-id' } };
+
 describe('GET /api/documents/[id]/versions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Document ownership check
+    mockDocFindUnique.mockResolvedValue(FAKE_DOC_STUB);
   });
 
   it('returns versions ordered by version desc', async () => {

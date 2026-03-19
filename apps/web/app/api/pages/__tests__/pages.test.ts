@@ -7,6 +7,23 @@ const mockPageFindMany = vi.fn();
 const mockPageFindUnique = vi.fn();
 const mockPageUpdate = vi.fn();
 const mockPageDelete = vi.fn();
+const mockPublicSlugDeleteMany = vi.fn();
+
+// tx object passed into $transaction callback
+const txMock = {
+  page: {
+    update: (...args: unknown[]) => mockPageUpdate(...args),
+    delete: (...args: unknown[]) => mockPageDelete(...args),
+  },
+  publicSlug: {
+    deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
+    create: vi.fn().mockResolvedValue({}),
+  },
+};
+
+const mockTransaction = vi.fn().mockImplementation(async (cb: (tx: typeof txMock) => unknown) => {
+  return cb(txMock);
+});
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
@@ -16,7 +33,28 @@ vi.mock('@/lib/infrastructure/db', () => ({
       update: (...args: unknown[]) => mockPageUpdate(...args),
       delete: (...args: unknown[]) => mockPageDelete(...args),
     },
+    publicSlug: {
+      deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
+    },
+    $transaction: (...args: unknown[]) => mockTransaction(...args),
   },
+}));
+
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('next-auth', () => ({
+  default: vi.fn(() => ({
+    handlers: {},
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    auth: vi.fn(),
+  })),
+}));
+
+vi.mock('@auth/prisma-adapter', () => ({
+  PrismaAdapter: vi.fn(),
 }));
 
 const mockStorageDelete = vi.fn();
@@ -53,6 +91,7 @@ function routeContext(id: string): { params: Promise<{ id: string }> } {
 
 const FAKE_PAGE = {
   id: 'page-1',
+  userId: 'test-user-id',
   imageUrl: '/api/images/abc-123.jpg',
   order: 0,
   status: 'pending',
@@ -104,6 +143,7 @@ describe('GET /api/pages', () => {
 
     expect(mockPageFindMany).toHaveBeenCalledWith({
       where: {
+        userId: 'test-user-id',
         status: { not: 'archived' },
         collectionId: null,
       },
@@ -132,6 +172,7 @@ describe('GET /api/pages', () => {
     expect(mockPageFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          userId: 'test-user-id',
           status: { not: 'archived' },
           collectionId: 'col-42',
         },
@@ -194,6 +235,8 @@ describe('GET /api/pages/[id]', () => {
 describe('PATCH /api/pages/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: page found and owned by test user
+    mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
   });
 
   it('updates collectionId', async () => {
@@ -330,7 +373,7 @@ describe('PATCH /api/pages/[id]', () => {
   });
 
   it('returns 404 when page not found during update', async () => {
-    mockPageUpdate.mockRejectedValue(new Error('Record not found'));
+    mockPageFindUnique.mockResolvedValue(null);
 
     const res = await updatePage(
       makeRequest('nonexistent', 'PATCH', { status: 'done' }),
@@ -346,13 +389,15 @@ describe('PATCH /api/pages/[id]', () => {
 describe('DELETE /api/pages/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: page found and owned by test user
+    mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
+    mockStorageDelete.mockResolvedValue(undefined);
+    mockPublicSlugDeleteMany.mockResolvedValue({ count: 0 });
+    mockPageDelete.mockResolvedValue(FAKE_PAGE);
+    mockTransaction.mockImplementation(async (cb: (tx: typeof txMock) => unknown) => cb(txMock));
   });
 
   it('deletes page and its file from storage', async () => {
-    mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
-    mockStorageDelete.mockResolvedValue(undefined);
-    mockPageDelete.mockResolvedValue(FAKE_PAGE);
-
     const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
 
     expect(res.status).toBe(200);
@@ -362,14 +407,14 @@ describe('DELETE /api/pages/[id]', () => {
     // Verify storage.delete was called with filename extracted from imageUrl
     expect(mockStorageDelete).toHaveBeenCalledWith('abc-123.jpg');
 
-    // Verify prisma.page.delete was called
+    // Verify transaction was used with publicSlug cleanup
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'page-1' } });
     expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
   });
 
   it('still deletes page when file deletion fails', async () => {
-    mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
     mockStorageDelete.mockRejectedValue(new Error('ENOENT'));
-    mockPageDelete.mockResolvedValue(FAKE_PAGE);
 
     const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
 

@@ -24,6 +24,23 @@ vi.mock('@/lib/infrastructure/versioning', () => ({
   createVersion: (...args: unknown[]) => mockCreateVersion(...args),
 }));
 
+vi.mock('@/lib/auth', () => ({
+  requireUserId: vi.fn().mockResolvedValue('test-user-id'),
+}));
+
+vi.mock('next-auth', () => ({
+  default: vi.fn(() => ({
+    handlers: {},
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+    auth: vi.fn(),
+  })),
+}));
+
+vi.mock('@auth/prisma-adapter', () => ({
+  PrismaAdapter: vi.fn(),
+}));
+
 // ── Helpers ──────────────────────────────────────────────
 
 const routeContext = { params: Promise.resolve({ id: 'doc-1' }) };
@@ -56,6 +73,7 @@ const FAKE_DOC = {
   context: 'Kontext dokumentu',
   translations: [{ language: 'cs', text: 'Český překlad' }],
   glossary: [{ term: 'slovo', definition: 'význam' }],
+  page: { userId: 'test-user-id' },
 };
 
 // ── Import route handlers (after mocks) ──────────────────
@@ -76,11 +94,12 @@ describe('GET /api/documents/[id]', () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toEqual(FAKE_DOC);
+    expect(json.id).toBe('doc-1');
+    expect(json.transcription).toBe('Starý text');
 
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
-      include: { translations: true, glossary: true },
+      include: { translations: true, glossary: true, page: { select: { userId: true } } },
     });
   });
 
@@ -106,7 +125,7 @@ describe('PATCH /api/documents/[id]', () => {
   });
 
   it('updates transcription and calls createVersion with old value before updating', async () => {
-    // First findUnique: fetch current state for versioning
+    // First findUnique: fetch current state for versioning and ownership check
     mockFindUnique.mockResolvedValueOnce(FAKE_DOC);
     // Second findUnique: fetch updated document to return
     const updatedDoc = { ...FAKE_DOC, transcription: 'Nový text' };
@@ -222,6 +241,8 @@ describe('PATCH /api/documents/[id]', () => {
 describe('DELETE /api/documents/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: document found and owned by test user
+    mockFindUnique.mockResolvedValue(FAKE_DOC);
   });
 
   it('deletes document successfully', async () => {
@@ -237,7 +258,7 @@ describe('DELETE /api/documents/[id]', () => {
   });
 
   it('returns 404 when document not found', async () => {
-    mockDelete.mockRejectedValue(new Error('Record not found'));
+    mockFindUnique.mockResolvedValue(null);
 
     const res = await DELETE(makeDeleteRequest(), routeContext);
 

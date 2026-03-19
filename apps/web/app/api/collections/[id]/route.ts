@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
+import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -65,19 +66,24 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
   }
 
-  const { name, description, context, contextUrl } = body as {
+  const { name, description, context, contextUrls, isPublic, slug } = body as {
     name?: unknown;
     description?: unknown;
     context?: unknown;
-    contextUrl?: unknown;
+    contextUrls?: unknown;
+    isPublic?: unknown;
+    slug?: unknown;
   };
 
   const data: {
     name?: string;
     description?: string;
     context?: string;
-    contextUrl?: string | null;
+    contextUrls?: string[];
+    isPublic?: boolean;
+    slug?: string | null;
   } = {};
+
   if (typeof name === 'string' && name.trim() !== '') {
     data.name = name.trim();
   }
@@ -87,9 +93,50 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   if (typeof context === 'string') {
     data.context = context;
   }
-  if ('contextUrl' in (body as object)) {
-    data.contextUrl =
-      typeof contextUrl === 'string' && contextUrl.trim() !== '' ? contextUrl.trim() : null;
+  if (Array.isArray(contextUrls)) {
+    data.contextUrls = contextUrls
+      .filter((u): u is string => typeof u === 'string' && u.trim() !== '')
+      .map((u) => u.trim());
+  }
+
+  // Process sharing fields before empty-check
+  let sharingFieldsPresent = false;
+  let resolvedSlug: string | null = null;
+
+  if (typeof isPublic === 'boolean') {
+    data.isPublic = isPublic;
+    sharingFieldsPresent = true;
+
+    if (isPublic) {
+      if (typeof slug === 'string' && slug.trim() !== '') {
+        // Validate the provided slug
+        const slugError = validateSlug(slug.trim());
+        if (slugError) {
+          return NextResponse.json({ error: slugError }, { status: 400 });
+        }
+        resolvedSlug = slug.trim();
+      } else {
+        // Auto-generate a unique slug from collection name
+        resolvedSlug = await generateUniqueSlug(collection.name);
+      }
+      data.slug = resolvedSlug;
+    } else {
+      // Making private — clear slug
+      data.slug = null;
+      resolvedSlug = null;
+    }
+  } else if (typeof slug === 'string') {
+    // slug provided without isPublic — validate and set
+    sharingFieldsPresent = true;
+    const slugTrimmed = slug.trim();
+    if (slugTrimmed !== '') {
+      const slugError = validateSlug(slugTrimmed);
+      if (slugError) {
+        return NextResponse.json({ error: slugError }, { status: 400 });
+      }
+      resolvedSlug = slugTrimmed;
+      data.slug = resolvedSlug;
+    }
   }
 
   if (Object.keys(data).length === 0) {
@@ -97,12 +144,46 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   try {
-    const updated = await prisma.collection.update({
-      where: { id },
-      data,
-    });
+    let updated;
+
+    if (sharingFieldsPresent) {
+      updated = await prisma.$transaction(async (tx) => {
+        // Remove old PublicSlug for this entity
+        await tx.publicSlug.deleteMany({ where: { targetId: id } });
+
+        // Create new PublicSlug if now public
+        if (data.isPublic && resolvedSlug) {
+          await tx.publicSlug.create({
+            data: {
+              slug: resolvedSlug,
+              targetType: 'collection',
+              targetId: id,
+            },
+          });
+        }
+
+        return tx.collection.update({
+          where: { id },
+          data,
+        });
+      });
+    } else {
+      updated = await prisma.collection.update({
+        where: { id },
+        data,
+      });
+    }
+
     return NextResponse.json(updated);
-  } catch {
+  } catch (err) {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: string }).code === 'P2002'
+    ) {
+      return NextResponse.json({ error: 'Tento slug je již obsazený' }, { status: 409 });
+    }
     return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
   }
 }
@@ -126,8 +207,11 @@ export async function DELETE(
   }
 
   try {
-    // Orphan pages: set collectionId to null (done by onDelete: SetNull in schema)
-    await prisma.collection.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.publicSlug.deleteMany({ where: { targetId: id } });
+      // Orphan pages: set collectionId to null (done by onDelete: SetNull in schema)
+      await tx.collection.delete({ where: { id } });
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
