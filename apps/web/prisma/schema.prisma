@@ -125,6 +125,7 @@ model Document {
   inputTokens     Int?
   outputTokens    Int?
   processingTimeMs Int?
+  batchId         String?
 }
 
 model Translation {
