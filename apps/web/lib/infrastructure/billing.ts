@@ -55,6 +55,68 @@ export async function deductTokens(
   });
 }
 
+/**
+ * Atomically check balance and deduct tokens in a single serializable transaction.
+ * Prevents race conditions where concurrent requests both see positive balance
+ * and proceed to overspend.
+ */
+export async function deductTokensIfSufficient(
+  userId: string,
+  inputTokens: number,
+  outputTokens: number,
+  description: string,
+  referenceId?: string,
+): Promise<{ success: boolean; balance: number; transaction?: { id: string; amount: number } }> {
+  const amount = -Math.ceil((inputTokens + outputTokens) * TOKEN_MULTIPLIER);
+
+  return prisma.$transaction(
+    async (tx) => {
+      const result = await tx.tokenTransaction.aggregate({
+        where: { userId },
+        _sum: { amount: true },
+      });
+      const balance = result._sum.amount ?? 0;
+
+      if (balance <= 0) {
+        return { success: false, balance };
+      }
+
+      // Handle idempotency: if referenceId already exists, return existing
+      if (referenceId) {
+        const existing = await tx.tokenTransaction.findFirst({
+          where: { userId, referenceId },
+        });
+        if (existing) {
+          return {
+            success: true,
+            balance: balance + existing.amount,
+            transaction: { id: existing.id, amount: existing.amount },
+          };
+        }
+      }
+
+      const transaction = await tx.tokenTransaction.create({
+        data: {
+          userId,
+          type: 'consumption',
+          amount,
+          description,
+          referenceId,
+        },
+      });
+
+      return {
+        success: true,
+        balance: balance + amount,
+        transaction: { id: transaction.id, amount: transaction.amount },
+      };
+    },
+    {
+      isolationLevel: 'Serializable',
+    },
+  );
+}
+
 export function czkToTokens(amountHalire: number): number {
   // amountHalire is in halire (1 CZK = 100 halire)
   const amountCzk = amountHalire / 100;

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createTransaction, czkToTokens } from '@/lib/infrastructure/billing';
 
+export const runtime = 'nodejs';
+
 export async function POST(request: Request) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const body = await request.text();
@@ -23,8 +25,20 @@ export async function POST(request: Request) {
     const userId = session.metadata?.userId;
     const amountTotal = session.amount_total; // in halire
 
-    if (!userId || !amountTotal) {
-      return NextResponse.json({ error: 'Missing metadata' }, { status: 400 });
+    if (typeof userId !== 'string' || userId.length === 0) {
+      console.error('[stripe-webhook] Invalid or missing userId in session metadata', {
+        sessionId: session.id,
+        userId,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    if (typeof amountTotal !== 'number' || amountTotal <= 0) {
+      console.error('[stripe-webhook] Invalid or missing amountTotal in session', {
+        sessionId: session.id,
+        amountTotal,
+      });
+      return NextResponse.json({ received: true });
     }
 
     const tokens = czkToTokens(amountTotal);

@@ -27,6 +27,11 @@ vi.mock('@anthropic-ai/sdk', () => {
   };
 });
 
+vi.mock('@/lib/infrastructure/billing', () => ({
+  checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
+  deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
+}));
+
 vi.mock('@/lib/auth', () => ({
   requireUserId: vi.fn().mockResolvedValue('test-user-id'),
 }));

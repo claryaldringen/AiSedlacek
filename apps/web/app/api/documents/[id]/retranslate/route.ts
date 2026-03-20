@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
-import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
+import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -85,14 +85,21 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
 
   const translatedText = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
-  // Deduct tokens for this API call
-  await deductTokens(
+  // Atomically check balance and deduct tokens
+  const deductResult = await deductTokensIfSufficient(
     userId,
     response.usage.input_tokens,
     response.usage.output_tokens,
     `Retranslace dokumentu ${id}`,
     `retranslate-${id}-${Date.now()}`,
   );
+
+  if (!deductResult.success) {
+    // Work already done by Claude, but balance is exhausted.
+    // We still save the result (don't waste the API call) but inform the client.
+    // The translation will be saved below — just log the overspend situation.
+    console.warn(`[Retranslate] Insufficient balance for user ${userId}, saving result anyway`);
+  }
 
   // Save old translation as version before overwriting
   if (existingTranslation) {

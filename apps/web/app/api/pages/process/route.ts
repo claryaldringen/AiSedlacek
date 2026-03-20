@@ -14,7 +14,7 @@ import {
   completeJob,
   type ProcessingEvent,
 } from '@/lib/infrastructure/processing-jobs';
-import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
+import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -407,14 +407,36 @@ async function runProcessing(
             targetLang,
           );
 
-          // Deduct tokens after successful processing
-          await deductTokens(
+          // Atomically check balance and deduct tokens
+          const deductResult = await deductTokensIfSufficient(
             userId,
             inputTokens,
             outputTokens,
             `OCR stránky ${pp.pageId}`,
             doc.id,
           );
+
+          if (!deductResult.success) {
+            // Balance exhausted mid-processing — mark page done (work already done)
+            // but stop processing further pages
+            await prisma.page.update({
+              where: { id: pp.pageId },
+              data: { status: 'done', errorMessage: null },
+            });
+            completed++;
+            emit(userId, 'page_done', {
+              pageId: pp.pageId,
+              documentId: doc.id,
+              cached: false,
+              progress: Math.round((completed / total) * 100),
+            });
+            emit(userId, 'insufficient_tokens', {
+              pageId: pp.pageId,
+              message: 'Nedostatečný kredit pro další zpracování',
+            });
+            emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+            return;
+          }
 
           await prisma.page.update({
             where: { id: pp.pageId },
@@ -513,14 +535,19 @@ async function runProcessing(
             `[BatchProcess] Batch ${batchNumber} done in ${batchResult.processingTimeMs}ms (${batchResult.model}, ${batchResult.inputTokens}+${batchResult.outputTokens} tokens, ${batchPages.length} pages)`,
           );
 
-          // Deduct tokens for the entire batch
-          await deductTokens(
+          // Atomically check balance and deduct tokens for the entire batch
+          const batchDeductResult = await deductTokensIfSufficient(
             userId,
             batchResult.inputTokens,
             batchResult.outputTokens,
             `OCR dávka ${batchId} (${batchPages.length} stránek)`,
             batchId,
           );
+
+          if (!batchDeductResult.success) {
+            // Balance exhausted — save results (work already done) but stop after this batch
+            // We still save all pages from this batch below, then stop
+          }
 
           const perPageTokens = Math.round(batchResult.outputTokens / batchPages.length);
           const rawLines = batchResult.rawResponse.split('\n');
@@ -599,6 +626,16 @@ async function runProcessing(
           }
 
           batchSuccess = true;
+
+          // If balance was insufficient, stop processing further batches
+          if (!batchDeductResult.success) {
+            emit(userId, 'insufficient_tokens', {
+              message: 'Nedostatečný kredit pro další zpracování',
+            });
+            emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+            return;
+          }
+
           await waitIfPaused(userId, signal, Math.round((completed / total) * 100));
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Neznámá chyba';
@@ -679,14 +716,35 @@ async function runProcessing(
                 targetLang,
               );
 
-              // Deduct tokens after successful fallback processing
-              await deductTokens(
+              // Atomically check balance and deduct tokens (fallback)
+              const fallbackDeductResult = await deductTokensIfSufficient(
                 userId,
                 inputTokens,
                 outputTokens,
                 `OCR stránky ${pp.pageId} (fallback)`,
                 doc.id,
               );
+
+              if (!fallbackDeductResult.success) {
+                // Balance exhausted — mark page done (work already done) but stop
+                await prisma.page.update({
+                  where: { id: pp.pageId },
+                  data: { status: 'done', errorMessage: null },
+                });
+                completed++;
+                emit(userId, 'page_done', {
+                  pageId: pp.pageId,
+                  documentId: doc.id,
+                  cached: false,
+                  progress: Math.round((completed / total) * 100),
+                });
+                emit(userId, 'insufficient_tokens', {
+                  pageId: pp.pageId,
+                  message: 'Nedostatečný kredit pro další zpracování',
+                });
+                emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+                return;
+              }
 
               await prisma.page.update({
                 where: { id: pp.pageId },

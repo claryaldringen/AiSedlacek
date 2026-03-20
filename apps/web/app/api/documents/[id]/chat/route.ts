@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
-import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
+import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -202,14 +202,18 @@ ${glossaryText}`;
           model: finalMsg.model,
         };
 
-        // Deduct tokens for this API call
-        await deductTokens(
+        // Atomically check balance and deduct tokens
+        const deductResult = await deductTokensIfSufficient(
           userId,
           finalMsg.usage.input_tokens,
           finalMsg.usage.output_tokens,
           `Chat s dokumentem ${id}`,
           `chat-${id}-${Date.now()}`,
         );
+
+        if (!deductResult.success) {
+          console.warn(`[Chat] Insufficient balance for user ${userId}, response already streamed`);
+        }
 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
       } catch (err) {
