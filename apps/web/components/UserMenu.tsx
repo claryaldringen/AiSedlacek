@@ -52,7 +52,7 @@ export function UserMenu(): React.JSX.Element | null {
 
   const formattedBalance =
     balance !== null
-      ? balance.toLocaleString('cs-CZ') + ' token\u016F'
+      ? balance.toLocaleString('cs-CZ') + ' tokenů'
       : null;
 
   const displayName = session.user.name ?? session.user.email ?? '';
@@ -131,7 +131,7 @@ export function UserMenu(): React.JSX.Element | null {
                 d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
               />
             </svg>
-            Dob\u00EDt tokeny
+            Dobít tokeny
           </Link>
           <button
             onClick={() => void signOut()}
@@ -150,7 +150,7 @@ export function UserMenu(): React.JSX.Element | null {
                 d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
               />
             </svg>
-            Odhl\u00E1sit se
+            Odhlásit se
           </button>
         </div>
       )}
