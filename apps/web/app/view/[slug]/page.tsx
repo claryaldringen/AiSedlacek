@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { prisma } from '@/lib/infrastructure/db';
 import { PublicResultViewer } from '@/components/PublicResultViewer';
 import ImageZoom from '@/components/ImageZoom';
+import { CollectionContextCard } from '@/components/CollectionContextCard';
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -98,6 +99,10 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-10">
+          {collection.context && (
+            <CollectionContextCard context={collection.context} />
+          )}
+
           {collection.pages.length === 0 ? (
             <p className="text-center font-serif text-[#a08060]">
               Kolekce neobsahuje žádné stránky.
@@ -157,6 +162,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
     const page = await prisma.page.findUnique({
       where: { id: ps.targetId },
       include: {
+        collection: { select: { context: true } },
         document: {
           include: {
             translations: { select: { language: true, text: true } },
@@ -192,11 +198,11 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
         </header>
 
         <div className="flex flex-1 gap-4 overflow-hidden p-4">
-          <div className="flex w-1/3 flex-col overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
-            <div className="shrink-0 border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
+          <div className="w-1/3 shrink-0 self-start overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
+            <div className="border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
               <h2 className="font-serif text-sm font-semibold text-[#3d2b1f]">Originál</h2>
             </div>
-            <div className="flex-1 overflow-hidden bg-[#e8dcc4]">
+            <div className="bg-[#e8dcc4]">
               <ImageZoom src={page.imageUrl} alt={displayName} />
             </div>
           </div>

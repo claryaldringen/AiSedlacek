@@ -51,7 +51,7 @@ export function PublicResultViewer({ document }: { document: PublicDocument }): 
         )}
       </div>
 
-      {/* Row 2: Glossary | Context */}
+      {/* Row 2: Glossary | Page Context */}
       {(document.glossary.length > 0 || document.context) && (
         <div className="flex gap-4">
           {document.glossary.length > 0 && (
@@ -69,12 +69,13 @@ export function PublicResultViewer({ document }: { document: PublicDocument }): 
             </Card>
           )}
           {document.context && (
-            <Card title="Kontext">
+            <Card title="Kontext stránky">
               <MarkdownContent content={document.context} />
             </Card>
           )}
         </div>
       )}
+
     </div>
   );
 }

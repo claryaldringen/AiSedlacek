@@ -32,7 +32,7 @@ export default async function PublicCollectionPageView({
 
   const collection = await prisma.collection.findUnique({
     where: { id: ps.targetId },
-    select: { id: true, name: true, isPublic: true },
+    select: { id: true, name: true, isPublic: true, context: true },
   });
   if (!collection || !collection.isPublic) notFound();
 
@@ -146,11 +146,11 @@ export default async function PublicCollectionPageView({
       </header>
 
       <div className="flex flex-1 gap-4 overflow-hidden p-4">
-        <div className="flex w-1/3 flex-col overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
-          <div className="shrink-0 border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
+        <div className="w-1/3 shrink-0 self-start overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
+          <div className="border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
             <h2 className="font-serif text-sm font-semibold text-[#3d2b1f]">Originál</h2>
           </div>
-          <div className="flex-1 overflow-hidden bg-[#e8dcc4]">
+          <div className="bg-[#e8dcc4]">
             <ImageZoom src={page.imageUrl} alt={displayName} />
           </div>
         </div>
