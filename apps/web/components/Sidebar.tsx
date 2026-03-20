@@ -161,19 +161,6 @@ export function Sidebar({
               )}
               <span className="shrink-0 text-xs opacity-60">{col._count.pages}</span>
             </button>
-            {selectedCollectionId === col.id && (
-              <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 px-4 pb-2 text-[10px] text-slate-400">
-                {col.stats.done > 0 && <span className="text-green-400">{col.stats.done} hotovo</span>}
-                {col.stats.pending > 0 && <span>{col.stats.pending} čeká</span>}
-                {col.stats.error > 0 && <span className="text-red-400">{col.stats.error} chyb</span>}
-                {col.stats.blank > 0 && <span>{col.stats.blank} prázdných</span>}
-                {(col.stats.inputTokens > 0 || col.stats.outputTokens > 0) && (
-                  <span className="basis-full">
-                    {Math.round((col.stats.inputTokens + col.stats.outputTokens) / 1000)}k tokenů · {'$'}{col.stats.costUsd.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
             </React.Fragment>
           ))
         )}
