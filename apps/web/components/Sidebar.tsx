@@ -21,7 +21,6 @@ export interface Collection {
     blank: number;
     inputTokens: number;
     outputTokens: number;
-    costUsd: number;
   };
 }
 
