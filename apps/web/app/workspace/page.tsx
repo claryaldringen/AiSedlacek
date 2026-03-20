@@ -1464,8 +1464,8 @@ export default function HomePage(): React.JSX.Element {
                           <span className="font-medium text-slate-700">{(selectedCollection.stats.outputTokens / 1000).toFixed(1)}k</span>
                         </div>
                         <div className="flex justify-between border-t border-slate-100 pt-1">
-                          <span className="font-medium text-slate-600">Celkem</span>
-                          <span className="font-semibold text-slate-800">{((selectedCollection.stats.inputTokens + selectedCollection.stats.outputTokens) / 1000).toFixed(1)}k</span>
+                          <span className="font-medium text-slate-600">Cena</span>
+                          <span className="font-semibold text-slate-800">{'$'}{selectedCollection.stats.costUsd.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>

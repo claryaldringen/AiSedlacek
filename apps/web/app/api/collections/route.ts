@@ -40,6 +40,8 @@ export async function GET(): Promise<NextResponse> {
 
       const inputTokens = tokenAgg._sum.inputTokens ?? 0;
       const outputTokens = tokenAgg._sum.outputTokens ?? 0;
+      // Claude Opus: $15/1M input, $75/1M output
+      const costUsd = (inputTokens * 15 + outputTokens * 75) / 1_000_000;
 
       return {
         ...c,
@@ -52,6 +54,7 @@ export async function GET(): Promise<NextResponse> {
           blank: byStatus['blank'] ?? 0,
           inputTokens,
           outputTokens,
+          costUsd: Math.round(costUsd * 100) / 100,
         },
       };
     }),
