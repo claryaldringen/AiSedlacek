@@ -9,6 +9,8 @@ const mockFindUnique = vi.fn();
 const mockUpdate = vi.fn();
 const mockDelete = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
+const mockPageGroupBy = vi.fn();
+const mockDocumentAggregate = vi.fn();
 
 // tx object passed into $transaction callback
 const txMock = {
@@ -34,6 +36,12 @@ vi.mock('@/lib/infrastructure/db', () => ({
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
       update: (...args: unknown[]) => mockUpdate(...args),
       delete: (...args: unknown[]) => mockDelete(...args),
+    },
+    page: {
+      groupBy: (...args: unknown[]) => mockPageGroupBy(...args),
+    },
+    document: {
+      aggregate: (...args: unknown[]) => mockDocumentAggregate(...args),
     },
     publicSlug: {
       deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
@@ -113,6 +121,13 @@ describe('GET /api/collections', () => {
       { ...FAKE_COLLECTION, id: 'col-2', name: 'Druhy svazek', _count: { pages: 0 } },
     ];
     mockFindMany.mockResolvedValue(collections);
+    mockPageGroupBy.mockResolvedValue([
+      { status: 'done', _count: 2 },
+      { status: 'pending', _count: 1 },
+    ]);
+    mockDocumentAggregate.mockResolvedValue({
+      _sum: { inputTokens: 1000, outputTokens: 500 },
+    });
 
     const res = await listCollections();
 
@@ -120,6 +135,12 @@ describe('GET /api/collections', () => {
     const json = await res.json();
     expect(json).toHaveLength(2);
     expect(json[0].name).toBe('Testovaci svazek');
+    expect(json[0].stats.done).toBe(2);
+    expect(json[0].stats.pending).toBe(1);
+    expect(json[0].processableCount).toBe(1);
+    expect(json[0].stats.inputTokens).toBe(1000);
+    expect(json[0].stats.outputTokens).toBe(500);
+    expect(json[0].stats.costUsd).toBeGreaterThan(0);
     expect(json[1].name).toBe('Druhy svazek');
 
     expect(mockFindMany).toHaveBeenCalledWith({

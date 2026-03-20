@@ -143,10 +143,11 @@ function fixJsonString(json: string): string {
 
     if (ch === '"') {
       // Is this the real end of the string, or an unescaped quote inside it?
-      // Look ahead: if after optional whitespace we see : , ] } or end-of-string,
-      // it's a real string terminator.
+      // Look ahead: if after optional whitespace we see a structural JSON token,
+      // it's a real string terminator. For comma, require it to be followed by
+      // another JSON value start (", [, {, digit) — not plain text like ", tj."
       const rest = json.slice(i + 1);
-      const afterQuote = rest.match(/^\s*([,:\]}\n]|$)/);
+      const afterQuote = rest.match(/^\s*([:}\]\n]|,\s*["{\[\d]|$)/);
       if (afterQuote) {
         // Real end of string
         out.push(ch);
