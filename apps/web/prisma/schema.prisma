@@ -16,12 +16,15 @@ model User {
   emailVerified DateTime?
   image         String?
   password      String?   // Hashed password for credentials login
+  credits       Int       @default(0)
+  variableSymbol Int?     @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   accounts      Account[]
   sessions      Session[]
   collections   Collection[]
   pages         Page[]
+  tokenTransactions TokenTransaction[]
 }
 
 model Account {
@@ -180,4 +183,28 @@ model GlossaryEntry {
   definition String
 
   @@index([documentId])
+}
+
+// ---- Token Billing ----
+
+enum TokenTransactionType {
+  topup_stripe
+  topup_bank
+  consumption
+  refund
+}
+
+model TokenTransaction {
+  id          String               @id @default(cuid())
+  userId      String
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        TokenTransactionType
+  amount      Int                  // positive = credit, negative = debit
+  amountCzk   Int?                 // amount in halire, only for topup
+  description String
+  referenceId String?              // Stripe payment ID, FIO transaction ID, document ID
+  createdAt   DateTime             @default(now())
+
+  @@unique([userId, referenceId])
+  @@index([userId, createdAt])
 }
