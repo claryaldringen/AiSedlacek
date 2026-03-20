@@ -63,6 +63,7 @@ export default function HomePage(): React.JSX.Element {
     pageCount: number;
   } | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [interruptedPages, setInterruptedPages] = useState<string[]>([]);
   const batchInfoRef = useRef(batchInfo);
   batchInfoRef.current = batchInfo;
 
@@ -652,6 +653,22 @@ export default function HomePage(): React.JSX.Element {
     void reconnect();
   }, [hasProcessingPages, consumeProcessingStream]);
 
+  // ---- Detect interrupted (orphaned) processing pages on load ----
+  useEffect(() => {
+    if (loadingPages) return;
+    const checkInterrupted = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/pages/process/interrupted');
+        if (!res.ok) return;
+        const data = (await res.json()) as { count: number; pageIds: string[] };
+        setInterruptedPages(data.pageIds);
+      } catch {
+        // ignore
+      }
+    };
+    void checkInterrupted();
+  }, [loadingPages]);
+
   const handleCancelProcessing = useCallback(async (): Promise<void> => {
     try {
       await fetch('/api/pages/process/cancel', { method: 'POST' });
@@ -675,6 +692,55 @@ export default function HomePage(): React.JSX.Element {
       // ignore
     }
   }, []);
+
+  const handleResumeInterrupted = useCallback(async (): Promise<void> => {
+    const pageIds = [...interruptedPages];
+    setInterruptedPages([]);
+    try {
+      await fetch('/api/pages/process/interrupted', { method: 'POST' });
+      setPages((prev) => prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'pending' } : p)));
+      // Start processing
+      setProcessingPageIds(new Set(pageIds));
+      setProcessingStep('Spouštím zpracování…');
+      setProcessingProgress(0);
+      setError(null);
+      setPages((prev) =>
+        prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'processing' } : p)),
+      );
+      const response = await fetch('/api/pages/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageIds, language: 'cs', mode: processingMode }),
+      });
+      if (!response.ok || !response.body) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${response.status}`);
+      }
+      await consumeProcessingStream(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Neznámá chyba');
+    } finally {
+      setProcessingPageIds(new Set());
+      setBatchInfo(null);
+      batchInfoRef.current = null;
+      setIsPaused(false);
+      setTimeout(() => {
+        setProcessingStep(undefined);
+        setProcessingProgress(undefined);
+      }, 2000);
+    }
+  }, [interruptedPages, processingMode, consumeProcessingStream]);
+
+  const handleResetInterrupted = useCallback(async (): Promise<void> => {
+    const pageIds = [...interruptedPages];
+    setInterruptedPages([]);
+    try {
+      await fetch('/api/pages/process/interrupted', { method: 'POST' });
+      setPages((prev) => prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'pending' } : p)));
+    } catch {
+      // ignore
+    }
+  }, [interruptedPages]);
 
   const handleToggleBlank = useCallback(
     async (pageIds: string[], blank: boolean): Promise<void> => {
@@ -1205,6 +1271,33 @@ export default function HomePage(): React.JSX.Element {
           {error}
           <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-600">
             x
+          </button>
+        </div>
+      )}
+
+      {/* Interrupted processing banner */}
+      {interruptedPages.length > 0 && !isProcessing && (
+        <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+          </svg>
+          <span className="flex-1">
+            Zpracování {interruptedPages.length} {interruptedPages.length === 1 ? 'stránky' : 'stránek'} bylo přerušeno.
+          </span>
+          <button
+            onClick={() => void handleResumeInterrupted()}
+            className="flex items-center gap-1 rounded border border-blue-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
+          >
+            <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+            </svg>
+            Pokračovat
+          </button>
+          <button
+            onClick={() => void handleResetInterrupted()}
+            className="rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+          >
+            Resetovat
           </button>
         </div>
       )}
