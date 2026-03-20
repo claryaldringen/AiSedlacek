@@ -62,6 +62,7 @@ export default function HomePage(): React.JSX.Element {
     totalBatches: number;
     pageCount: number;
   } | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const batchInfoRef = useRef(batchInfo);
   batchInfoRef.current = batchInfo;
 
@@ -508,6 +509,16 @@ export default function HomePage(): React.JSX.Element {
           batchInfoRef.current = null;
           setProcessingStep('Zrušeno');
           setProcessingProgress(undefined);
+        } else if (eventType === 'paused') {
+          const data = JSON.parse(dataStr) as { message: string; progress: number };
+          setProcessingStep(data.message);
+          setProcessingProgress(data.progress);
+          setIsPaused(true);
+        } else if (eventType === 'resumed') {
+          const data = JSON.parse(dataStr) as { message: string; progress: number };
+          setProcessingStep(data.message);
+          setProcessingProgress(data.progress);
+          setIsPaused(false);
         }
       }
     }
@@ -573,6 +584,7 @@ export default function HomePage(): React.JSX.Element {
       setError(err instanceof Error ? err.message : 'Neznámá chyba');
     } finally {
       setProcessingPageIds(new Set());
+      setIsPaused(false);
       setBatchInfo(null);
       batchInfoRef.current = null;
       setTimeout(() => {
@@ -626,6 +638,7 @@ export default function HomePage(): React.JSX.Element {
         await consumeProcessingStream(response);
 
         setProcessingPageIds(new Set());
+        setIsPaused(false);
         setBatchInfo(null);
         batchInfoRef.current = null;
         setTimeout(() => {
@@ -642,6 +655,22 @@ export default function HomePage(): React.JSX.Element {
   const handleCancelProcessing = useCallback(async (): Promise<void> => {
     try {
       await fetch('/api/pages/process/cancel', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handlePauseProcessing = useCallback(async (): Promise<void> => {
+    try {
+      await fetch('/api/pages/process/pause', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleResumeProcessing = useCallback(async (): Promise<void> => {
+    try {
+      await fetch('/api/pages/process/resume', { method: 'POST' });
     } catch {
       // ignore
     }
@@ -1147,6 +1176,9 @@ export default function HomePage(): React.JSX.Element {
         processingMode={processingMode}
         onProcessingModeChange={setProcessingMode}
         onCancelProcessing={isProcessing ? handleCancelProcessing : undefined}
+        onPauseProcessing={isProcessing && !isPaused ? handlePauseProcessing : undefined}
+        onResumeProcessing={isProcessing && isPaused ? handleResumeProcessing : undefined}
+        isPaused={isPaused}
         onDetectBlank={() => void handleDetectBlank()}
         detectingBlank={detectingBlank}
         onShareCollection={
