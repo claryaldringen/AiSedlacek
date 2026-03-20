@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 
 const mockDocAggregate = vi.fn();
 const mockDocFindUnique = vi.fn();
+const mockDocFindFirst = vi.fn();
 const mockDocCreate = vi.fn();
 const mockPageFindUnique = vi.fn();
 const mockPageUpdate = vi.fn();
@@ -16,6 +17,7 @@ vi.mock('@/lib/infrastructure/db', () => ({
     document: {
       aggregate: (...args: unknown[]) => mockDocAggregate(...args),
       findUnique: (...args: unknown[]) => mockDocFindUnique(...args),
+      findFirst: (...args: unknown[]) => mockDocFindFirst(...args),
       create: (...args: unknown[]) => mockDocCreate(...args),
     },
     page: {
@@ -195,7 +197,7 @@ describe('POST /api/pages/process', () => {
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
     // Hash check – no existing document with same hash
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValue({ id: 'doc-1' });
 
     const res = await POST(makeRequest({ pageIds: ['page-1'] }));
@@ -281,7 +283,7 @@ describe('POST /api/pages/process', () => {
       });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValue({ id: 'doc-2' });
 
     const res = await POST(makeRequest({ pageIds: ['page-1', 'page-2'] }));
@@ -315,7 +317,7 @@ describe('POST /api/pages/process', () => {
     });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockProcessWithClaude.mockRejectedValue(new Error('Claude API timeout'));
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
 
     const res = await POST(makeRequest({ pageIds: ['page-1'] }));
 
@@ -345,7 +347,7 @@ describe('POST /api/pages/process', () => {
     });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValue({ id: 'doc-1' });
 
     const res = await POST(makeRequest({ pageIds: ['page-1'] }));
@@ -369,19 +371,38 @@ describe('POST /api/pages/process', () => {
     );
   });
 
-  it('reuses cached document when hash matches existing document', async () => {
+  it('copies cached document when hash matches existing document from another user', async () => {
     mockPageFindUnique.mockResolvedValue({
       id: 'page-1',
       imageUrl: '/api/images/test.jpg',
       document: null,
     });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
-    // Hash check returns existing document with matching translation
-    mockDocFindUnique.mockResolvedValue({
+    // Hash check returns existing document (from any user) with full data for copying
+    mockDocFindFirst.mockResolvedValue({
       id: 'doc-existing',
-      translations: [{ language: 'cs', text: 'Cached translation' }],
-      glossary: [],
+      hash: 'fakehash123',
+      rawResponse: '{"transcription":"Cached"}',
+      transcription: 'Cached transcription',
+      detectedLanguage: 'cs-old',
+      context: 'Cached context',
+      model: 'claude-opus-4-6',
+      inputTokens: 500,
+      outputTokens: 200,
+      processingTimeMs: 100,
+      translations: [
+        {
+          language: 'cs',
+          text: 'Cached translation',
+          model: null,
+          inputTokens: null,
+          outputTokens: null,
+        },
+      ],
+      glossary: [{ term: 'slovo', definition: 'význam' }],
     });
+    // copyDocumentForPage will call prisma.document.create
+    mockDocCreate.mockResolvedValue({ id: 'doc-copy' });
 
     const res = await POST(makeRequest({ pageIds: ['page-1'], language: 'cs' }));
 
@@ -389,16 +410,27 @@ describe('POST /api/pages/process', () => {
 
     const pageDoneEvent = events.find((e) => e.event === 'page_done');
     expect(pageDoneEvent).toBeDefined();
-    expect(pageDoneEvent!.data.documentId).toBe('doc-existing');
+    expect(pageDoneEvent!.data.documentId).toBe('doc-copy');
     expect(pageDoneEvent!.data.cached).toBe(true);
 
     // processWithClaude should NOT have been called
     expect(mockProcessWithClaude).not.toHaveBeenCalled();
 
+    // A new document should have been created (copy)
+    expect(mockDocCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pageId: 'page-1',
+          hash: 'fakehash123',
+          transcription: 'Cached transcription',
+        }),
+      }),
+    );
+
     // Page status should be set to done
     expect(mockPageUpdate).toHaveBeenCalledWith({
       where: { id: 'page-1' },
-      data: { status: 'done' },
+      data: { status: 'done', errorMessage: null },
     });
   });
 
@@ -416,7 +448,7 @@ describe('POST /api/pages/process', () => {
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
     mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
     // Hash check returns null (no duplicate by hash)
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockTranslationCreate.mockResolvedValue({});
 
     const res = await POST(makeRequest({ pageIds: ['page-1'], language: 'cs' }));
@@ -526,7 +558,7 @@ describe('batch processing', () => {
         collection: null,
       });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValueOnce({ id: 'doc-1' }).mockResolvedValueOnce({ id: 'doc-2' });
     mockProcessWithClaudeBatch.mockResolvedValue(BATCH_CLAUDE_RESULT);
 
@@ -560,7 +592,7 @@ describe('batch processing', () => {
         collection: null,
       });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValueOnce({ id: 'doc-1' }).mockResolvedValueOnce({ id: 'doc-2' });
     // Batch fails
     mockProcessWithClaudeBatch.mockRejectedValue(new Error('API Error'));
@@ -585,7 +617,7 @@ describe('batch processing', () => {
       collection: { id: 'col-1', context: null },
     });
     mockReadFile.mockResolvedValue(Buffer.from('fake image'));
-    mockDocFindUnique.mockResolvedValue(null);
+    mockDocFindFirst.mockResolvedValue(null);
     mockDocCreate.mockResolvedValue({ id: 'doc-3' });
     mockProcessWithClaude.mockResolvedValue(CLAUDE_RESULT);
     // Ownership check returns matching pages; context query returns previous pages

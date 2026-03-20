@@ -130,6 +130,83 @@ async function saveDocumentResult(
   return doc;
 }
 
+/** Copy an existing Document (from any user) for a new page, including translations, glossary, and versions. */
+async function copyDocumentForPage(
+  pageId: string,
+  source: {
+    id: string;
+    hash: string;
+    rawResponse: string | null;
+    transcription: string;
+    detectedLanguage: string;
+    context: string;
+    model: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    processingTimeMs: number | null;
+    batchId?: string | null;
+    translations: {
+      language: string;
+      text: string;
+      model: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    }[];
+    glossary: { term: string; definition: string }[];
+  },
+): Promise<{ id: string }> {
+  const doc = await prisma.document.create({
+    data: {
+      pageId,
+      hash: source.hash,
+      rawResponse: source.rawResponse,
+      transcription: source.transcription,
+      detectedLanguage: source.detectedLanguage,
+      context: source.context,
+      model: source.model,
+      inputTokens: source.inputTokens,
+      outputTokens: source.outputTokens,
+      processingTimeMs: source.processingTimeMs,
+      glossary: {
+        create: source.glossary.map((g) => ({
+          term: g.term,
+          definition: g.definition,
+        })),
+      },
+      translations: {
+        create: source.translations.map((t) => ({
+          language: t.language,
+          text: t.text,
+          model: t.model,
+          inputTokens: t.inputTokens,
+          outputTokens: t.outputTokens,
+        })),
+      },
+    },
+  });
+
+  // Create initial version records
+  await createVersion(
+    doc.id,
+    'transcription',
+    source.transcription,
+    'ai_initial',
+    source.model ?? undefined,
+  );
+  for (const t of source.translations) {
+    await createVersion(
+      doc.id,
+      `translation:${t.language}`,
+      t.text,
+      'ai_initial',
+      source.model ?? undefined,
+    );
+  }
+  await createVersion(doc.id, 'context', source.context, 'ai_initial', source.model ?? undefined);
+
+  return doc;
+}
+
 interface PreparedPage {
   pageId: string;
   page: {
@@ -241,31 +318,41 @@ async function runProcessing(
         const imageBuffer = await storage.read(storagePath);
         const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
 
-        const existingByHash = await prisma.document.findUnique({
+        const existingByHash = await prisma.document.findFirst({
           where: { hash: imageHash },
           include: { translations: true, glossary: true },
         });
 
-        if (existingByHash !== null) {
-          const existingTranslation = existingByHash.translations.find(
-            (t: { language: string }) => t.language === targetLang,
-          );
+        if (existingByHash !== null && page.document === null) {
+          // Cross-user dedup: copy document data instead of calling Claude API
+          const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
 
-          if (existingTranslation !== undefined) {
-            await prisma.page.update({
-              where: { id: pageId },
-              data: { status: 'done' },
-            });
-
-            completed++;
-            emit(userId, 'page_done', {
-              pageId,
-              documentId: existingByHash.id,
-              cached: true,
-              progress: Math.round((completed / total) * 100),
-            });
-            continue;
+          // Charge tokens based on original document's usage
+          const origInput = existingByHash.inputTokens ?? 0;
+          const origOutput = existingByHash.outputTokens ?? 0;
+          if (origInput + origOutput > 0) {
+            await deductTokensIfSufficient(
+              userId,
+              origInput,
+              origOutput,
+              `OCR stránky ${pageId} (deduplikace)`,
+              `copy-${copiedDoc.id}`,
+            );
           }
+
+          await prisma.page.update({
+            where: { id: pageId },
+            data: { status: 'done', errorMessage: null },
+          });
+
+          completed++;
+          emit(userId, 'page_done', {
+            pageId,
+            documentId: copiedDoc.id,
+            cached: true,
+            progress: Math.round((completed / total) * 100),
+          });
+          continue;
         }
 
         pagesToProcess.push({
@@ -900,10 +987,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Check token balance before starting
   const { balance, sufficient } = await checkBalance(userId);
   if (!sufficient) {
-    return Response.json(
-      { error: 'Nedostatečný kredit', balance },
-      { status: 402 },
-    );
+    return Response.json({ error: 'Nedostatečný kredit', balance }, { status: 402 });
   }
 
   const targetLang =

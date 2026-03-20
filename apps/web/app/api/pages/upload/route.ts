@@ -77,7 +77,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      const storageResult = await storage.upload(buffer, filename);
+      // Cross-user dedup: reuse storage file if any user already uploaded this hash
+      const existingGlobal = await prisma.page.findFirst({
+        where: { hash },
+        select: { imageUrl: true },
+      });
+
+      const storageResult = existingGlobal
+        ? { url: existingGlobal.imageUrl }
+        : await storage.upload(buffer, filename);
       const thumbnailUrl = await generateThumbnail(buffer, filename);
 
       // Detect blank pages (parchment without writing)
