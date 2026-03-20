@@ -9,15 +9,27 @@ export interface PublicDocument {
   glossary: { term: string; definition: string }[];
 }
 
-function Section({ title, content }: { title: string; content: string }): React.JSX.Element {
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
-    <div className="flex flex-1 flex-col">
-      <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-        <h2 className="text-sm font-semibold text-stone-700">{title}</h2>
+    <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
+      <div className="border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
+        <h2 className="font-serif text-sm font-semibold text-[#3d2b1f]">{title}</h2>
       </div>
-      <div className="prose prose-stone prose-sm max-w-none p-4">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </div>
+      <div className="flex-1 bg-[#f0e6d0] p-5">{children}</div>
+    </div>
+  );
+}
+
+function MarkdownContent({ content }: { content: string }): React.JSX.Element {
+  return (
+    <div className="prose prose-sm max-w-none prose-headings:font-serif prose-headings:text-[#3d2b1f] prose-p:text-[#5a4a3a] prose-strong:text-[#3d2b1f] prose-a:text-[#8b1a1a]">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
 }
@@ -26,39 +38,41 @@ export function PublicResultViewer({ document }: { document: PublicDocument }): 
   const translation = document.translations[0];
 
   return (
-    <div className="flex flex-col gap-px bg-stone-200">
+    <div className="flex flex-col gap-4">
       {/* Row 1: Transcription | Translation */}
-      <div className="flex flex-1 gap-px">
-        <Section
-          title={`Transkripce (${document.detectedLanguage})`}
-          content={document.transcription}
-        />
+      <div className="flex flex-1 gap-4">
+        <Card title={`Transkripce (${document.detectedLanguage})`}>
+          <MarkdownContent content={document.transcription} />
+        </Card>
         {translation && (
-          <Section title={`Překlad (${translation.language})`} content={translation.text} />
+          <Card title={`Překlad (${translation.language})`}>
+            <MarkdownContent content={translation.text} />
+          </Card>
         )}
       </div>
 
       {/* Row 2: Glossary | Context */}
       {(document.glossary.length > 0 || document.context) && (
-        <div className="flex gap-px">
+        <div className="flex gap-4">
           {document.glossary.length > 0 && (
-            <div className="flex flex-1 flex-col">
-              <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-                <h2 className="text-sm font-semibold text-stone-700">Glosář</h2>
-              </div>
-              <div className="p-4">
-                <dl className="space-y-2">
-                  {document.glossary.map((g) => (
-                    <div key={g.term}>
-                      <dt className="text-sm font-medium text-stone-800">{g.term}</dt>
-                      <dd className="text-sm text-stone-600">{g.definition}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            </div>
+            <Card title="Glosář">
+              <dl className="space-y-3">
+                {document.glossary.map((g) => (
+                  <div key={g.term}>
+                    <dt className="font-serif text-sm font-semibold text-[#3d2b1f]">{g.term}</dt>
+                    <dd className="mt-0.5 text-sm leading-relaxed text-[#7a6652]">
+                      {g.definition}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
           )}
-          {document.context && <Section title="Kontext" content={document.context} />}
+          {document.context && (
+            <Card title="Kontext">
+              <MarkdownContent content={document.context} />
+            </Card>
+          )}
         </div>
       )}
     </div>

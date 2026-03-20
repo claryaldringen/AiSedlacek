@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { prisma } from '@/lib/infrastructure/db';
 import { PublicResultViewer } from '@/components/PublicResultViewer';
+import ImageZoom from '@/components/ImageZoom';
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -19,7 +20,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     });
     if (!collection) return { title: 'Nenalezeno' };
     return {
-      title: collection.name,
+      title: `${collection.name} — AiSedlacek`,
       description: collection.description || `Veřejná kolekce: ${collection.name}`,
     };
   }
@@ -30,9 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       select: { displayName: true, filename: true },
     });
     if (!page) return { title: 'Nenalezeno' };
-    return {
-      title: page.displayName ?? 'Dokument',
-    };
+    return { title: `${page.displayName ?? 'Dokument'} — AiSedlacek` };
   }
 
   return { title: 'AiSedlacek' };
@@ -66,27 +65,45 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
 
     if (!collection || !collection.isPublic) notFound();
 
+    const doneCount = collection.pages.filter((p) => p.status === 'done').length;
+
     return (
-      <div className="min-h-screen bg-stone-50">
-        {/* Header */}
-        <header className="border-b border-stone-200 bg-white">
-          <div className="mx-auto max-w-5xl px-6 py-4">
-            <Link href="/" className="text-sm text-stone-500 hover:text-stone-700">
-              ← AiSedlacek
+      <div className="min-h-screen bg-[#f0e6d0]">
+        <header className="border-b border-[#d4c5a9] bg-[#2c1810]">
+          <div className="mx-auto max-w-6xl px-6 py-6">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1.5 text-sm text-[#a08060] transition-colors hover:text-[#d4a855]"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
+              AiSedlacek
             </Link>
-            <h1 className="mt-2 text-2xl font-bold text-stone-900">{collection.name}</h1>
+            <h1 className="mt-3 font-serif text-3xl font-bold text-[#f5edd6]">{collection.name}</h1>
             {collection.description && (
-              <p className="mt-1 text-sm text-stone-500">{collection.description}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#a08060]">
+                {collection.description}
+              </p>
             )}
+            <p className="mt-3 text-xs text-[#7a6652]">
+              {doneCount}{' '}
+              {doneCount === 1
+                ? 'zpracovaná stránka'
+                : doneCount < 5
+                  ? 'zpracované stránky'
+                  : 'zpracovaných stránek'}
+            </p>
           </div>
         </header>
 
-        {/* Page thumbnails grid */}
-        <main className="mx-auto max-w-5xl px-6 py-8">
+        <main className="mx-auto max-w-6xl px-6 py-10">
           {collection.pages.length === 0 ? (
-            <p className="text-center text-stone-400">Kolekce neobsahuje žádné stránky.</p>
+            <p className="text-center font-serif text-[#a08060]">
+              Kolekce neobsahuje žádné stránky.
+            </p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {collection.pages.map((page, index) => {
                 const displayName =
                   page.displayName ??
@@ -96,40 +113,32 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                   <Link
                     key={page.id}
                     href={`/view/${slug}/${page.id}`}
-                    className="group flex flex-col overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+                    className="group overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6] transition-all hover:border-[#a08060] hover:shadow-lg"
                   >
-                    <div className="aspect-[3/4] overflow-hidden bg-stone-100">
+                    <div className="aspect-[3/4] overflow-hidden bg-[#e8dcc4]">
                       {(page.thumbnailUrl ?? page.imageUrl) ? (
                         <img
                           src={page.thumbnailUrl ?? page.imageUrl}
                           alt={displayName}
-                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                         />
                       ) : (
-                        <div className="flex h-full items-center justify-center text-stone-300">
-                          <svg
-                            className="h-10 w-10"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={1.5}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-                            />
+                        <div className="flex h-full items-center justify-center text-[#d4c5a9]">
+                          <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
                           </svg>
                         </div>
                       )}
                     </div>
-                    <div className="p-2">
-                      <p className="truncate text-xs font-medium text-stone-700">{displayName}</p>
+                    <div className="px-3 py-2.5">
+                      <p className="truncate font-serif text-xs font-medium text-[#3d2b1f]">
+                        {displayName}
+                      </p>
                       {page.status !== 'done' && (
-                        <p className="text-xs text-stone-400">
-                          {page.status === 'pending' && 'Čeká'}
+                        <p className="text-[10px] text-[#a08060]">
+                          {page.status === 'pending' && 'Čeká na zpracování'}
                           {page.status === 'processing' && 'Zpracovává se…'}
-                          {page.status === 'error' && 'Chyba'}
+                          {page.status === 'error' && 'Chyba zpracování'}
                         </p>
                       )}
                     </div>
@@ -162,38 +171,42 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
     const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Dokument';
 
     return (
-      <div className="flex min-h-screen flex-col bg-stone-50">
-        {/* Header */}
-        <header className="shrink-0 border-b border-stone-200 bg-white">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+      <div className="flex min-h-screen flex-col bg-[#f0e6d0]">
+        <header className="shrink-0 border-b border-[#d4c5a9] bg-[#2c1810]">
+          <div className="mx-auto flex max-w-7xl items-center px-6 py-3">
             <div>
-              <Link href="/" className="text-sm text-stone-500 hover:text-stone-700">
-                ← AiSedlacek
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1.5 text-sm text-[#a08060] transition-colors hover:text-[#d4a855]"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+                </svg>
+                AiSedlacek
               </Link>
-              <h1 className="mt-0.5 text-base font-semibold text-stone-900">{displayName}</h1>
+              <h1 className="mt-0.5 font-serif text-base font-semibold text-[#f5edd6]">
+                {displayName}
+              </h1>
             </div>
           </div>
         </header>
 
-        {/* Content: image left (1/3), results right (2/3) */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left: original image */}
-          <div className="flex w-1/3 flex-col border-r border-stone-200 bg-stone-100">
-            <div className="shrink-0 border-b border-stone-200 bg-stone-50 px-4 py-2">
-              <span className="text-xs font-medium text-stone-500">Originál</span>
+        <div className="flex flex-1 gap-4 overflow-hidden p-4">
+          <div className="flex w-1/3 flex-col overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
+            <div className="shrink-0 border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
+              <h2 className="font-serif text-sm font-semibold text-[#3d2b1f]">Originál</h2>
             </div>
-            <div className="flex-1 overflow-auto p-4">
-              <img src={page.imageUrl} alt={displayName} className="w-full rounded shadow-sm" />
+            <div className="flex-1 overflow-hidden bg-[#e8dcc4]">
+              <ImageZoom src={page.imageUrl} alt={displayName} />
             </div>
           </div>
 
-          {/* Right: result viewer */}
           <div className="flex w-2/3 flex-col overflow-y-auto">
             {page.document ? (
               <PublicResultViewer document={page.document} />
             ) : (
-              <div className="flex h-full items-center justify-center text-stone-400">
-                <p className="text-sm">Dokument zatím nebyl zpracován.</p>
+              <div className="flex h-full items-center justify-center text-[#a08060]">
+                <p className="font-serif text-sm">Dokument zatím nebyl zpracován.</p>
               </div>
             )}
           </div>

@@ -2,17 +2,52 @@ import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/infrastructure/db';
+import HeroCarousel from '@/components/HeroCarousel';
 
-async function getStats(): Promise<{ pages: number; documents: number; collections: number }> {
+async function getStats(): Promise<{
+  pages: number;
+  documents: number;
+  collections: number;
+  languages: number;
+}> {
   try {
-    const [pages, documents, collections] = await Promise.all([
+    const [pages, documents, collections, langs] = await Promise.all([
       prisma.page.count(),
       prisma.document.count(),
       prisma.collection.count(),
+      prisma.document.findMany({
+        select: { detectedLanguage: true },
+        distinct: ['detectedLanguage'],
+      }),
     ]);
-    return { pages, documents, collections };
-  } catch {
-    return { pages: 0, documents: 0, collections: 0 };
+    return { pages, documents, collections, languages: langs.length };
+  } catch (e) {
+    console.error('getStats error:', e);
+    return { pages: 0, documents: 0, collections: 0, languages: 0 };
+  }
+}
+
+async function getPublicCollections() {
+  try {
+    const collections = await prisma.collection.findMany({
+      where: { isPublic: true },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        context: true,
+        pages: {
+          where: { status: 'done', document: { isNot: null } },
+          select: { imageUrl: true },
+          take: 1,
+        },
+        _count: { select: { pages: true } },
+      },
+    });
+    return collections.filter((c) => c.pages.length > 0);
+  } catch (e) {
+    console.error('getPublicCollections error:', e);
+    return [];
   }
 }
 
@@ -20,26 +55,32 @@ export default async function LandingPage(): Promise<React.ReactElement> {
   const session = await auth();
   if (session?.user) redirect('/workspace');
 
-  const stats = await getStats();
+  const [stats, collections] = await Promise.all([getStats(), getPublicCollections()]);
 
   return (
-    <div className="min-h-screen bg-stone-50">
+    <div className="min-h-screen bg-[#f0e6d0]">
       {/* Header */}
-      <header className="absolute left-0 right-0 top-0 z-10">
+      <header className="absolute left-0 right-0 top-0 z-10 bg-[#2c1810]/60 backdrop-blur-sm">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <span className="text-xl font-bold tracking-wide text-white">
-            A<span className="text-stone-400">i</span>Sedlacek
+          <span className="font-serif text-xl font-bold tracking-wide text-white">
+            A<span className="text-white/60">i</span>Sedlacek
           </span>
           <nav className="flex items-center gap-6">
-            <a href="#how-it-works" className="text-sm text-stone-300 transition-colors hover:text-white">
+            <a
+              href="#how-it-works"
+              className="text-sm text-white/70 transition-colors hover:text-white"
+            >
               Jak to funguje
             </a>
-            <a href="#texts" className="text-sm text-stone-300 transition-colors hover:text-white">
+            <a
+              href="#texts"
+              className="text-sm text-white/70 transition-colors hover:text-white"
+            >
               Jaké texty
             </a>
             <Link
               href="/login"
-              className="rounded-lg border border-stone-400/30 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm transition-colors hover:border-white/50 hover:bg-white/10"
+              className="rounded-lg border border-white/30 px-4 py-2 text-sm font-medium text-white transition-colors hover:border-white/60 hover:bg-white/10"
             >
               Přihlásit se
             </Link>
@@ -48,113 +89,163 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       </header>
 
       {/* Hero */}
-      <section className="relative flex min-h-[85vh] items-center overflow-hidden bg-stone-900">
-        {/* Background pattern — subtle parchment texture */}
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage:
-              'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-          }}
-        />
-        {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-br from-stone-900 via-stone-800 to-amber-900/40" />
+      <section className="relative flex min-h-[66vh] items-center overflow-hidden bg-[#2c1810]">
+        <HeroCarousel />
 
-        <div className="relative mx-auto max-w-6xl px-6">
-          <div className="max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-400/80">
-              Brána k písemnému dědictví
-            </p>
-            <h1 className="mt-4 text-5xl font-bold leading-tight tracking-tight text-white sm:text-6xl">
-              Čtečka starých
-              <br />
-              <span className="text-amber-200">textů</span>
-            </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-stone-300">
-              Nahrajte sken historického rukopisu a získejte přesný přepis, překlad do moderního
-              jazyka, historický kontext a slovníček archaických pojmů.
-            </p>
-            <div className="mt-10 flex items-center gap-4">
-              <Link
-                href="/login"
-                className="rounded-lg bg-amber-600 px-7 py-3.5 text-sm font-semibold text-white shadow-lg shadow-amber-900/30 transition-all hover:bg-amber-500 hover:shadow-amber-900/40"
+        <div className="relative z-[1] mx-auto max-w-6xl px-6">
+          <p className="font-serif text-sm font-medium uppercase tracking-[0.2em] text-white/80">
+            Brána k písemnému dědictví
+          </p>
+          <h1 className="mt-3 max-w-3xl font-serif text-4xl font-bold leading-tight text-white drop-shadow-lg sm:text-5xl lg:text-6xl">
+            Čtěte středověké rukopisy
+            <br />
+            <span className="text-white">jako dnešní noviny</span>
+          </h1>
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-white/90 drop-shadow">
+            Nahrajte sken a během chvíle máte přepis, překlad do moderního jazyka, historický
+            kontext i slovníček — ať už je originál v latině, staré češtině nebo němčině.
+          </p>
+          <div className="mt-8 flex items-center gap-4">
+            <Link
+              href="/login"
+              className="rounded-lg bg-[#8b1a1a] px-7 py-3 text-sm font-semibold text-[#f5edd6] shadow-lg shadow-black/30 transition-all hover:bg-[#a52020]"
+            >
+              Začít zdarma
+            </Link>
+            <a
+              href="#how-it-works"
+              className="group flex items-center gap-2 px-4 py-3 text-sm font-medium text-[#d4c5a9]/70 transition-colors hover:text-[#f5edd6]"
+            >
+              Jak to funguje
+              <svg
+                className="h-4 w-4 transition-transform group-hover:translate-y-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
               >
-                Začít zdarma
-              </Link>
-              <a
-                href="#how-it-works"
-                className="group flex items-center gap-2 rounded-lg px-5 py-3.5 text-sm font-semibold text-stone-300 transition-colors hover:text-white"
-              >
-                Jak to funguje
-                <svg
-                  className="h-4 w-4 transition-transform group-hover:translate-y-0.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Decorative side element */}
-        <div className="absolute -right-20 top-1/2 hidden -translate-y-1/2 lg:block">
-          <div className="h-[500px] w-[400px] rounded-l-3xl border border-stone-700/50 bg-gradient-to-b from-stone-800/50 to-stone-900/50 p-8 shadow-2xl backdrop-blur-sm">
-            <div className="flex h-full flex-col justify-between rounded-xl border border-stone-600/30 bg-stone-800/30 p-6">
-              <div className="space-y-3">
-                <div className="h-2 w-3/4 rounded bg-stone-600/40" />
-                <div className="h-2 w-full rounded bg-stone-600/30" />
-                <div className="h-2 w-5/6 rounded bg-stone-600/30" />
-                <div className="h-2 w-2/3 rounded bg-stone-600/20" />
-              </div>
-              <div className="space-y-2">
-                <p className="font-serif text-xs italic leading-relaxed text-stone-500">
-                  „Item Identity Boczek de Kunstatu et de Podiebrad..."
-                </p>
-                <div className="h-px bg-stone-700/50" />
-                <p className="text-xs leading-relaxed text-stone-500">
-                  Též jmenovaný Boček z Kunštátu a z Poděbrad...
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <span className="rounded bg-amber-900/30 px-2 py-1 text-[10px] text-amber-400/70">
-                  stará čeština
-                </span>
-                <span className="rounded bg-stone-700/50 px-2 py-1 text-[10px] text-stone-400">
-                  15. stol.
-                </span>
-              </div>
-            </div>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </a>
           </div>
         </div>
       </section>
 
       {/* Statistics */}
-      <section className="border-b border-stone-200 bg-white">
-        <div className="mx-auto grid max-w-6xl grid-cols-3 divide-x divide-stone-200">
+      <section className="border-b border-[#d4c5a9] bg-[#f5edd6]">
+        <div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-[#d4c5a9] sm:grid-cols-4">
           {[
-            { value: stats.pages.toLocaleString('cs-CZ'), label: 'Nahraných stránek' },
-            { value: stats.documents.toLocaleString('cs-CZ'), label: 'Zpracovaných dokumentů' },
-            { value: stats.collections.toLocaleString('cs-CZ'), label: 'Svazků' },
+            {
+              value: stats.pages.toLocaleString('cs-CZ'),
+              label: 'Nahraných stránek',
+              icon: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
+            },
+            {
+              value: stats.documents.toLocaleString('cs-CZ'),
+              label: 'Zpracovaných dokumentů',
+              icon: 'M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.745 3.745 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z',
+            },
+            {
+              value: stats.collections.toLocaleString('cs-CZ'),
+              label: 'Svazků',
+              icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
+            },
+            {
+              value: stats.languages.toLocaleString('cs-CZ'),
+              label: 'Jazyků',
+              icon: 'm10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802',
+            },
           ].map((stat) => (
             <div key={stat.label} className="px-6 py-10 text-center">
-              <p className="text-3xl font-bold tracking-tight text-stone-900">{stat.value}</p>
-              <p className="mt-1 text-sm text-stone-500">{stat.label}</p>
+              <svg
+                className="mx-auto h-10 w-10 text-[#8b1a1a]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d={stat.icon} />
+              </svg>
+              <p className="mt-3 font-serif text-3xl font-bold tracking-tight text-[#3d2b1f]">
+                {stat.value}
+              </p>
+              <p className="mt-1 text-sm text-[#7a6652]">{stat.label}</p>
             </div>
           ))}
         </div>
       </section>
 
+      {/* Samples */}
+      {collections.length > 0 && (
+        <section className="bg-[#f0e6d0] py-24">
+          <div className="mx-auto max-w-6xl px-6">
+            <h2 className="text-center font-serif text-3xl font-bold text-[#3d2b1f]">Ukázky</h2>
+            <div
+              className={`mt-14 grid gap-8 ${collections.length === 1 ? 'mx-auto max-w-sm' : collections.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}
+            >
+              {collections.map((col) => {
+                const contextLines = (col.context ?? '')
+                  .split('\n')
+                  .filter(
+                    (l) =>
+                      l.trim() &&
+                      !l.startsWith('#') &&
+                      !l.startsWith('|') &&
+                      !l.startsWith('---') &&
+                      !l.startsWith('- '),
+                  );
+                const perex =
+                  contextLines
+                    .find((l) => l.length > 40)
+                    ?.replace(/\*\*/g, '')
+                    .trim() ?? '';
+
+                const href = col.slug ? `/view/${col.slug}` : '#';
+
+                return (
+                  <Link
+                    key={col.id}
+                    href={href}
+                    className="group overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6] transition-all hover:border-[#a08060] hover:shadow-lg"
+                  >
+                    <div className="aspect-[4/3] overflow-hidden bg-[#e8dcc4]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={col.pages[0]?.imageUrl}
+                        alt={col.name}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    </div>
+                    <div className="p-5">
+                      <h3 className="font-serif text-lg font-semibold text-[#3d2b1f]">
+                        {col.name}
+                      </h3>
+                      <p className="mt-1 text-xs text-[#a08060]">
+                        {col._count.pages} {col._count.pages === 1 ? 'stránka' : col._count.pages < 5 ? 'stránky' : 'stránek'}
+                      </p>
+                      {perex && (
+                        <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-[#7a6652]">
+                          {perex}
+                        </p>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* How it works */}
-      <section id="how-it-works" className="bg-white py-24">
+      <section id="how-it-works" className="bg-[#f0e6d0] py-24">
         <div className="mx-auto max-w-6xl px-6">
-          <p className="text-center text-sm font-semibold uppercase tracking-[0.15em] text-amber-700">
+          <p className="text-center font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#8b1a1a]">
             Tři kroky
           </p>
-          <h2 className="mt-2 text-center text-3xl font-bold text-stone-900">Jak to funguje</h2>
+          <h2 className="mt-2 text-center font-serif text-3xl font-bold text-[#3d2b1f]">
+            Jak to funguje
+          </h2>
           <div className="mt-16 grid gap-12 sm:grid-cols-3">
             {[
               {
@@ -177,7 +268,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
               },
             ].map((item) => (
               <div key={item.step}>
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#8b1a1a]/10 text-[#8b1a1a]">
                   <svg
                     className="h-6 w-6"
                     fill="none"
@@ -188,11 +279,13 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                     <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
                   </svg>
                 </div>
-                <p className="mt-4 text-xs font-bold uppercase tracking-widest text-amber-600/60">
+                <p className="mt-4 font-serif text-xs font-bold uppercase tracking-widest text-[#8b1a1a]/50">
                   {item.step}
                 </p>
-                <h3 className="mt-1 text-lg font-semibold text-stone-900">{item.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-stone-500">{item.desc}</p>
+                <h3 className="mt-1 font-serif text-lg font-semibold text-[#3d2b1f]">
+                  {item.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#7a6652]">{item.desc}</p>
               </div>
             ))}
           </div>
@@ -200,12 +293,14 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       </section>
 
       {/* Supported texts */}
-      <section id="texts" className="border-t border-stone-200 bg-stone-50 py-24">
+      <section id="texts" className="border-t border-[#d4c5a9] bg-[#f5edd6] py-24">
         <div className="mx-auto max-w-6xl px-6">
-          <p className="text-center text-sm font-semibold uppercase tracking-[0.15em] text-amber-700">
+          <p className="text-center font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#8b1a1a]">
             Specializace
           </p>
-          <h2 className="mt-2 text-center text-3xl font-bold text-stone-900">Jaké texty zvládáme</h2>
+          <h2 className="mt-2 text-center font-serif text-3xl font-bold text-[#3d2b1f]">
+            Jaké texty zvládáme
+          </h2>
           <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {[
               {
@@ -231,15 +326,17 @@ export default async function LandingPage(): Promise<React.ReactElement> {
             ].map((item) => (
               <div
                 key={item.label}
-                className="group rounded-xl border border-stone-200 bg-white p-6 transition-all hover:border-amber-300 hover:shadow-md"
+                className="group rounded-xl border border-[#d4c5a9] bg-[#f0e6d0] p-6 transition-all hover:border-[#a08060] hover:shadow-md"
               >
                 <div className="flex items-start justify-between">
-                  <h3 className="text-base font-semibold text-stone-800">{item.label}</h3>
-                  <span className="rounded bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-500 group-hover:bg-amber-50 group-hover:text-amber-700">
+                  <h3 className="font-serif text-base font-semibold text-[#3d2b1f]">
+                    {item.label}
+                  </h3>
+                  <span className="rounded bg-[#e8dcc4] px-2 py-0.5 text-[10px] font-medium text-[#7a6652] group-hover:bg-[#8b1a1a]/10 group-hover:text-[#8b1a1a]">
                     {item.period}
                   </span>
                 </div>
-                <p className="mt-2 text-sm leading-relaxed text-stone-500">{item.desc}</p>
+                <p className="mt-2 text-sm leading-relaxed text-[#7a6652]">{item.desc}</p>
               </div>
             ))}
           </div>
@@ -247,21 +344,23 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       </section>
 
       {/* About / CTA */}
-      <section className="bg-stone-900 py-24">
+      <section className="bg-[#2c1810] py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.15em] text-amber-400/70">
+            <p className="font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#d4a855]/70">
               O projektu
             </p>
-            <h2 className="mt-2 text-3xl font-bold text-white">Na počest Augusta Sedláčka</h2>
-            <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-stone-400">
+            <h2 className="mt-2 font-serif text-3xl font-bold text-[#f5edd6]">
+              Na počest Augusta Sedláčka
+            </h2>
+            <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[#a08060]">
               Projekt je pojmenován po Augustu Sedláčkovi (1843–1926), českém historikovi a
               archiváři, který zasvětil život studiu historických pramenů. Naším cílem je zpřístupnit
               středověké texty moderním čtenářům.
             </p>
             <Link
               href="/login"
-              className="mt-10 inline-block rounded-lg bg-amber-600 px-8 py-3.5 text-sm font-semibold text-white shadow-lg shadow-amber-900/30 transition-all hover:bg-amber-500"
+              className="mt-10 inline-block rounded-lg bg-[#8b1a1a] px-8 py-3.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-lg shadow-black/30 transition-all hover:bg-[#a52020]"
             >
               Vyzkoušet zdarma
             </Link>
@@ -270,24 +369,24 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-stone-800 bg-stone-950 py-10">
+      <footer className="border-t border-[#3d2b1f] bg-[#1e110a] py-10">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col items-center gap-4 text-center">
-            <span className="text-lg font-bold tracking-wide text-stone-400">
-              A<span className="text-stone-600">i</span>Sedlacek
+            <span className="font-serif text-lg font-bold tracking-wide text-[#a08060]">
+              A<span className="text-[#6b5440]">i</span>Sedlacek
             </span>
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-[#7a6652]">
               Provozuje{' '}
               <a
                 href="https://tyrovsti.cz"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-medium text-stone-400 underline decoration-stone-600 underline-offset-2 transition-colors hover:text-amber-400 hover:decoration-amber-600"
+                className="font-medium text-[#a08060] underline decoration-[#6b5440] underline-offset-2 transition-colors hover:text-[#d4a855] hover:decoration-[#d4a855]"
               >
                 Týřovští z.s.
               </a>
             </p>
-            <div className="text-xs leading-relaxed text-stone-600">
+            <div className="text-xs leading-relaxed text-[#6b5440]">
               <p>IČO: 24090956 &middot; Karla Čapka 1393, Beroun-Město, 266 01 Beroun</p>
             </div>
           </div>

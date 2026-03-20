@@ -14,7 +14,7 @@ export default function RootLayout({
 }): React.ReactElement {
   return (
     <html lang="cs">
-      <body className="overflow-hidden bg-slate-800 text-slate-900">
+      <body className="bg-slate-800 text-slate-900">
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
