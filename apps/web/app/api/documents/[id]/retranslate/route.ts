@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
+import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -12,6 +13,11 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     userId = await requireUserId();
   } catch {
     return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    return NextResponse.json({ error: 'insufficient_tokens', balance }, { status: 402 });
   }
 
   const { id } = await params;
@@ -78,6 +84,15 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
   });
 
   const translatedText = response.content[0]?.type === 'text' ? response.content[0].text : '';
+
+  // Deduct tokens for this API call
+  await deductTokens(
+    userId,
+    response.usage.input_tokens,
+    response.usage.output_tokens,
+    `Retranslace dokumentu ${id}`,
+    `retranslate-${id}-${Date.now()}`,
+  );
 
   // Save old translation as version before overwriting
   if (existingTranslation) {

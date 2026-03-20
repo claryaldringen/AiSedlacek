@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
+import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -49,6 +50,26 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     userId = await requireUserId();
   } catch {
     return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    const encoder = new TextEncoder();
+    const body = encoder.encode(
+      `data: ${JSON.stringify({ type: 'insufficient_tokens', balance })}\n\n`,
+    );
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(body);
+        controller.close();
+      },
+    }), {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
   }
 
   const { id } = await params;
@@ -180,6 +201,16 @@ ${glossaryText}`;
           outputTokens: finalMsg.usage.output_tokens,
           model: finalMsg.model,
         };
+
+        // Deduct tokens for this API call
+        await deductTokens(
+          userId,
+          finalMsg.usage.input_tokens,
+          finalMsg.usage.output_tokens,
+          `Chat s dokumentem ${id}`,
+          `chat-${id}-${Date.now()}`,
+        );
+
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';

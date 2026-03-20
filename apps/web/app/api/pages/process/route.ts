@@ -14,6 +14,7 @@ import {
   completeJob,
   type ProcessingEvent,
 } from '@/lib/infrastructure/processing-jobs';
+import { checkBalance, deductTokens } from '@/lib/infrastructure/billing';
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -347,6 +348,22 @@ async function runProcessing(
       if (batchPages.length === 1) {
         const pp = batchPages[0]!;
         try {
+          // Re-check balance before sending to Claude
+          const { sufficient: hasTokens } = await checkBalance(userId);
+          if (!hasTokens) {
+            // Reset page status and stop
+            await prisma.page.update({
+              where: { id: pp.pageId },
+              data: { status: 'pending' },
+            });
+            emit(userId, 'insufficient_tokens', {
+              pageId: pp.pageId,
+              message: 'Nedostatečný kredit pro zpracování',
+            });
+            emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+            return;
+          }
+
           const previousContext = await getPreviousPageContext(
             pp.page.collection?.id ?? null,
             pp.pageId,
@@ -390,6 +407,15 @@ async function runProcessing(
             targetLang,
           );
 
+          // Deduct tokens after successful processing
+          await deductTokens(
+            userId,
+            inputTokens,
+            outputTokens,
+            `OCR stránky ${pp.pageId}`,
+            doc.id,
+          );
+
           await prisma.page.update({
             where: { id: pp.pageId },
             data: { status: 'done', errorMessage: null },
@@ -428,6 +454,27 @@ async function runProcessing(
         const batchId = `batch-${Date.now()}-${batchNumber}`;
         let batchSuccess = false;
 
+        // Re-check balance before sending batch to Claude
+        const { sufficient: hasBatchTokens } = await checkBalance(userId);
+        if (!hasBatchTokens) {
+          // Reset all batch pages back to pending
+          for (const pp of batchPages) {
+            try {
+              await prisma.page.update({
+                where: { id: pp.pageId },
+                data: { status: 'pending' },
+              });
+            } catch {
+              // ignore
+            }
+          }
+          emit(userId, 'insufficient_tokens', {
+            message: 'Nedostatečný kredit pro zpracování dávky',
+          });
+          emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+          return;
+        }
+
         try {
           const firstPage = batchPages[0]!;
           const previousContext = await getPreviousPageContext(
@@ -464,6 +511,15 @@ async function runProcessing(
 
           console.log(
             `[BatchProcess] Batch ${batchNumber} done in ${batchResult.processingTimeMs}ms (${batchResult.model}, ${batchResult.inputTokens}+${batchResult.outputTokens} tokens, ${batchPages.length} pages)`,
+          );
+
+          // Deduct tokens for the entire batch
+          await deductTokens(
+            userId,
+            batchResult.inputTokens,
+            batchResult.outputTokens,
+            `OCR dávka ${batchId} (${batchPages.length} stránek)`,
+            batchId,
           );
 
           const perPageTokens = Math.round(batchResult.outputTokens / batchPages.length);
@@ -568,6 +624,21 @@ async function runProcessing(
             }
 
             try {
+              // Re-check balance before each fallback page
+              const { sufficient: hasFallbackTokens } = await checkBalance(userId);
+              if (!hasFallbackTokens) {
+                await prisma.page.update({
+                  where: { id: pp.pageId },
+                  data: { status: 'pending' },
+                });
+                emit(userId, 'insufficient_tokens', {
+                  pageId: pp.pageId,
+                  message: 'Nedostatečný kredit pro zpracování',
+                });
+                emit(userId, 'done', { total, completed, error: 'Nedostatečný kredit' });
+                return;
+              }
+
               let userPrompt = 'Přepiš text z tohoto rukopisu.';
               if (pp.collectionContext) {
                 userPrompt = `Kontext díla (použij pro lepší porozumění dokumentu):\n${pp.collectionContext}\n\n---\n\nPřepiš text z tohoto rukopisu.`;
@@ -606,6 +677,15 @@ async function runProcessing(
                 rawResponse,
                 { model, inputTokens, outputTokens, processingTimeMs },
                 targetLang,
+              );
+
+              // Deduct tokens after successful fallback processing
+              await deductTokens(
+                userId,
+                inputTokens,
+                outputTokens,
+                `OCR stránky ${pp.pageId} (fallback)`,
+                doc.id,
               );
 
               await prisma.page.update({
@@ -756,6 +836,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json(
       { error: 'Některé stránky nepatří přihlášenému uživateli' },
       { status: 403 },
+    );
+  }
+
+  // Check token balance before starting
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    return Response.json(
+      { error: 'Nedostatečný kredit', balance },
+      { status: 402 },
     );
   }
 
