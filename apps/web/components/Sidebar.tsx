@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 
 export interface Collection {
   id: string;
@@ -13,6 +13,16 @@ export interface Collection {
   slug: string | null;
   _count: { pages: number };
   processableCount: number;
+  stats: {
+    done: number;
+    pending: number;
+    error: number;
+    processing: number;
+    blank: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  };
 }
 
 interface SidebarProps {
@@ -100,8 +110,8 @@ export function Sidebar({
           <div className="px-4 py-2 text-xs text-slate-500">Žádné svazky</div>
         ) : (
           collections.map((col) => (
+            <React.Fragment key={col.id}>
             <button
-              key={col.id}
               onClick={() => onCollectionSelect(col.id)}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -151,6 +161,20 @@ export function Sidebar({
               )}
               <span className="shrink-0 text-xs opacity-60">{col._count.pages}</span>
             </button>
+            {selectedCollectionId === col.id && (
+              <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 px-4 pb-2 text-[10px] text-slate-400">
+                {col.stats.done > 0 && <span className="text-green-400">{col.stats.done} hotovo</span>}
+                {col.stats.pending > 0 && <span>{col.stats.pending} čeká</span>}
+                {col.stats.error > 0 && <span className="text-red-400">{col.stats.error} chyb</span>}
+                {col.stats.blank > 0 && <span>{col.stats.blank} prázdných</span>}
+                {(col.stats.inputTokens > 0 || col.stats.outputTokens > 0) && (
+                  <span className="basis-full">
+                    {Math.round((col.stats.inputTokens + col.stats.outputTokens) / 1000)}k tokenů · {'$'}{col.stats.costUsd.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            )}
+            </React.Fragment>
           ))
         )}
       </div>

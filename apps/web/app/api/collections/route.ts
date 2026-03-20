@@ -18,17 +18,49 @@ export async function GET(): Promise<NextResponse> {
     },
   });
 
-  // Add count of processable pages (pending + error) for each collection
-  const collectionsWithCounts = await Promise.all(
-    collections.map(async (c) => ({
-      ...c,
-      processableCount: await prisma.page.count({
-        where: { collectionId: c.id, status: { in: ['pending', 'error'] } },
-      }),
-    })),
+  // Add stats for each collection
+  const collectionsWithStats = await Promise.all(
+    collections.map(async (c) => {
+      const [statusCounts, tokenAgg] = await Promise.all([
+        prisma.page.groupBy({
+          by: ['status'],
+          where: { collectionId: c.id },
+          _count: true,
+        }),
+        prisma.document.aggregate({
+          where: { page: { collectionId: c.id } },
+          _sum: { inputTokens: true, outputTokens: true },
+        }),
+      ]);
+
+      const byStatus: Record<string, number> = {};
+      for (const s of statusCounts) {
+        byStatus[s.status] = s._count;
+      }
+
+      const inputTokens = tokenAgg._sum.inputTokens ?? 0;
+      const outputTokens = tokenAgg._sum.outputTokens ?? 0;
+      // Claude Opus: $15/1M input, $75/1M output
+      const costUsd = (inputTokens * 15 + outputTokens * 75) / 1_000_000;
+
+      return {
+        ...c,
+        processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
+        stats: {
+          done: byStatus['done'] ?? 0,
+          pending: byStatus['pending'] ?? 0,
+          error: byStatus['error'] ?? 0,
+          processing: byStatus['processing'] ?? 0,
+          blank: byStatus['blank'] ?? 0,
+          inputTokens,
+          outputTokens,
+          costUsd: Math.round(costUsd * 100) / 100,
+        },
+      };
+    }),
   );
 
-  return NextResponse.json(collectionsWithCounts);
+  return NextResponse.json(collectionsWithStats);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
