@@ -5,8 +5,6 @@ import { ResultViewer, type DocumentResult } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
 
-type RightPanelTab = 'result' | 'chat';
-
 interface DocumentPanelProps {
   page: PageItem | null;
   result: DocumentResult | null;
@@ -49,20 +47,16 @@ export function DocumentPanel({
   hasPrevious,
   hasNext,
 }: DocumentPanelProps): React.JSX.Element | null {
-  const [activeTab, setActiveTab] = useState<RightPanelTab>('result');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset tab when switching documents
   useEffect(() => {
-    setActiveTab('result');
     setEditingTitle(false);
   }, [page?.id]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent): void => {
-      // Don't capture arrows when typing in chat input or title
       const target = e.target as HTMLElement;
       const isInput =
         target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable;
@@ -123,7 +117,6 @@ export function DocumentPanel({
   const status = page?.status ?? 'pending';
   const title = getDisplayTitle(page);
   const showRegenerate = page && onRegenerate && (status === 'done' || status === 'error');
-  const showTabs = status === 'done' && result;
 
   return (
     <>
@@ -270,11 +263,11 @@ export function DocumentPanel({
           </div>
         </div>
 
-        {/* Content: split view */}
+        {/* Content: image left (1/3), results + chat right (2/3) */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: original image */}
+          {/* Left: original image — full height */}
           {page && (
-            <div className="flex w-1/2 flex-col border-r border-slate-200 bg-slate-50">
+            <div className="flex w-1/3 flex-col border-r border-slate-200 bg-slate-50">
               <div className="shrink-0 border-b border-slate-100 px-4 py-2">
                 <span className="text-xs font-medium text-slate-500">Originál</span>
               </div>
@@ -284,155 +277,117 @@ export function DocumentPanel({
             </div>
           )}
 
-          {/* Right: tabs (result / chat) or status */}
-          <div className="flex w-1/2 flex-col">
-            {/* Tab bar */}
-            <div className="flex shrink-0 items-center gap-0 border-b border-slate-100">
-              {showTabs ? (
-                <>
-                  <button
-                    onClick={() => setActiveTab('result')}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${
-                      activeTab === 'result'
-                        ? 'border-b-2 border-slate-800 text-slate-800'
-                        : 'text-slate-400 hover:text-slate-600'
-                    }`}
+          {/* Right: result content or status */}
+          <div className="flex w-2/3 flex-col overflow-hidden">
+            {isRegenerating || status === 'processing' ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="w-full max-w-xs space-y-3 text-center">
+                  <svg
+                    className="mx-auto h-8 w-8 animate-spin text-blue-500"
+                    fill="none"
+                    viewBox="0 0 24 24"
                   >
-                    Přepis a překlad
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('chat')}
-                    className={`px-4 py-2 text-xs font-medium transition-colors ${
-                      activeTab === 'chat'
-                        ? 'border-b-2 border-slate-800 text-slate-800'
-                        : 'text-slate-400 hover:text-slate-600'
-                    }`}
-                  >
-                    Chat
-                  </button>
-                </>
-              ) : (
-                <span className="px-4 py-2 text-xs font-medium text-slate-500">Stav</span>
-              )}
-            </div>
-
-            {/* Tab content */}
-            <div className="flex-1 overflow-hidden">
-              {isRegenerating || status === 'processing' ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="w-full max-w-xs space-y-3 text-center">
-                    <svg
-                      className="mx-auto h-8 w-8 animate-spin text-blue-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    <p className="text-sm text-slate-600">
-                      {regenerateStep ?? 'Zpracovávám dokument…'}
-                    </p>
-                    {regenerateProgress != null && (
-                      <div className="space-y-1">
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                          <div
-                            className="h-full rounded-full bg-blue-500 transition-all duration-300 ease-out"
-                            style={{ width: `${Math.min(regenerateProgress, 100)}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-slate-400">{regenerateProgress} %</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : isLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="text-center">
-                    <svg
-                      className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
-                    <p className="text-sm text-slate-500">Načítám…</p>
-                  </div>
-                </div>
-              ) : status === 'done' && result ? (
-                <>
-                  {/* Result tab */}
-                  <div
-                    className={`h-full overflow-y-auto p-4 ${activeTab !== 'result' ? 'hidden' : ''}`}
-                  >
-                    <ResultViewer result={result} onUpdate={onResultUpdate} />
-                  </div>
-                  {/* Chat tab */}
-                  <div className={`h-full ${activeTab !== 'chat' ? 'hidden' : ''}`}>
-                    <DocumentChat
-                      documentId={result.id}
-                      currentFields={{
-                        transcription: result.transcription,
-                        translation: result.translation,
-                        context: result.context,
-                      }}
-                      onApplyUpdate={handleChatApplyUpdate}
-                      onTokenUsage={(usage) => {
-                        onResultUpdate?.({
-                          ...result,
-                          chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
-                          chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
-                          chatModel: usage.model,
-                        });
-                      }}
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
                     />
-                  </div>
-                </>
-              ) : status === 'error' ? (
-                <div className="p-4">
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                    <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>
-                    <p className="text-sm text-red-600">
-                      {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center text-center">
-                  <p className="mb-4 text-sm text-slate-500">Dokument zatím nebyl zpracován.</p>
-                  {page && onRegenerate && (
-                    <button
-                      onClick={() => onRegenerate(page.id)}
-                      className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                    >
-                      Zpracovat
-                    </button>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <p className="text-sm text-slate-600">
+                    {regenerateStep ?? 'Zpracovávám dokument…'}
+                  </p>
+                  {regenerateProgress != null && (
+                    <div className="space-y-1">
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-blue-500 transition-all duration-300 ease-out"
+                          style={{ width: `${Math.min(regenerateProgress, 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400">{regenerateProgress} %</p>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center">
+                  <svg
+                    className="mx-auto mb-3 h-8 w-8 animate-spin text-slate-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <p className="text-sm text-slate-500">Načítám…</p>
+                </div>
+              </div>
+            ) : status === 'done' && result ? (
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <ResultViewer result={result} onUpdate={onResultUpdate} />
+                {/* Chat */}
+                <div className="border-t border-slate-200">
+                  <DocumentChat
+                    documentId={result.id}
+                    currentFields={{
+                      transcription: result.transcription,
+                      translation: result.translation,
+                      context: result.context,
+                    }}
+                    onApplyUpdate={handleChatApplyUpdate}
+                    onTokenUsage={(usage) => {
+                      onResultUpdate?.({
+                        ...result,
+                        chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
+                        chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
+                        chatModel: usage.model,
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+            ) : status === 'error' ? (
+              <div className="p-4">
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                  <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>
+                  <p className="text-sm text-red-600">
+                    {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center text-center">
+                <p className="mb-4 text-sm text-slate-500">Dokument zatím nebyl zpracován.</p>
+                {page && onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(page.id)}
+                    className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Zpracovat
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
-import fs from 'fs/promises';
 import { prisma } from '@/lib/infrastructure/db';
+import { getStorage } from '@/lib/adapters/storage';
 import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
 import { requireUserId } from '@/lib/auth';
 
@@ -80,12 +80,14 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   }
 
   // Load the image for multimodal context (resize if > 5 MB)
-  const filename = doc.page.imageUrl.replace('/api/images/', '');
-  const imagePath = `tmp/uploads/${filename}`;
+  const storage = getStorage();
+  const storagePath = doc.page.imageUrl.startsWith('/api/images/')
+    ? doc.page.imageUrl.replace('/api/images/', '')
+    : doc.page.imageUrl;
   let imageBase64: string | null = null;
   let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg';
   try {
-    let imageBuffer = await fs.readFile(imagePath);
+    let imageBuffer = await storage.read(storagePath);
     const MAX_BYTES = 5 * 1024 * 1024;
     if (imageBuffer.length > MAX_BYTES) {
       imageBuffer = Buffer.from(

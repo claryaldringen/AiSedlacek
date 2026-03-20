@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
-import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { getStorage } from '@/lib/adapters/storage';
+import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Nebyl nahrán žádný soubor' }, { status: 400 });
   }
 
-  const storage = new LocalStorageProvider();
+  const storage = getStorage();
   const created = [];
   const errors: { filename: string; error: string }[] = [];
 
@@ -77,6 +78,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       const storageResult = await storage.upload(buffer, filename);
+      const thumbnailUrl = await generateThumbnail(buffer, filename);
+
+      // Detect blank pages (parchment without writing)
+      const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
+      const detectedBlank = await isBlankPage(buffer);
 
       // Verify collection exists if provided
       if (resolvedCollectionId !== null) {
@@ -106,8 +112,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           filename,
           hash,
           imageUrl: storageResult.url,
+          thumbnailUrl,
           collectionId: resolvedCollectionId,
-          status: 'pending',
+          status: detectedBlank ? 'blank' : 'pending',
           mimeType: file.type,
           fileSize: buffer.length,
           width,

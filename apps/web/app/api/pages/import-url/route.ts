@@ -3,10 +3,30 @@ import crypto from 'crypto';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
+import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp', 'image/gif'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
+
+// Semaphore to limit concurrent sharp operations (sharp uses a fixed-size libuv thread pool)
+let sharpInFlight = 0;
+const SHARP_MAX_CONCURRENT = 3;
+const sharpQueue: Array<() => void> = [];
+
+async function withSharpLimit<T>(fn: () => Promise<T>): Promise<T> {
+  if (sharpInFlight >= SHARP_MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => sharpQueue.push(resolve));
+  }
+  sharpInFlight++;
+  try {
+    return await fn();
+  } finally {
+    sharpInFlight--;
+    sharpQueue.shift()?.();
+  }
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let userId: string;
@@ -44,27 +64,58 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Neplatná URL' }, { status: 400 });
   }
 
-  // Fetch the image
-  let response: Response;
   try {
-    response = await fetch(parsedUrl.toString(), {
-      headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
-      signal: AbortSignal.timeout(60000),
-    });
+    return await handleImport(parsedUrl, userId, collectionId, displayName);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Nepodařilo se stáhnout';
-    return NextResponse.json({ error: `Stahování selhalo: ${message}` }, { status: 422 });
+    console.error('[import-url] Unhandled error for URL:', parsedUrl.toString());
+    console.error('[import-url] Error:', err instanceof Error ? err.stack : err);
+    const message = err instanceof Error ? err.message : 'Interní chyba serveru';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
 
-  if (!response.ok) {
-    return NextResponse.json(
-      { error: `Server vrátil ${response.status} ${response.statusText}` },
-      { status: 422 },
-    );
+async function handleImport(
+  parsedUrl: URL,
+  userId: string,
+  collectionId: unknown,
+  displayName: unknown,
+): Promise<NextResponse> {
+  // Try prefetch cache first, fall back to fresh download
+  const cached = await getOrWait(parsedUrl.toString());
+  let buffer: Buffer;
+  let contentType: string;
+  let contentDisposition: string;
+
+  if (cached) {
+    buffer = cached.buffer;
+    contentType = cached.contentType;
+    contentDisposition = cached.contentDisposition;
+  } else {
+    let response: Response;
+    try {
+      response = await fetch(parsedUrl.toString(), {
+        headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nepodařilo se stáhnout';
+      return NextResponse.json({ error: `Stahování selhalo: ${message}` }, { status: 422 });
+    }
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: `Server vrátil ${response.status} ${response.statusText}` },
+        { status: 422 },
+      );
+    }
+
+    contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+    contentDisposition = response.headers.get('content-disposition') ?? '';
+    const arrayBuffer = await response.arrayBuffer();
+    buffer = Buffer.from(arrayBuffer);
   }
 
   // Check content type
-  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
   if (!ALLOWED_TYPES.includes(contentType)) {
     return NextResponse.json(
       {
@@ -73,10 +124,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 422 },
     );
   }
-
-  // Read body
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
 
   if (buffer.length > MAX_SIZE_MB * 1024 * 1024) {
     return NextResponse.json(
@@ -97,8 +144,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Extract filename from URL — for IIIF URLs find the page identifier segment
-  // e.g. .../ID0009V/full/full/0/default.jpg → ID0009V.jpg
+  // Extract filename — priority:
+  // 1. Content-Disposition header (e.g. "4360-110814-0004r.jpg" from esbirky.cz)
+  // 2. IIIF path segment (e.g. .../ID0009V/full/full/0/default.jpg → ID0009V.jpg)
+  // 3. Query parameter fallback (e.g. ?id=180462 → 180462.jpg)
+  // 4. Last path segment
+  const cdMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)"?/i);
+  const cdFilename = cdMatch ? decodeURIComponent(cdMatch[1]!.trim()) : null;
+
   const pathParts = parsedUrl.pathname.split('/');
   const SKIP_SEGMENTS = new Set([
     '',
@@ -120,24 +173,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         !/\.[a-z]{2,4}$/i.test(seg) &&
         /\d/.test(seg),
     );
-  const urlFilename = pageIdSegment
-    ? decodeURIComponent(pageIdSegment) + ext
-    : decodeURIComponent(pathParts[pathParts.length - 1] ?? 'import.jpg');
+  let urlFilename: string;
+  if (cdFilename) {
+    urlFilename = cdFilename;
+  } else if (pageIdSegment) {
+    urlFilename = decodeURIComponent(pageIdSegment) + ext;
+  } else {
+    // Try query parameters — use first numeric param value as filename
+    let queryId: string | null = null;
+    for (const [, value] of parsedUrl.searchParams) {
+      if (/^\d+$/.test(value) && value.length >= 2) {
+        queryId = value;
+        break;
+      }
+    }
+    urlFilename = queryId
+      ? queryId + ext
+      : decodeURIComponent(pathParts[pathParts.length - 1] ?? 'import.jpg');
+  }
 
-  // Save to local storage
+  // Save to local storage + run sharp operations with concurrency limit
   const storage = new LocalStorageProvider();
   const storageResult = await storage.upload(buffer, urlFilename);
 
-  // Extract image metadata
-  let width: number | undefined;
-  let height: number | undefined;
-  try {
-    const metadata = await sharp(buffer).metadata();
-    width = metadata.width;
-    height = metadata.height;
-  } catch {
-    // skip metadata
-  }
+  const [thumbnailUrl, detectedBlank, dimensions] = await withSharpLimit(async () => {
+    const thumb = await generateThumbnail(buffer, urlFilename);
+    const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
+    const blank = await isBlankPage(buffer);
+    let w: number | undefined;
+    let h: number | undefined;
+    try {
+      const metadata = await sharp(buffer).metadata();
+      w = metadata.width;
+      h = metadata.height;
+    } catch {
+      // skip metadata
+    }
+    return [thumb, blank, { width: w, height: h }] as const;
+  });
 
   // Validate collection
   const resolvedCollectionId =
@@ -153,18 +226,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     data: {
       userId,
       filename: urlFilename,
-      displayName:
-        typeof displayName === 'string' && displayName.trim() !== ''
+      displayName: cdFilename
+        ? cdFilename.replace(/\.[^.]+$/, '')
+        : typeof displayName === 'string' && displayName.trim() !== ''
           ? displayName.trim()
           : urlFilename.replace(/\.[^.]+$/, ''),
       hash,
       imageUrl: storageResult.url,
+      thumbnailUrl,
       collectionId: resolvedCollectionId,
-      status: 'pending',
+      status: detectedBlank ? 'blank' : 'pending',
       mimeType: contentType,
       fileSize: buffer.length,
-      width,
-      height,
+      width: dimensions.width,
+      height: dimensions.height,
     },
   });
 

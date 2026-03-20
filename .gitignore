@@ -2,8 +2,12 @@ node_modules/
 .next/
 dist/
 .turbo/
+.env
 .env.local
 tmp/
 *.tsbuildinfo
 coverage/
 *.traineddata
+.vercel
+.superpowers/
+.wrangler/

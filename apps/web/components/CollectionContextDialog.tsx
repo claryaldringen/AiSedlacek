@@ -10,8 +10,8 @@ interface CollectionContextDialogProps {
   collectionId: string;
   collectionName: string;
   initialContext: string;
-  initialContextUrl: string | null;
-  onSaved: (context: string, contextUrl: string | null) => void;
+  initialContextUrls: string[];
+  onSaved: (context: string, contextUrls: string[]) => void;
 }
 
 export function CollectionContextDialog({
@@ -20,24 +20,29 @@ export function CollectionContextDialog({
   collectionId,
   collectionName,
   initialContext,
-  initialContextUrl,
+  initialContextUrls,
   onSaved,
 }: CollectionContextDialogProps): React.JSX.Element | null {
   const [context, setContext] = useState(initialContext);
-  const [contextUrl, setContextUrl] = useState(initialContextUrl ?? '');
+  const [contextUrls, setContextUrls] = useState<string[]>(initialContextUrls);
+  const [urlInput, setUrlInput] = useState('');
+  const [textInput, setTextInput] = useState('');
   const [editing, setEditing] = useState(!initialContext);
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setContext(initialContext);
-      setContextUrl(initialContextUrl ?? '');
+      setContextUrls(initialContextUrls);
+      setUrlInput('');
+      setTextInput('');
       setEditing(!initialContext);
       setError(null);
     }
-  }, [isOpen, initialContext, initialContextUrl]);
+  }, [isOpen, initialContext, initialContextUrls]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -46,44 +51,85 @@ export function CollectionContextDialog({
       const res = await fetch(`/api/collections/${collectionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context, contextUrl: contextUrl.trim() || null }),
+        body: JSON.stringify({ context, contextUrls }),
       });
       if (!res.ok) throw new Error('Ukládání selhalo');
-      onSaved(context, contextUrl.trim() || null);
+      onSaved(context, contextUrls);
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chyba');
     } finally {
       setSaving(false);
     }
-  }, [collectionId, context, contextUrl, onSaved]);
+  }, [collectionId, context, contextUrls, onSaved]);
 
   const handleFetchFromUrl = useCallback(async () => {
-    if (!contextUrl.trim()) return;
+    const trimmed = urlInput.trim();
+    if (!trimmed) return;
     setFetching(true);
     setError(null);
     try {
       const res = await fetch(`/api/collections/${collectionId}/fetch-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: contextUrl.trim() }),
+        body: JSON.stringify({ url: trimmed }),
       });
-      let data: { context?: string; error?: string };
+      let data: { context?: string; contextUrls?: string[]; error?: string };
       try {
-        data = (await res.json()) as { context?: string; error?: string };
+        data = (await res.json()) as { context?: string; contextUrls?: string[]; error?: string };
       } catch {
         throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
       }
       if (!res.ok) throw new Error(data.error ?? 'Stahování selhalo');
-      setContext(data.context ?? '');
+      const newContext = data.context ?? '';
+      const newUrls = data.contextUrls ?? contextUrls;
+      setContext(newContext);
+      setContextUrls(newUrls);
+      setUrlInput('');
       setEditing(false);
-      onSaved(data.context ?? '', contextUrl.trim());
+      onSaved(newContext, newUrls);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chyba');
     } finally {
       setFetching(false);
     }
-  }, [collectionId, contextUrl, onSaved]);
+  }, [collectionId, urlInput, contextUrls, onSaved]);
+
+  const handleMergeText = useCallback(async () => {
+    const trimmed = textInput.trim();
+    if (!trimmed) return;
+    setMerging(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/collections/${collectionId}/fetch-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: trimmed }),
+      });
+      let data: { context?: string; contextUrls?: string[]; error?: string };
+      try {
+        data = (await res.json()) as { context?: string; contextUrls?: string[]; error?: string };
+      } catch {
+        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+      }
+      if (!res.ok) throw new Error(data.error ?? 'Sloučení selhalo');
+      const newContext = data.context ?? '';
+      const newUrls = data.contextUrls ?? contextUrls;
+      setContext(newContext);
+      setContextUrls(newUrls);
+      setTextInput('');
+      setEditing(false);
+      onSaved(newContext, newUrls);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Chyba');
+    } finally {
+      setMerging(false);
+    }
+  }, [collectionId, textInput, contextUrls, onSaved]);
+
+  const handleRemoveUrl = useCallback((urlToRemove: string) => {
+    setContextUrls((prev) => prev.filter((u) => u !== urlToRemove));
+  }, []);
 
   if (!isOpen) return null;
 
@@ -112,34 +158,6 @@ export function CollectionContextDialog({
           </button>
         </div>
 
-        {/* URL import */}
-        <div className="shrink-0 border-b border-slate-100 px-6 py-3">
-          <label className="mb-1 block text-xs font-medium text-slate-500">
-            Načíst kontext z URL
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="url"
-              value={contextUrl}
-              onChange={(e) => setContextUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && contextUrl.trim()) void handleFetchFromUrl();
-                e.stopPropagation();
-              }}
-              placeholder="https://… (stránka s popisem díla)"
-              disabled={fetching}
-              className="flex-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
-            />
-            <button
-              onClick={() => void handleFetchFromUrl()}
-              disabled={!contextUrl.trim() || fetching}
-              className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
-            >
-              {fetching ? 'Stahuji…' : 'Stáhnout'}
-            </button>
-          </div>
-        </div>
-
         {/* Context editor / preview */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {error && (
@@ -165,6 +183,95 @@ export function CollectionContextDialog({
             <p className="text-center text-sm text-slate-400">
               Žádný kontext. Zadejte text nebo stáhněte z URL.
             </p>
+          )}
+        </div>
+
+        {/* URL import */}
+        <div className="shrink-0 border-t border-slate-100 px-6 py-3">
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Načíst kontext z URL
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && urlInput.trim()) void handleFetchFromUrl();
+                e.stopPropagation();
+              }}
+              placeholder="https://… (stránka s popisem díla)"
+              disabled={fetching}
+              className="flex-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+            />
+            <button
+              onClick={() => void handleFetchFromUrl()}
+              disabled={!urlInput.trim() || fetching}
+              className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+            >
+              {fetching ? 'Načítám…' : 'Načíst'}
+            </button>
+          </div>
+
+          {/* Text input */}
+          <div className="mt-3">
+            <label className="mb-1 block text-xs font-medium text-slate-500">
+              Přidat informace z textu
+            </label>
+            <textarea
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="Vložte text s informacemi o díle (např. z katalogu, knihy, článku)…"
+              rows={3}
+              disabled={merging}
+              className="w-full resize-none rounded border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+            />
+            <div className="mt-1 flex justify-end">
+              <button
+                onClick={() => void handleMergeText()}
+                disabled={!textInput.trim() || merging}
+                className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+              >
+                {merging ? 'Zpracovávám…' : 'Sloučit s kontextem'}
+              </button>
+            </div>
+          </div>
+
+          {/* Source URLs list */}
+          {contextUrls.length > 0 && (
+            <div className="mt-2 space-y-1">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+                Zdroje
+              </span>
+              {contextUrls.map((sourceUrl) => (
+                <div key={sourceUrl} className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <a
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 flex-1 truncate text-blue-600 hover:underline"
+                  >
+                    {sourceUrl}
+                  </a>
+                  <button
+                    onClick={() => handleRemoveUrl(sourceUrl)}
+                    className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-red-500"
+                    title="Odebrat zdroj"
+                  >
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

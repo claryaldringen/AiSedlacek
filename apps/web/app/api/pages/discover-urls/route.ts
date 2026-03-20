@@ -16,10 +16,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { url } = (body as { url?: string }) ?? {};
+  const { url, direction, limit, offset } =
+    (body as { url?: string; direction?: string; limit?: number; offset?: number }) ?? {};
   if (typeof url !== 'string' || url.trim() === '') {
     return Response.json({ error: 'Chybí url' }, { status: 400 });
   }
+  const scanDirection = direction === 'forward' || direction === 'backward' ? direction : 'both';
+  const pageLimit = typeof limit === 'number' && limit > 0 ? limit : 20;
+  const skipCount = typeof offset === 'number' && offset > 0 ? offset : 0;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -35,22 +39,286 @@ export async function POST(request: NextRequest): Promise<Response> {
       try {
         const parsed = new URL(url.trim());
         const segments = parsed.pathname.split('/');
-        const pageSegment = findPageSegment(segments);
+        const iiifId = findIIIFIdentifier(segments);
+        const pageSegment = !iiifId ? findPageSegment(segments) : null;
+        const queryParam = !iiifId && !pageSegment ? findNumericQueryParam(parsed) : null;
 
-        if (pageSegment) {
+        if (iiifId) {
+          const label = `${iiifId.num}${iiifId.folioSuffix.toLowerCase()}`;
+          send('source', {
+            label,
+            thumbnailUrl: buildThumbnailUrl(url.trim(), parsed, segments),
+          });
+        } else if (pageSegment) {
           const srcSegment = segments[pageSegment.index]!;
           send('source', {
             label: formatPageLabel(srcSegment, pageSegment.prefix),
             thumbnailUrl: buildThumbnailUrl(url.trim(), parsed, segments),
           });
+        } else if (queryParam) {
+          send('source', {
+            label: `${queryParam.key}=${queryParam.num}`,
+            thumbnailUrl: url.trim(),
+          });
         }
 
-        if (pageSegment) {
+        const scanForward = scanDirection === 'both' || scanDirection === 'forward';
+        const scanBackward = scanDirection === 'both' || scanDirection === 'backward';
+
+        if (iiifId) {
+          const MAX_CONSECUTIVE_MISSES = 10;
+          const { segmentIndex, prefix, num, pad, suffix, folioSuffix, identifierHead } = iiifId;
+          const isFolio = folioSuffix === 'R' || folioSuffix === 'V';
+          let forwardCount = 0;
+          let backwardCount = 0;
+          let hasMoreForward = false;
+          let hasMoreBackward = false;
+          const forwardSkip = scanForward ? skipCount : 0;
+          const backwardSkip = scanBackward ? skipCount : 0;
+          let forwardFound = 0;
+          let backwardFound = 0;
+
+          const buildIIIFCandidate = (
+            n: number,
+            side: string,
+          ): { candidateStr: string; label: string; newSegments: string[] } => {
+            const lastPart = `${prefix}${String(n).padStart(pad, '0')}${side}${suffix}`;
+            const newIdentifier = identifierHead + lastPart;
+            const encoded = encodeURIComponent(newIdentifier);
+            const newSegments = [...segments];
+            newSegments[segmentIndex] = encoded;
+            const candidateUrl = new URL(newSegments.join('/'), parsed.origin);
+            candidateUrl.search = parsed.search;
+            const label = `${n}${side.toLowerCase()}`;
+            return { candidateStr: candidateUrl.toString(), label, newSegments };
+          };
+
+          const checkIIIF = async (
+            n: number,
+            side: string,
+          ): Promise<{
+            exists: boolean;
+            candidateStr: string;
+            label: string;
+            newSegments: string[];
+          }> => {
+            const { candidateStr, label, newSegments } = buildIIIFCandidate(n, side);
+            if (candidateStr === url.trim())
+              return { exists: true, candidateStr, label, newSegments };
+            const exists = await checkUrlExists(candidateStr);
+            return { exists, candidateStr, label, newSegments };
+          };
+
+          const emitIIIFFound = (
+            candidateStr: string,
+            label: string,
+            newSegments: string[],
+          ): void => {
+            const thumbUrl = buildThumbnailUrl(candidateStr, parsed, newSegments);
+            send('found', { url: candidateStr, label, thumbnailUrl: thumbUrl });
+          };
+
+          if (isFolio) {
+            if (scanForward) {
+              let misses = 0;
+              for (let n = num; forwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES; n++) {
+                const sides = n === num ? (folioSuffix === 'R' ? ['V'] : []) : ['R', 'V'];
+                let anyFound = false;
+                for (const s of sides) {
+                  if (forwardCount >= pageLimit) break;
+                  const r = await checkIIIF(n, s);
+                  if (r.exists && r.candidateStr !== url.trim()) {
+                    forwardFound++;
+                    anyFound = true;
+                    if (forwardFound > forwardSkip) {
+                      emitIIIFFound(r.candidateStr, r.label, r.newSegments);
+                      forwardCount++;
+                    }
+                  }
+                }
+                if (!anyFound && n !== num) misses++;
+                else misses = 0;
+              }
+              if (forwardCount >= pageLimit) hasMoreForward = true;
+            }
+            if (scanBackward) {
+              let misses = 0;
+              for (
+                let n = num - 1;
+                n > 0 && backwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n--
+              ) {
+                let anyFound = false;
+                for (const s of ['R', 'V']) {
+                  if (backwardCount >= pageLimit) break;
+                  const r = await checkIIIF(n, s);
+                  if (r.exists && r.candidateStr !== url.trim()) {
+                    backwardFound++;
+                    anyFound = true;
+                    if (backwardFound > backwardSkip) {
+                      emitIIIFFound(r.candidateStr, r.label, r.newSegments);
+                      backwardCount++;
+                    }
+                  }
+                }
+                if (!anyFound) misses++;
+                else misses = 0;
+              }
+              if (backwardCount >= pageLimit) hasMoreBackward = true;
+            }
+          } else {
+            if (scanForward) {
+              let misses = 0;
+              for (
+                let n = num + 1;
+                forwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n++
+              ) {
+                const r = await checkIIIF(n, '');
+                if (r.exists && r.candidateStr !== url.trim()) {
+                  forwardFound++;
+                  if (forwardFound > forwardSkip) {
+                    emitIIIFFound(r.candidateStr, r.label, r.newSegments);
+                    forwardCount++;
+                  }
+                  misses = 0;
+                } else if (r.candidateStr !== url.trim()) {
+                  misses++;
+                }
+              }
+              if (forwardCount >= pageLimit) hasMoreForward = true;
+            }
+            if (scanBackward) {
+              let misses = 0;
+              for (
+                let n = num - 1;
+                n > 0 && backwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n--
+              ) {
+                const r = await checkIIIF(n, '');
+                if (r.exists && r.candidateStr !== url.trim()) {
+                  backwardFound++;
+                  if (backwardFound > backwardSkip) {
+                    emitIIIFFound(r.candidateStr, r.label, r.newSegments);
+                    backwardCount++;
+                  }
+                  misses = 0;
+                } else if (r.candidateStr !== url.trim()) {
+                  misses++;
+                }
+              }
+              if (backwardCount >= pageLimit) hasMoreBackward = true;
+            }
+          }
+          send('has_more', {
+            forward: hasMoreForward,
+            backward: hasMoreBackward,
+            forwardTotal: forwardCount + (scanForward ? skipCount : 0),
+            backwardTotal: backwardCount + (scanBackward ? skipCount : 0),
+          });
+        } else if (queryParam) {
+          // Query-param URLs (like esbirky.cz ?id=N) have sparse ID spaces
+          // — use higher miss tolerance than path-segment URLs
+          const MAX_CONSECUTIVE_MISSES = 50;
+          const { key, num } = queryParam;
+          let forwardCount = 0;
+          let backwardCount = 0;
+          let hasMoreForward = false;
+          let hasMoreBackward = false;
+          const forwardSkip = scanForward ? skipCount : 0;
+          const backwardSkip = scanBackward ? skipCount : 0;
+
+          const checkQuery = async (
+            n: number,
+          ): Promise<{ exists: boolean; candidateStr: string }> => {
+            const candidateUrl = new URL(parsed.toString());
+            candidateUrl.searchParams.set(key, String(n));
+            const candidateStr = candidateUrl.toString();
+            if (candidateStr === url.trim()) return { exists: true, candidateStr };
+            const exists = await checkUrlExists(candidateStr);
+            return { exists, candidateStr };
+          };
+
+          if (scanForward) {
+            let misses = 0;
+            let found = 0; // total found including skipped
+            let stoppedByMisses = false;
+            for (
+              let n = num + 1;
+              forwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+              n++
+            ) {
+              const { exists, candidateStr } = await checkQuery(n);
+              if (exists && candidateStr !== url.trim()) {
+                found++;
+                if (found > forwardSkip) {
+                  send('found', {
+                    url: candidateStr,
+                    label: `${key}=${n}`,
+                    thumbnailUrl: candidateStr,
+                  });
+                  forwardCount++;
+                }
+                misses = 0;
+              } else if (candidateStr !== url.trim()) {
+                misses++;
+              }
+            }
+            stoppedByMisses = misses >= MAX_CONSECUTIVE_MISSES;
+            // Report has_more if we hit pageLimit OR if we stopped due to gaps but found pages
+            if (forwardCount >= pageLimit || (stoppedByMisses && forwardCount > 0))
+              hasMoreForward = true;
+          }
+          if (scanBackward) {
+            let misses = 0;
+            let found = 0;
+            let stoppedByMisses = false;
+            let lastN = num - 1;
+            for (
+              let n = num - 1;
+              n > 0 && backwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+              n--
+            ) {
+              lastN = n;
+              const { exists, candidateStr } = await checkQuery(n);
+              if (exists && candidateStr !== url.trim()) {
+                found++;
+                if (found > backwardSkip) {
+                  send('found', {
+                    url: candidateStr,
+                    label: `${key}=${n}`,
+                    thumbnailUrl: candidateStr,
+                  });
+                  backwardCount++;
+                }
+                misses = 0;
+              } else if (candidateStr !== url.trim()) {
+                misses++;
+              }
+            }
+            stoppedByMisses = misses >= MAX_CONSECUTIVE_MISSES;
+            // Report has_more if we hit pageLimit, or stopped by gaps (but not if we reached id=1)
+            if (backwardCount >= pageLimit || (stoppedByMisses && backwardCount > 0 && lastN > 1))
+              hasMoreBackward = true;
+          }
+          send('has_more', {
+            forward: hasMoreForward,
+            backward: hasMoreBackward,
+            forwardTotal: forwardCount + (scanForward ? skipCount : 0),
+            backwardTotal: backwardCount + (scanBackward ? skipCount : 0),
+          });
+        } else if (pageSegment) {
+          const MAX_CONSECUTIVE_MISSES = 10;
           const { index, prefix, num, pad, suffix } = pageSegment;
           const isFolio = suffix === 'R' || suffix === 'V';
-          const MAX_PAGES = 999;
-          const MAX_CONSECUTIVE_MISSES = 10;
-          let count = 0;
+          let forwardCount = 0;
+          let backwardCount = 0;
+          let hasMoreForward = false;
+          let hasMoreBackward = false;
+          const forwardSkip = scanForward ? skipCount : 0;
+          const backwardSkip = scanBackward ? skipCount : 0;
+          let forwardFound = 0;
+          let backwardFound = 0;
 
           const buildCandidateUrl = (
             n: number,
@@ -64,60 +332,130 @@ export async function POST(request: NextRequest): Promise<Response> {
             return { candidateStr: candidateUrl.toString(), candidate, newSegments };
           };
 
-          const tryAdd = async (n: number, side: string): Promise<boolean> => {
+          const checkSeg = async (
+            n: number,
+            side: string,
+          ): Promise<{
+            exists: boolean;
+            candidateStr: string;
+            candidate: string;
+            newSegments: string[];
+          }> => {
             const { candidateStr, candidate, newSegments } = buildCandidateUrl(n, side);
-            if (candidateStr === url.trim()) return true;
+            if (candidateStr === url.trim())
+              return { exists: true, candidateStr, candidate, newSegments };
             const exists = await checkUrlExists(candidateStr);
-            if (exists) {
-              const label = formatPageLabel(candidate, prefix);
-              const thumbUrl = buildThumbnailUrl(candidateStr, parsed, newSegments);
-              send('found', { url: candidateStr, label, thumbnailUrl: thumbUrl });
-              count++;
-              return true;
-            }
-            return false;
+            return { exists, candidateStr, candidate, newSegments };
+          };
+
+          const emitFound = (
+            candidateStr: string,
+            candidate: string,
+            newSegments: string[],
+          ): void => {
+            const label = formatPageLabel(candidate, prefix);
+            const thumbUrl = buildThumbnailUrl(candidateStr, parsed, newSegments);
+            send('found', { url: candidateStr, label, thumbnailUrl: thumbUrl });
           };
 
           if (isFolio) {
-            let misses = 0;
-            for (let n = num; count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES; n++) {
-              const sides = n === num ? (suffix === 'R' ? ['V'] : []) : ['R', 'V'];
-              let anyFound = false;
-              for (const s of sides) {
-                if (await tryAdd(n, s)) anyFound = true;
+            if (scanForward) {
+              let misses = 0;
+              for (let n = num; forwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES; n++) {
+                const sides = n === num ? (suffix === 'R' ? ['V'] : []) : ['R', 'V'];
+                let anyFound = false;
+                for (const s of sides) {
+                  if (forwardCount >= pageLimit) break;
+                  const { exists, candidateStr, candidate, newSegments } = await checkSeg(n, s);
+                  if (exists && candidateStr !== url.trim()) {
+                    forwardFound++;
+                    anyFound = true;
+                    if (forwardFound > forwardSkip) {
+                      emitFound(candidateStr, candidate, newSegments);
+                      forwardCount++;
+                    }
+                  }
+                }
+                if (!anyFound && n !== num) misses++;
+                else misses = 0;
               }
-              if (!anyFound && n !== num) misses++;
-              else misses = 0;
+              if (forwardCount >= pageLimit) hasMoreForward = true;
             }
-            misses = 0;
-            for (
-              let n = num - 1;
-              n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES;
-              n--
-            ) {
-              let anyFound = false;
-              for (const s of ['R', 'V']) {
-                if (await tryAdd(n, s)) anyFound = true;
+            if (scanBackward) {
+              let misses = 0;
+              for (
+                let n = num - 1;
+                n > 0 && backwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n--
+              ) {
+                let anyFound = false;
+                for (const s of ['R', 'V']) {
+                  if (backwardCount >= pageLimit) break;
+                  const { exists, candidateStr, candidate, newSegments } = await checkSeg(n, s);
+                  if (exists && candidateStr !== url.trim()) {
+                    backwardFound++;
+                    anyFound = true;
+                    if (backwardFound > backwardSkip) {
+                      emitFound(candidateStr, candidate, newSegments);
+                      backwardCount++;
+                    }
+                  }
+                }
+                if (!anyFound) misses++;
+                else misses = 0;
               }
-              if (!anyFound) misses++;
-              else misses = 0;
+              if (backwardCount >= pageLimit) hasMoreBackward = true;
             }
           } else {
-            let misses = 0;
-            for (let n = num + 1; count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES; n++) {
-              if (await tryAdd(n, '')) misses = 0;
-              else misses++;
+            if (scanForward) {
+              let misses = 0;
+              for (
+                let n = num + 1;
+                forwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n++
+              ) {
+                const { exists, candidateStr, candidate, newSegments } = await checkSeg(n, '');
+                if (exists && candidateStr !== url.trim()) {
+                  forwardFound++;
+                  if (forwardFound > forwardSkip) {
+                    emitFound(candidateStr, candidate, newSegments);
+                    forwardCount++;
+                  }
+                  misses = 0;
+                } else if (candidateStr !== url.trim()) {
+                  misses++;
+                }
+              }
+              if (forwardCount >= pageLimit) hasMoreForward = true;
             }
-            misses = 0;
-            for (
-              let n = num - 1;
-              n > 0 && count < MAX_PAGES && misses < MAX_CONSECUTIVE_MISSES;
-              n--
-            ) {
-              if (await tryAdd(n, '')) misses = 0;
-              else misses++;
+            if (scanBackward) {
+              let misses = 0;
+              for (
+                let n = num - 1;
+                n > 0 && backwardCount < pageLimit && misses < MAX_CONSECUTIVE_MISSES;
+                n--
+              ) {
+                const { exists, candidateStr, candidate, newSegments } = await checkSeg(n, '');
+                if (exists && candidateStr !== url.trim()) {
+                  backwardFound++;
+                  if (backwardFound > backwardSkip) {
+                    emitFound(candidateStr, candidate, newSegments);
+                    backwardCount++;
+                  }
+                  misses = 0;
+                } else if (candidateStr !== url.trim()) {
+                  misses++;
+                }
+              }
+              if (backwardCount >= pageLimit) hasMoreBackward = true;
             }
           }
+          send('has_more', {
+            forward: hasMoreForward,
+            backward: hasMoreBackward,
+            forwardTotal: forwardCount + (scanForward ? skipCount : 0),
+            backwardTotal: backwardCount + (scanBackward ? skipCount : 0),
+          });
         }
 
         send('done', {});
@@ -136,6 +474,91 @@ export async function POST(request: NextRequest): Promise<Response> {
       Connection: 'keep-alive',
     },
   });
+}
+
+// ---------- IIIF identifier detection ----------
+
+interface IIIFIdentifier {
+  /** Index of the identifier segment in the path */
+  segmentIndex: number;
+  /** The raw (percent-encoded) segment */
+  rawSegment: string;
+  /** Text before the number (in the decoded last component) */
+  prefix: string;
+  /** The page number */
+  num: number;
+  /** Zero-padding width */
+  pad: number;
+  /** Suffix after the number (e.g. '.jp2') */
+  suffix: string;
+  /** R/V folio suffix before the extension, if any */
+  folioSuffix: string;
+  /** Parts of the decoded identifier before the last component */
+  identifierHead: string;
+}
+
+/**
+ * Detect a IIIF Image API identifier with an embedded page number.
+ *
+ * IIIF URLs: {server}/{prefix}/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
+ *
+ * The identifier may contain %2F-encoded slashes and a file extension.
+ * Example: bbb%2Fbbb-Mss-hh-I0002%2Fbbb-Mss-hh-I0002_001.jp2
+ *   → page number 001, prefix "bbb-Mss-hh-I0002_", suffix ".jp2"
+ */
+function findIIIFIdentifier(segments: string[]): IIIFIdentifier | null {
+  // Look for a segment containing %2F or a IIIF-like identifier before /full/ or /square/
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i]!;
+    const nextSeg = segments[i + 1]?.toLowerCase();
+
+    // IIIF region parameter follows the identifier
+    if (nextSeg !== 'full' && nextSeg !== 'square' && !/^\d+,\d+,\d+,\d+$/.test(nextSeg ?? '')) {
+      continue;
+    }
+
+    // Decode the identifier
+    const decoded = decodeURIComponent(seg);
+
+    // Get the last component (after the last /)
+    const parts = decoded.split('/');
+    const lastPart = parts[parts.length - 1] ?? '';
+    const head = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
+
+    // Match: prefix + digits + optional R/V + extension
+    const match = lastPart.match(/^(.+?)(\d{2,})([RVrv])?(\.[a-z0-9]{2,4})?$/i);
+    if (!match) continue;
+
+    return {
+      segmentIndex: i,
+      rawSegment: seg,
+      prefix: match[1]!,
+      num: parseInt(match[2]!, 10),
+      pad: match[2]!.length,
+      suffix: match[4] ?? '',
+      folioSuffix: (match[3] ?? '').toUpperCase(),
+      identifierHead: head,
+    };
+  }
+  return null;
+}
+
+interface NumericQueryParam {
+  key: string;
+  num: number;
+}
+
+/**
+ * Find a query parameter with a numeric value (e.g. ?id=180463).
+ * Returns the first parameter whose value is a pure integer.
+ */
+function findNumericQueryParam(parsed: URL): NumericQueryParam | null {
+  for (const [key, value] of parsed.searchParams) {
+    if (/^\d+$/.test(value) && value.length >= 2) {
+      return { key, num: parseInt(value, 10) };
+    }
+  }
+  return null;
 }
 
 interface PageSegment {

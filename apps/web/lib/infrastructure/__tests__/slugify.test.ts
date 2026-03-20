@@ -48,9 +48,7 @@ describe('generateUniqueSlug', () => {
   });
 
   it('appends suffix on collision', async () => {
-    mockFindUnique
-      .mockResolvedValueOnce({ slug: 'jensky-kodex' })
-      .mockResolvedValueOnce(null);
+    mockFindUnique.mockResolvedValueOnce({ slug: 'jensky-kodex' }).mockResolvedValueOnce(null);
     const slug = await generateUniqueSlug('Jenský kodex');
     expect(slug).toBe('jensky-kodex-2');
   });

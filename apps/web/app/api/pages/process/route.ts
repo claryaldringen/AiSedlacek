@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import fs from 'fs/promises';
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { processWithClaude, processWithClaudeBatch } from '@/lib/adapters/ocr/claude-vision';
@@ -7,6 +6,7 @@ import type { StructuredOcrResult, ProcessingMode } from '@/lib/adapters/ocr/cla
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { requireUserId } from '@/lib/auth';
 import { createBatches, truncateContext } from '@/lib/batch-utils';
+import { getStorage } from '@/lib/adapters/storage';
 import {
   createJob,
   getActiveJob,
@@ -28,7 +28,10 @@ async function waitIfPaused(userId: string, signal: AbortSignal, progress: numbe
   await Promise.race([
     job.pausePromise ?? Promise.resolve(),
     new Promise<void>((resolve) => {
-      if (signal.aborted) { resolve(); return; }
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
       signal.addEventListener('abort', () => resolve(), { once: true });
     }),
   ]);
@@ -230,9 +233,11 @@ async function runProcessing(
           progress: Math.round((completed / total) * 100),
         });
 
-        const filename = page.imageUrl.replace('/api/images/', '');
-        const imagePath = `tmp/uploads/${filename}`;
-        const imageBuffer = await fs.readFile(imagePath);
+        const storage = getStorage();
+        const storagePath = page.imageUrl.startsWith('/api/images/')
+          ? page.imageUrl.replace('/api/images/', '')
+          : page.imageUrl;
+        const imageBuffer = await storage.read(storagePath);
         const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
 
         const existingByHash = await prisma.document.findUnique({

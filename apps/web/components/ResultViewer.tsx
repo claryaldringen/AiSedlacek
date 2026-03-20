@@ -77,7 +77,7 @@ function EditableSection({
   }, []);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
+    <div className="flex flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-stone-200 bg-stone-50 px-4 py-2">
         <div>
           <h2 className="text-sm font-semibold text-stone-700">{title}</h2>
@@ -113,7 +113,7 @@ function EditableSection({
           <MarkdownEditor ref={editorRef} initialValue={content} onChange={setDraft} />
         </div>
       ) : (
-        <div className="prose prose-stone prose-sm max-w-none p-6">
+        <div className="prose prose-stone prose-sm max-w-none p-4">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       )}
@@ -175,9 +175,9 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
   );
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col">
       {retranslating && (
-        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+        <div className="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
           <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle
               className="opacity-25"
@@ -197,203 +197,219 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         </div>
       )}
 
-      <EditableSection
-        title="Transkripce"
-        subtitle={`Jazyk originálu: ${result.detectedLanguage}`}
-        content={result.transcription}
-        onSave={(text) => void handleTranscriptionSave(text)}
-        saving={saving}
-      />
-
-      <EditableSection
-        title="Překlad"
-        subtitle={`Jazyk: ${result.translationLanguage}${retranslating ? ' (aktualizuje se…)' : ''}`}
-        content={result.translation}
-        onSave={(text) => void saveField('translation', text)}
-        saving={saving}
-      />
-
-      {result.context && (
-        <EditableSection
-          title="Kontext"
-          content={result.context}
-          onSave={(text) => void saveField('context', text)}
-          saving={saving}
-        />
-      )}
-
-      {result.glossary.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-          <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-            <h2 className="text-sm font-semibold text-stone-700">Slovníček</h2>
-          </div>
-          <div className="p-6">
-            <dl className="space-y-3">
-              {result.glossary.map((entry, i) => (
-                <div key={i}>
-                  <dt className="text-sm font-semibold text-stone-800">{entry.term}</dt>
-                  <dd className="mt-0.5 text-sm text-stone-600">{entry.definition}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
+      {/* Row 1: Transcription | Translation */}
+      <div className="grid flex-1 grid-cols-2 divide-x divide-slate-200">
+        <div className="flex flex-col">
+          <EditableSection
+            title="Transkripce"
+            subtitle={`Jazyk originálu: ${result.detectedLanguage}`}
+            content={result.transcription}
+            onSave={(text) => void handleTranscriptionSave(text)}
+            saving={saving}
+          />
         </div>
-      )}
-
-      {/* Version history */}
-      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-        <details>
-          <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
-            Historie verzí
-          </summary>
-          <div className="p-4">
-            <VersionHistory
-              documentId={result.id}
-              onRestore={(field, content) => {
-                if (field === 'transcription') {
-                  void handleTranscriptionSave(content);
-                } else if (field.startsWith('translation:')) {
-                  void saveField('translation', content);
-                } else if (field === 'context') {
-                  void saveField('context', content);
-                }
-              }}
-            />
-          </div>
-        </details>
+        <div className="flex flex-col">
+          <EditableSection
+            title="Překlad"
+            subtitle={`Jazyk: ${result.translationLanguage}${retranslating ? ' (aktualizuje se…)' : ''}`}
+            content={result.translation}
+            onSave={(text) => void saveField('translation', text)}
+            saving={saving}
+          />
+        </div>
       </div>
 
-      {/* Metadata */}
-      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-        <details>
-          <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
-            Metadata
-          </summary>
-          <div className="divide-y divide-stone-100 text-sm">
-            {/* Document processing */}
-            <MetadataGroup title="Zpracování">
-              <MetadataRow label="Model" value={result.model} />
-              <MetadataRow
-                label="Tokeny"
-                value={
-                  result.inputTokens != null || result.outputTokens != null
-                    ? `${result.inputTokens ?? '?'} vstup / ${result.outputTokens ?? '?'} výstup`
-                    : null
-                }
-              />
-              <MetadataRow
-                label="Čas zpracování"
-                value={
-                  result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
-                }
-              />
-              <MetadataRow
-                label="Cena"
-                value={formatCost(result.model, result.inputTokens, result.outputTokens)}
-              />
-              <MetadataRow
-                label="Vytvořeno"
-                value={result.createdAt ? formatDate(result.createdAt) : null}
-              />
-              <MetadataRow
-                label="Upraveno"
-                value={result.updatedAt ? formatDate(result.updatedAt) : null}
-              />
-            </MetadataGroup>
+      {/* Row 2: Glossary | Context */}
+      <div className="grid grid-cols-2 divide-x divide-slate-200 border-t border-slate-200">
+        <div className="flex flex-col">
+          {result.glossary.length > 0 ? (
+            <div>
+              <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
+                <h2 className="text-sm font-semibold text-stone-700">Slovníček</h2>
+              </div>
+              <div className="p-4">
+                <dl className="space-y-2">
+                  {result.glossary.map((entry, i) => (
+                    <div key={i}>
+                      <dt className="text-sm font-semibold text-stone-800">{entry.term}</dt>
+                      <dd className="mt-0.5 text-sm text-stone-600">{entry.definition}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
+                <h2 className="text-sm font-semibold text-stone-700">Slovníček</h2>
+              </div>
+              <div className="p-4 text-sm text-slate-400">Žádné termíny</div>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col">
+          <EditableSection
+            title="Kontext"
+            content={result.context || ''}
+            onSave={(text) => void saveField('context', text)}
+            saving={saving}
+          />
+        </div>
+      </div>
 
-            {/* Translation */}
-            {(result.translationModel || result.translationInputTokens != null) && (
-              <MetadataGroup title="Překlad">
-                <MetadataRow label="Model" value={result.translationModel} />
+      {/* Row 3: Metadata | Version history */}
+      <div className="grid grid-cols-2 divide-x divide-slate-200 border-t border-slate-200">
+        {/* Metadata */}
+        <div>
+          <details>
+            <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
+              Metadata
+            </summary>
+            <div className="divide-y divide-stone-100 text-sm">
+              <MetadataGroup title="Zpracování">
+                <MetadataRow label="Model" value={result.model} />
                 <MetadataRow
                   label="Tokeny"
                   value={
-                    result.translationInputTokens != null || result.translationOutputTokens != null
-                      ? `${result.translationInputTokens ?? '?'} vstup / ${result.translationOutputTokens ?? '?'} výstup`
+                    result.inputTokens != null || result.outputTokens != null
+                      ? `${result.inputTokens ?? '?'} vstup / ${result.outputTokens ?? '?'} výstup`
                       : null
                   }
                 />
                 <MetadataRow
-                  label="Cena"
-                  value={formatCost(
-                    result.translationModel,
-                    result.translationInputTokens,
-                    result.translationOutputTokens,
-                  )}
-                />
-              </MetadataGroup>
-            )}
-
-            {/* Chat */}
-            {(result.chatInputTokens ?? 0) > 0 && (
-              <MetadataGroup title="Chat">
-                <MetadataRow label="Model" value={result.chatModel} />
-                <MetadataRow
-                  label="Tokeny"
-                  value={`${result.chatInputTokens ?? 0} vstup / ${result.chatOutputTokens ?? 0} výstup`}
-                />
-                <MetadataRow
-                  label="Cena"
-                  value={formatCost(
-                    result.chatModel,
-                    result.chatInputTokens,
-                    result.chatOutputTokens,
-                  )}
-                />
-              </MetadataGroup>
-            )}
-
-            {/* Total cost */}
-            {(() => {
-              const processCost = computeCostRaw(
-                result.model,
-                result.inputTokens,
-                result.outputTokens,
-              );
-              const translationCost = computeCostRaw(
-                result.translationModel,
-                result.translationInputTokens,
-                result.translationOutputTokens,
-              );
-              const chatCost = computeCostRaw(
-                result.chatModel,
-                result.chatInputTokens,
-                result.chatOutputTokens,
-              );
-              const total = processCost + translationCost + chatCost;
-              return total > 0 ? (
-                <MetadataGroup title="Celkem">
-                  <MetadataRow
-                    label="Celková cena"
-                    value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
-                  />
-                </MetadataGroup>
-              ) : null;
-            })()}
-
-            {/* Image / Page */}
-            {(result.mimeType || result.width || result.hash) && (
-              <MetadataGroup title="Obrázek">
-                <MetadataRow label="Formát" value={result.mimeType} />
-                <MetadataRow
-                  label="Rozměry"
+                  label="Čas zpracování"
                   value={
-                    result.width && result.height ? `${result.width} × ${result.height} px` : null
+                    result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
                   }
                 />
                 <MetadataRow
-                  label="Velikost"
-                  value={result.fileSize != null ? formatFileSize(result.fileSize) : null}
+                  label="Cena"
+                  value={formatCost(result.model, result.inputTokens, result.outputTokens)}
                 />
                 <MetadataRow
-                  label="Nahráno"
-                  value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null}
+                  label="Vytvořeno"
+                  value={result.createdAt ? formatDate(result.createdAt) : null}
                 />
-                <MetadataRow label="SHA-256" value={result.hash} mono />
+                <MetadataRow
+                  label="Upraveno"
+                  value={result.updatedAt ? formatDate(result.updatedAt) : null}
+                />
               </MetadataGroup>
-            )}
-          </div>
-        </details>
+
+              {(result.translationModel || result.translationInputTokens != null) && (
+                <MetadataGroup title="Překlad">
+                  <MetadataRow label="Model" value={result.translationModel} />
+                  <MetadataRow
+                    label="Tokeny"
+                    value={
+                      result.translationInputTokens != null ||
+                      result.translationOutputTokens != null
+                        ? `${result.translationInputTokens ?? '?'} vstup / ${result.translationOutputTokens ?? '?'} výstup`
+                        : null
+                    }
+                  />
+                  <MetadataRow
+                    label="Cena"
+                    value={formatCost(
+                      result.translationModel,
+                      result.translationInputTokens,
+                      result.translationOutputTokens,
+                    )}
+                  />
+                </MetadataGroup>
+              )}
+
+              {(result.chatInputTokens ?? 0) > 0 && (
+                <MetadataGroup title="Chat">
+                  <MetadataRow label="Model" value={result.chatModel} />
+                  <MetadataRow
+                    label="Tokeny"
+                    value={`${result.chatInputTokens ?? 0} vstup / ${result.chatOutputTokens ?? 0} výstup`}
+                  />
+                  <MetadataRow
+                    label="Cena"
+                    value={formatCost(
+                      result.chatModel,
+                      result.chatInputTokens,
+                      result.chatOutputTokens,
+                    )}
+                  />
+                </MetadataGroup>
+              )}
+
+              {(() => {
+                const processCost = computeCostRaw(
+                  result.model,
+                  result.inputTokens,
+                  result.outputTokens,
+                );
+                const translationCost = computeCostRaw(
+                  result.translationModel,
+                  result.translationInputTokens,
+                  result.translationOutputTokens,
+                );
+                const chatCost = computeCostRaw(
+                  result.chatModel,
+                  result.chatInputTokens,
+                  result.chatOutputTokens,
+                );
+                const total = processCost + translationCost + chatCost;
+                return total > 0 ? (
+                  <MetadataGroup title="Celkem">
+                    <MetadataRow
+                      label="Celková cena"
+                      value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
+                    />
+                  </MetadataGroup>
+                ) : null;
+              })()}
+
+              {(result.mimeType || result.width || result.hash) && (
+                <MetadataGroup title="Obrázek">
+                  <MetadataRow label="Formát" value={result.mimeType} />
+                  <MetadataRow
+                    label="Rozměry"
+                    value={
+                      result.width && result.height ? `${result.width} × ${result.height} px` : null
+                    }
+                  />
+                  <MetadataRow
+                    label="Velikost"
+                    value={result.fileSize != null ? formatFileSize(result.fileSize) : null}
+                  />
+                  <MetadataRow
+                    label="Nahráno"
+                    value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null}
+                  />
+                  <MetadataRow label="SHA-256" value={result.hash} mono />
+                </MetadataGroup>
+              )}
+            </div>
+          </details>
+        </div>
+
+        {/* Version history */}
+        <div>
+          <details>
+            <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
+              Historie verzí
+            </summary>
+            <div className="p-4">
+              <VersionHistory
+                documentId={result.id}
+                onRestore={(field, content) => {
+                  if (field === 'transcription') {
+                    void handleTranscriptionSave(content);
+                  } else if (field.startsWith('translation:')) {
+                    void saveField('translation', content);
+                  } else if (field === 'context') {
+                    void saveField('context', content);
+                  }
+                }}
+              />
+            </div>
+          </details>
+        </div>
       </div>
     </div>
   );

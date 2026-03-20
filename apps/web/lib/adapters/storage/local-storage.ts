@@ -8,10 +8,16 @@ export class LocalStorageProvider implements IStorageProvider {
 
   async upload(file: Buffer, filename: string): Promise<StorageResult> {
     await fs.mkdir(this.uploadDir, { recursive: true });
-    const uniqueName = `${crypto.randomUUID()}-${filename}`;
+    // Sanitize filename — decoded IIIF identifiers can contain slashes (e.g. bbb/Mss-hh-I0002)
+    const safeName = filename.replace(/[/\\]/g, '_');
+    const uniqueName = `${crypto.randomUUID()}-${safeName}`;
     const filePath = path.join(this.uploadDir, uniqueName);
     await fs.writeFile(filePath, file);
     return { url: `/api/images/${uniqueName}`, path: uniqueName };
+  }
+
+  async read(filePath: string): Promise<Buffer> {
+    return fs.readFile(path.join(this.uploadDir, filePath));
   }
 
   getUrl(filePath: string): string {

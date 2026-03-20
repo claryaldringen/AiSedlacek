@@ -66,6 +66,12 @@ export function ImportDialog({
   const [discovered, setDiscovered] = useState<DiscoveredImage[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isImportingDiscovered, setIsImportingDiscovered] = useState(false);
+  const [hasMoreForward, setHasMoreForward] = useState(false);
+  const [hasMoreBackward, setHasMoreBackward] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [forwardOffset, setForwardOffset] = useState(0);
+  const [backwardOffset, setBackwardOffset] = useState(0);
+  const [pageLimit, setPageLimit] = useState(20);
 
   useEffect(() => {
     if (isOpen) {
@@ -76,6 +82,11 @@ export function ImportDialog({
       setUrlError(null);
       setUrlSuccess(null);
       setDiscovered([]);
+      setHasMoreForward(false);
+      setHasMoreBackward(false);
+      setIsLoadingMore(false);
+      setForwardOffset(0);
+      setBackwardOffset(0);
     }
   }, [isOpen]);
 
@@ -163,93 +174,154 @@ export function ImportDialog({
   // ---- URL tab logic ----
   const importSingleUrl = useCallback(
     async (url: string, displayName?: string): Promise<UploadedPage | null> => {
-      const res = await fetch('/api/pages/import-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, collectionId, displayName }),
-      });
-      let data: { page?: UploadedPage; error?: string };
-      try {
-        data = (await res.json()) as { page?: UploadedPage; error?: string };
-      } catch {
-        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+      const MAX_RETRIES = 3;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const res = await fetch('/api/pages/import-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, collectionId, displayName }),
+        });
+        // Retry on 500 (server overload) with exponential backoff
+        if (res.status >= 500 && attempt < MAX_RETRIES - 1) {
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+          continue;
+        }
+        let data: { page?: UploadedPage; error?: string };
+        try {
+          data = (await res.json()) as { page?: UploadedPage; error?: string };
+        } catch {
+          throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+        }
+        if (!res.ok) throw new Error(data.error ?? 'Import selhal');
+        return (data.page as UploadedPage) ?? null;
       }
-      if (!res.ok) throw new Error(data.error ?? 'Import selhal');
-      return (data.page as UploadedPage) ?? null;
+      throw new Error('Import selhal po opakovaných pokusech');
     },
     [collectionId],
   );
 
   const discoverAbortRef = useRef<AbortController | null>(null);
 
-  const discoverRelated = useCallback(async (baseUrl: string) => {
-    // Abort any previous discovery
-    discoverAbortRef.current?.abort();
-    const abortController = new AbortController();
-    discoverAbortRef.current = abortController;
+  const pageLimitRef = useRef(pageLimit);
+  pageLimitRef.current = pageLimit;
 
-    setIsDiscovering(true);
-    try {
-      const res = await fetch('/api/pages/discover-urls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: baseUrl }),
-        signal: abortController.signal,
-      });
-      if (!res.ok || !res.body) return;
+  const discoverRelated = useCallback(
+    async (baseUrl: string, direction?: 'forward' | 'backward', offset?: number) => {
+      // Abort any previous discovery
+      discoverAbortRef.current?.abort();
+      const abortController = new AbortController();
+      discoverAbortRef.current = abortController;
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      if (direction) {
+        setIsLoadingMore(true);
+        if (direction === 'forward') setHasMoreForward(false);
+        else setHasMoreBackward(false);
+      } else {
+        setIsDiscovering(true);
+        setHasMoreForward(false);
+        setHasMoreBackward(false);
+        setForwardOffset(0);
+        setBackwardOffset(0);
+      }
+      try {
+        const res = await fetch('/api/pages/discover-urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: baseUrl,
+            direction: direction ?? 'both',
+            limit: pageLimitRef.current,
+            ...(offset ? { offset } : {}),
+          }),
+          signal: abortController.signal,
+        });
+        if (!res.ok || !res.body) return;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const prefetchBatch: string[] = [];
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() ?? '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6)) as {
-            type: string;
-            url?: string;
-            label?: string;
-            thumbnailUrl?: string;
-          };
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() ?? '';
 
-          if (data.type === 'source' && data.label && data.thumbnailUrl) {
-            // Update the entered URL (first item) with proper label/thumbnail
-            setDiscovered((prev) =>
-              prev.map((d, i) =>
-                i === 0 ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! } : d,
-              ),
-            );
-          } else if (data.type === 'found' && data.url && data.label && data.thumbnailUrl) {
-            setDiscovered((prev) => {
-              if (prev.some((d) => d.url === data.url)) return prev;
-              return [
-                ...prev,
-                {
-                  url: data.url!,
-                  label: data.label!,
-                  thumbnailUrl: data.thumbnailUrl!,
-                  selected: true,
-                  state: 'pending' as const,
-                },
-              ];
-            });
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = JSON.parse(line.slice(6)) as {
+              type: string;
+              url?: string;
+              label?: string;
+              thumbnailUrl?: string;
+              forward?: boolean;
+              backward?: boolean;
+              forwardTotal?: number;
+              backwardTotal?: number;
+            };
+
+            if (data.type === 'source' && data.label && data.thumbnailUrl) {
+              setDiscovered((prev) =>
+                prev.map((d, i) =>
+                  i === 0 ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! } : d,
+                ),
+              );
+            } else if (data.type === 'found' && data.url && data.label && data.thumbnailUrl) {
+              prefetchBatch.push(data.url);
+              // Trigger prefetch every 10 URLs
+              if (prefetchBatch.length >= 10) {
+                void fetch('/api/pages/prefetch', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ urls: prefetchBatch.splice(0) }),
+                });
+              }
+              setDiscovered((prev) => {
+                if (prev.some((d) => d.url === data.url)) return prev;
+                return [
+                  ...prev,
+                  {
+                    url: data.url!,
+                    label: data.label!,
+                    thumbnailUrl: data.thumbnailUrl!,
+                    selected: true,
+                    state: 'pending' as const,
+                  },
+                ];
+              });
+            } else if (data.type === 'has_more') {
+              if (!direction || direction === 'forward') {
+                setHasMoreForward(data.forward ?? false);
+                if (data.forwardTotal != null) setForwardOffset(data.forwardTotal);
+              }
+              if (!direction || direction === 'backward') {
+                setHasMoreBackward(data.backward ?? false);
+                if (data.backwardTotal != null) setBackwardOffset(data.backwardTotal);
+              }
+            }
           }
         }
+        // Flush remaining prefetch batch
+        if (prefetchBatch.length > 0) {
+          void fetch('/api/pages/prefetch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: prefetchBatch.splice(0) }),
+          });
+        }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+        // Discovery is best-effort
+      } finally {
+        setIsDiscovering(false);
+        setIsLoadingMore(false);
       }
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') return;
-      // Discovery is best-effort
-    } finally {
-      setIsDiscovering(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Trigger discovery as soon as URL is entered (debounced)
   const discoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,7 +337,22 @@ export function ImportDialog({
     } catch {
       return;
     }
-    const enteredFilename = decodeURIComponent(url.split('/').pop() ?? 'unknown');
+    // Extract a reasonable label — for query-param URLs use the numeric value
+    let enteredFilename: string;
+    try {
+      const parsed = new URL(url);
+      let queryId: string | null = null;
+      for (const [key, value] of parsed.searchParams) {
+        if (/^\d+$/.test(value) && value.length >= 2) {
+          queryId = `${key}=${value}`;
+          break;
+        }
+      }
+      enteredFilename =
+        queryId ?? decodeURIComponent(parsed.pathname.split('/').pop() ?? 'unknown');
+    } catch {
+      enteredFilename = decodeURIComponent(url.split('/').pop() ?? 'unknown');
+    }
     setDiscovered([
       { url, label: enteredFilename, thumbnailUrl: url, selected: true, state: 'pending' },
     ]);
@@ -283,29 +370,53 @@ export function ImportDialog({
     if (toImport.length === 0 || isImportingDiscovered) return;
     setIsImportingDiscovered(true);
 
-    const allImported: UploadedPage[] = [];
+    // Mark all as importing at once
+    const importingUrls = new Set(toImport.map((d) => d.url));
+    setDiscovered((prev) =>
+      prev.map((d) =>
+        importingUrls.has(d.url) && d.state === 'pending'
+          ? { ...d, state: 'importing' as const }
+          : d,
+      ),
+    );
 
-    for (const item of toImport) {
-      setDiscovered((prev) =>
-        prev.map((d) => (d.url === item.url ? { ...d, state: 'importing' as const } : d)),
+    const CONCURRENCY = 3;
+
+    // Process in parallel batches
+    for (let i = 0; i < toImport.length; i += CONCURRENCY) {
+      const batch = toImport.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (item) => {
+          const page = await importSingleUrl(item.url, item.label);
+          setDiscovered((prev) =>
+            prev.map((d) => (d.url === item.url ? { ...d, state: 'done' as const } : d)),
+          );
+          return { url: item.url, page };
+        }),
       );
-      try {
-        const page = await importSingleUrl(item.url, item.label);
-        if (page) allImported.push(page);
-        setDiscovered((prev) =>
-          prev.map((d) => (d.url === item.url ? { ...d, state: 'done' as const } : d)),
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Chyba';
-        setDiscovered((prev) =>
-          prev.map((d) =>
-            d.url === item.url ? { ...d, state: 'error' as const, error: message } : d,
-          ),
-        );
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j]!;
+        if (result.status !== 'fulfilled') {
+          const item = batch[j]!;
+          const message = result.reason instanceof Error ? result.reason.message : 'Chyba';
+          setDiscovered((prev) =>
+            prev.map((d) =>
+              d.url === item.url ? { ...d, state: 'error' as const, error: message } : d,
+            ),
+          );
+        }
       }
+      // Report batch progress
+      const batchImported = results
+        .filter(
+          (r): r is PromiseFulfilledResult<{ url: string; page: UploadedPage | null }> =>
+            r.status === 'fulfilled',
+        )
+        .map((r) => r.value.page)
+        .filter((p): p is UploadedPage => p !== null);
+      if (batchImported.length > 0) onPagesImported(batchImported);
     }
 
-    if (allImported.length > 0) onPagesImported(allImported);
     setIsImportingDiscovered(false);
   }, [discovered, isImportingDiscovered, importSingleUrl, onPagesImported]);
 
@@ -607,13 +718,82 @@ export function ImportDialog({
                       </button>
                     ))}
                   </div>
+                  {/* Pagination buttons */}
+                  {(hasMoreBackward || hasMoreForward) && !isDiscovering && (
+                    <div className="flex items-center justify-center gap-2">
+                      {hasMoreBackward && (
+                        <button
+                          onClick={() => {
+                            const url = urlInput.trim();
+                            if (url) void discoverRelated(url, 'backward', backwardOffset);
+                          }}
+                          disabled={isLoadingMore}
+                          className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15.75 19.5 8.25 12l7.5-7.5"
+                            />
+                          </svg>
+                          {isLoadingMore ? 'Načítám…' : 'Načíst předchozí'}
+                        </button>
+                      )}
+                      <select
+                        value={pageLimit}
+                        onChange={(e) => setPageLimit(Number(e.target.value))}
+                        className="rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-600 outline-none focus:border-blue-400"
+                      >
+                        <option value={20}>20</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                        <option value={200}>200</option>
+                        <option value={500}>500</option>
+                      </select>
+                      {hasMoreForward && (
+                        <button
+                          onClick={() => {
+                            const url = urlInput.trim();
+                            if (url) void discoverRelated(url, 'forward', forwardOffset);
+                          }}
+                          disabled={isLoadingMore}
+                          className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {isLoadingMore ? 'Načítám…' : 'Načíst další'}
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {discovered.some((d) => d.selected && d.state === 'pending') && (
                     <button
                       onClick={() => void handleImportDiscovered()}
                       disabled={isImportingDiscovered}
                       className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isImportingDiscovered ? 'Importuji…' : `Importovat vybrané (${discovered.filter((d) => d.selected && d.state === 'pending').length})`}
+                      {isImportingDiscovered
+                        ? 'Importuji…'
+                        : `Importovat vybrané (${discovered.filter((d) => d.selected && d.state === 'pending').length})`}
                     </button>
                   )}
                 </div>
