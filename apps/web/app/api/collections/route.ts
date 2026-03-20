@@ -18,7 +18,17 @@ export async function GET(): Promise<NextResponse> {
     },
   });
 
-  return NextResponse.json(collections);
+  // Add count of processable pages (pending + error) for each collection
+  const collectionsWithCounts = await Promise.all(
+    collections.map(async (c) => ({
+      ...c,
+      processableCount: await prisma.page.count({
+        where: { collectionId: c.id, status: { in: ['pending', 'error'] } },
+      }),
+    })),
+  );
+
+  return NextResponse.json(collectionsWithCounts);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

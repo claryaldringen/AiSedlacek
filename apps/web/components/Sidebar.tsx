@@ -12,6 +12,7 @@ export interface Collection {
   isPublic: boolean;
   slug: string | null;
   _count: { pages: number };
+  processableCount: number;
 }
 
 interface SidebarProps {

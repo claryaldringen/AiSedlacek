@@ -1121,7 +1121,7 @@ export default function HomePage(): React.JSX.Element {
         // In root view, pages of this collection are NOT in `pages` array.
         // Use _count as estimate so the button is enabled.
         const col = collections.find((c) => c.id === id);
-        if (col) collectionPageEstimate += col._count.pages;
+        if (col) collectionPageEstimate += col.processableCount;
       } else {
         expandedPageIds.add(id);
       }
