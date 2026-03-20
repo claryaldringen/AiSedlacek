@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { createTransaction, czkToTokens, getTokenBalance, generateVariableSymbol } from '@/lib/infrastructure/billing';
 
-let lastFioCall = 0;
+const lastFioCallByUser = new Map<string, number>();
 
 export async function POST() {
   const session = await auth();
@@ -12,9 +12,10 @@ export async function POST() {
   }
   const userId = session.user.id;
 
-  // Rate limiting - FIO API allows 1 request per 30 seconds
+  // Rate limiting - FIO API allows 1 request per 30 seconds (per user)
   const now = Date.now();
-  const elapsed = now - lastFioCall;
+  const lastCall = lastFioCallByUser.get(userId) ?? 0;
+  const elapsed = now - lastCall;
   if (elapsed < 30_000) {
     const retryAfterSeconds = Math.ceil((30_000 - elapsed) / 1000);
     return NextResponse.json({ error: 'rate_limited', retryAfterSeconds }, { status: 429 });
@@ -34,7 +35,7 @@ export async function POST() {
   }
 
   // Call FIO API
-  lastFioCall = Date.now();
+  lastFioCallByUser.set(userId, Date.now());
   const fioUrl = `https://www.fio.cz/ib_api/rest/last/${fioToken}/transactions.json`;
 
   let fioData: any;
