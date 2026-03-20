@@ -198,7 +198,7 @@ export function FileList({
                   <div className="h-10 w-8 overflow-hidden rounded border border-slate-200 bg-slate-100">
                     <img
                       src={page.thumbnailUrl ?? page.imageUrl}
-                      alt=""
+                      alt={cleanFilename(page.filename)}
                       className="h-full w-full object-cover"
                       loading="lazy"
                     />

@@ -260,7 +260,7 @@ export function FileUploadZone({
                   className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
                 >
                   {s.preview && (
-                    <img src={s.preview} alt="" className="h-8 w-8 rounded object-cover" />
+                    <img src={s.preview} alt={s.file.name} className="h-8 w-8 rounded object-cover" />
                   )}
                   <span className="flex-1 truncate text-slate-700">{s.file.name}</span>
                   {s.state === 'uploading' && (

@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
+import { computeCostRaw, formatCost } from '@/lib/pricing';
 
 export interface DocumentResult {
   id: string;
@@ -465,36 +466,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// Pricing per million tokens (USD), May 2025
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-opus-4-6': { input: 15, output: 75 },
-  'claude-opus-4-20250514': { input: 15, output: 75 },
-  'claude-sonnet-4-6': { input: 3, output: 15 },
-  'claude-sonnet-4-20250514': { input: 3, output: 15 },
-};
-
-function computeCostRaw(
-  model: string | null | undefined,
-  inputTokens: number | null | undefined,
-  outputTokens: number | null | undefined,
-): number {
-  if (!model || inputTokens == null || outputTokens == null) return 0;
-  const pricing = MODEL_PRICING[model];
-  if (!pricing) return 0;
-  return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
-}
-
-function formatCost(
-  model: string | null | undefined,
-  inputTokens: number | null | undefined,
-  outputTokens: number | null | undefined,
-): string | null {
-  const cost = computeCostRaw(model, inputTokens, outputTokens);
-  if (cost === 0) return null;
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(3)}`;
 }
 
 function formatDate(iso: string): string {

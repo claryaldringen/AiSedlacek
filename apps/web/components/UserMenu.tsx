@@ -67,7 +67,7 @@ export function UserMenu(): React.JSX.Element | null {
         {/* Avatar */}
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-600 text-xs font-semibold text-white">
           {session.user.image ? (
-            <img src={session.user.image} alt="" className="h-7 w-7 rounded-full" />
+            <img src={session.user.image} alt={session.user.name ?? 'Avatar'} className="h-7 w-7 rounded-full" />
           ) : (
             initials
           )}

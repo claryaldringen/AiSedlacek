@@ -819,7 +819,7 @@ export function ImportDialog({
 function FileStatusRow({ status: s }: { status: FileStatus }): React.JSX.Element {
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-      {s.preview && <img src={s.preview} alt="" className="h-8 w-8 rounded object-cover" />}
+      {s.preview && <img src={s.preview} alt={s.file.name} className="h-8 w-8 rounded object-cover" />}
       <span className="flex-1 truncate text-slate-700">{s.file.name}</span>
       {s.state === 'uploading' && (
         <svg className="h-4 w-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">

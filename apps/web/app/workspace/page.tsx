@@ -13,6 +13,8 @@ import { ShareDialog } from '@/components/ShareDialog';
 import type { Collection } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
+import { useProcessingStream } from '@/hooks/useProcessingStream';
+import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -50,22 +52,10 @@ export default function HomePage(): React.JSX.Element {
   // Blank detection
   const [detectingBlank, setDetectingBlank] = useState(false);
 
-  // Processing
+  // Processing mode
   const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>(
     'transcribe+translate',
   );
-  const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
-  const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
-  const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
-  const [batchInfo, setBatchInfo] = useState<{
-    batchNumber: number;
-    totalBatches: number;
-    pageCount: number;
-  } | null>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [interruptedPages, setInterruptedPages] = useState<string[]>([]);
-  const batchInfoRef = useRef(batchInfo);
-  batchInfoRef.current = batchInfo;
 
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
@@ -74,9 +64,6 @@ export default function HomePage(): React.JSX.Element {
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
   const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
-
-  // Error
-  const [error, setError] = useState<string | null>(null);
 
   // Drag-over for whole content area
   const [contentDragOver, setContentDragOver] = useState(false);
@@ -111,146 +98,30 @@ export default function HomePage(): React.JSX.Element {
     setAnchor,
   } = useDesktopSelection({ itemIds: allItemIds });
 
-  // Keyboard focus cursor (independent from selection anchor)
-  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
-  // Actual columns count reported by FileGrid via ResizeObserver
-  const [columnsCount, setColumnsCount] = useState(4);
-
-  const columnsCountRef = useRef(columnsCount);
-  columnsCountRef.current = columnsCount;
-
-  const allItemIdsRef = useRef(allItemIds);
-  allItemIdsRef.current = allItemIds;
-
-  // Stable refs for callbacks defined later in the file, so the keyboard
-  // useEffect can read the latest version without a forward-reference dep.
-  const handleCollectionSelectRef = useRef<((id: string) => void) | null>(null);
-  const handlePageDoubleClickRef = useRef<((page: PageItem) => Promise<void>) | null>(null);
-  const handleDeleteSelectedRef = useRef<(() => Promise<void>) | null>(null);
-
-  // Mutable state refs so the keyboard handler always sees current values
-  const focusedItemIdRef = useRef(focusedItemId);
-  focusedItemIdRef.current = focusedItemId;
-  const lastClickedIdRef = useRef(lastClickedId);
-  lastClickedIdRef.current = lastClickedId;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  const collectionsRef = useRef(collections);
-  collectionsRef.current = collections;
-  const pagesRef = useRef(pages);
-  pagesRef.current = pages;
-
-  // ---- Keyboard shortcuts (Ctrl+A, Escape, Arrow keys, Home/End, Enter, Delete) ----
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      // Don't capture when typing in input fields
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if ((e.target as HTMLElement).isContentEditable) return;
-
-      if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
-        e.preventDefault();
-        handleSelectAll();
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleDeselectAll();
-        setFocusedItemId(null);
-        return;
-      }
-
-      // Arrow / Home / End navigation
-      const isArrow =
-        e.key === 'ArrowLeft' ||
-        e.key === 'ArrowRight' ||
-        e.key === 'ArrowUp' ||
-        e.key === 'ArrowDown';
-
-      if (isArrow || e.key === 'Home' || e.key === 'End') {
-        const ids = allItemIdsRef.current;
-        if (ids.length === 0) return;
-        e.preventDefault();
-
-        const currentFocused = focusedItemIdRef.current;
-        const currentIndex = currentFocused !== null ? ids.indexOf(currentFocused) : -1;
-        const cols = columnsCountRef.current;
-
-        let nextIndex: number;
-        if (e.key === 'Home') {
-          nextIndex = 0;
-        } else if (e.key === 'End') {
-          nextIndex = ids.length - 1;
-        } else if (e.key === 'ArrowLeft') {
-          nextIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
-        } else if (e.key === 'ArrowRight') {
-          nextIndex =
-            currentIndex === -1
-              ? 0
-              : currentIndex >= ids.length - 1
-                ? ids.length - 1
-                : currentIndex + 1;
-        } else if (e.key === 'ArrowUp') {
-          nextIndex =
-            currentIndex === -1 ? 0 : currentIndex - cols < 0 ? currentIndex : currentIndex - cols;
-        } else {
-          // ArrowDown
-          nextIndex =
-            currentIndex === -1
-              ? 0
-              : currentIndex + cols >= ids.length
-                ? currentIndex
-                : currentIndex + cols;
-        }
-
-        const nextId = ids[nextIndex];
-        if (nextId == null) return;
-
-        setFocusedItemId(nextId);
-
-        if (e.shiftKey) {
-          // Extend selection from anchor to new focused item
-          const anchorId = lastClickedIdRef.current ?? ids[0] ?? nextId;
-          selectRange(anchorId, nextId);
-        } else {
-          // Move focus + select only the focused item (Finder behaviour)
-          setSelected(new Set([nextId]));
-          setAnchor(nextId);
-        }
-        return;
-      }
-
-      // Enter = open focused item
-      if (e.key === 'Enter') {
-        const focused = focusedItemIdRef.current;
-        if (focused == null) return;
-        e.preventDefault();
-        // Check if it's a collection
-        const col = collectionsRef.current.find((c) => c.id === focused);
-        if (col) {
-          handleCollectionSelectRef.current?.(col.id);
-          return;
-        }
-        // Otherwise it's a page
-        const page = pagesRef.current.find((p) => p.id === focused);
-        if (page?.status === 'done') {
-          void handlePageDoubleClickRef.current?.(page);
-        }
-        return;
-      }
-
-      // Delete / Backspace = delete selected
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedRef.current.size === 0) return;
-        e.preventDefault();
-        void handleDeleteSelectedRef.current?.();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleSelectAll, handleDeselectAll, selectRange, setSelected, setAnchor]);
+  // ---- Processing stream hook ----
+  const {
+    processingPageIds,
+    processingStep,
+    processingProgress,
+    isPaused,
+    interruptedPages,
+    isProcessing,
+    handleProcessSelected,
+    handleCancelProcessing,
+    handlePauseProcessing,
+    handleResumeProcessing,
+    handleResumeInterrupted,
+    handleResetInterrupted,
+    setError,
+    error,
+  } = useProcessingStream({
+    pages,
+    setPages,
+    selected,
+    collections,
+    processingMode,
+    loadingPages,
+  });
 
   // ---- Load collections ----
   const loadCollections = useCallback(async (): Promise<void> => {
@@ -333,7 +204,7 @@ export default function HomePage(): React.JSX.Element {
       setFixingContexts(false);
       setFixingContextsProgress(null);
     }
-  }, []);
+  }, [setError]);
 
   const handleCollectionSelect = useCallback(
     (id: string | null): void => {
@@ -346,8 +217,6 @@ export default function HomePage(): React.JSX.Element {
     },
     [router],
   );
-  // Keep ref in sync (used by keyboard handler to avoid forward-reference dep)
-  handleCollectionSelectRef.current = (id: string) => handleCollectionSelect(id);
 
   const selectedCollection =
     selectedCollectionId !== null
@@ -389,359 +258,7 @@ export default function HomePage(): React.JSX.Element {
     [loadCollections],
   );
 
-  // ---- Processing ----
-
-  /** Read an SSE stream from a Response and dispatch events to state. */
-  const consumeProcessingStream = useCallback(async (response: Response): Promise<void> => {
-    if (!response.body) return;
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() ?? '';
-
-      for (const eventStr of events) {
-        const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
-        if (!match) continue;
-        const eventType = match[1];
-        const dataStr = match[2];
-        if (!eventType || !dataStr) continue;
-
-        if (eventType === 'page_progress') {
-          const data = JSON.parse(dataStr) as {
-            pageId: string;
-            message: string;
-            progress: number;
-          };
-          const bi = batchInfoRef.current;
-          const batchPrefix =
-            bi && bi.totalBatches > 1 ? `Dávka ${bi.batchNumber}/${bi.totalBatches} — ` : '';
-          setProcessingStep(batchPrefix + data.message);
-          setProcessingProgress(data.progress);
-        } else if (eventType === 'page_done') {
-          const data = JSON.parse(dataStr) as {
-            pageId: string;
-            documentId: string;
-            cached: boolean;
-            progress: number;
-          };
-          setProcessingProgress(data.progress);
-          setProcessingPageIds((prev) => {
-            const next = new Set(prev);
-            next.delete(data.pageId);
-            return next;
-          });
-          setPages((prev) =>
-            prev.map((p) => (p.id === data.pageId ? { ...p, status: 'done' } : p)),
-          );
-          void (async () => {
-            try {
-              const res = await fetch(`/api/pages/${data.pageId}`);
-              if (res.ok) {
-                const updated = (await res.json()) as PageItem;
-                setPages((prev) => prev.map((p) => (p.id === data.pageId ? updated : p)));
-              }
-            } catch {
-              // ignore
-            }
-          })();
-        } else if (eventType === 'page_skipped') {
-          const data = JSON.parse(dataStr) as { pageId: string; progress: number };
-          setProcessingProgress(data.progress);
-          setProcessingPageIds((prev) => {
-            const next = new Set(prev);
-            next.delete(data.pageId);
-            return next;
-          });
-        } else if (eventType === 'page_error') {
-          const data = JSON.parse(dataStr) as {
-            pageId: string;
-            error: string;
-            progress: number;
-          };
-          setProcessingPageIds((prev) => {
-            const next = new Set(prev);
-            next.delete(data.pageId);
-            return next;
-          });
-          setPages((prev) =>
-            prev.map((p) => (p.id === data.pageId ? { ...p, status: 'error' } : p)),
-          );
-        } else if (eventType === 'batch_info') {
-          const data = JSON.parse(dataStr) as {
-            batchNumber: number;
-            totalBatches: number;
-            pageCount: number;
-          };
-          setBatchInfo(data);
-          batchInfoRef.current = data;
-        } else if (eventType === 'batch_progress') {
-          const data = JSON.parse(dataStr) as {
-            batchNumber: number;
-            message?: string;
-            outputTokens?: number;
-            estimatedTotal?: number;
-            progress?: number;
-          };
-          const bi = batchInfoRef.current;
-          const totalBatches = bi?.totalBatches ?? '?';
-          if (data.message) {
-            setProcessingStep(`Dávka ${data.batchNumber}/${totalBatches} — ${data.message}`);
-          }
-          if (data.progress != null) {
-            setProcessingProgress(data.progress);
-          } else if (data.outputTokens != null && data.estimatedTotal) {
-            setProcessingProgress(Math.round((data.outputTokens / data.estimatedTotal) * 100));
-          }
-        } else if (eventType === 'done') {
-          setBatchInfo(null);
-          batchInfoRef.current = null;
-          setProcessingStep('Hotovo');
-          setProcessingProgress(100);
-        } else if (eventType === 'cancelled') {
-          setBatchInfo(null);
-          batchInfoRef.current = null;
-          setProcessingStep('Zrušeno');
-          setProcessingProgress(undefined);
-        } else if (eventType === 'paused') {
-          const data = JSON.parse(dataStr) as { message: string; progress: number };
-          setProcessingStep(data.message);
-          setProcessingProgress(data.progress);
-          setIsPaused(true);
-        } else if (eventType === 'resumed') {
-          const data = JSON.parse(dataStr) as { message: string; progress: number };
-          setProcessingStep(data.message);
-          setProcessingProgress(data.progress);
-          setIsPaused(false);
-        }
-      }
-    }
-  }, []);
-
-  const handleProcessSelected = useCallback(async (): Promise<void> => {
-    // Expand selected collections into their page IDs
-    const selectedIds = Array.from(selected);
-    const collectionIds = new Set(collections.map((c) => c.id));
-    const expandedPageIds = new Set<string>();
-    // Track pages we already know about locally
-    const knownPages = new Map(pages.map((p) => [p.id, p]));
-
-    for (const id of selectedIds) {
-      if (collectionIds.has(id)) {
-        // Fetch pages for this collection (they may not be in `pages` array in root view)
-        try {
-          const res = await fetch(`/api/collections/${id}`);
-          if (res.ok) {
-            const col = (await res.json()) as { pages: PageItem[] };
-            for (const p of col.pages) {
-              expandedPageIds.add(p.id);
-              knownPages.set(p.id, p);
-            }
-          }
-        } catch {
-          // ignore
-        }
-      } else {
-        expandedPageIds.add(id);
-      }
-    }
-
-    const pageIds = Array.from(expandedPageIds).filter((id) => {
-      const p = knownPages.get(id);
-      return p && (p.status === 'pending' || p.status === 'error');
-    });
-    if (pageIds.length === 0) return;
-
-    setProcessingPageIds(new Set(pageIds));
-    setProcessingStep('Spouštím zpracování…');
-    setProcessingProgress(0);
-    setError(null);
-
-    setPages((prev) =>
-      prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'processing' } : p)),
-    );
-
-    try {
-      const response = await fetch('/api/pages/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds, language: 'cs', mode: processingMode }),
-      });
-
-      if (!response.ok || !response.body) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${response.status}`);
-      }
-
-      await consumeProcessingStream(response);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
-    } finally {
-      setProcessingPageIds(new Set());
-      setIsPaused(false);
-      setBatchInfo(null);
-      batchInfoRef.current = null;
-      setTimeout(() => {
-        setProcessingStep(undefined);
-        setProcessingProgress(undefined);
-      }, 2000);
-    }
-  }, [selected, pages, collections, processingMode, consumeProcessingStream]);
-
-  /** Reconnect to an already-running processing job (e.g. after page refresh). */
-  const hasProcessingPages = pages.some((p) => p.status === 'processing');
-  const reconnectedRef = useRef(false);
-
-  useEffect(() => {
-    if (!hasProcessingPages) {
-      reconnectedRef.current = false;
-      return;
-    }
-    // Don't reconnect if we're already tracking a job or already reconnected
-    if (reconnectedRef.current) return;
-    reconnectedRef.current = true;
-
-    const reconnect = async (): Promise<void> => {
-      const processingPages = pagesRef.current.filter((p) => p.status === 'processing');
-      try {
-        const response = await fetch('/api/pages/process');
-
-        // If server returns JSON (no active job), the pages are stale — reload them
-        const ct = response.headers.get('content-type') ?? '';
-        if (ct.includes('application/json')) {
-          // No active job — pages stuck in 'processing' need a status refresh
-          for (const p of processingPages) {
-            try {
-              const res = await fetch(`/api/pages/${p.id}`);
-              if (res.ok) {
-                const updated = (await res.json()) as PageItem;
-                setPages((prev) => prev.map((pg) => (pg.id === p.id ? updated : pg)));
-              }
-            } catch {
-              // ignore
-            }
-          }
-          return;
-        }
-
-        // Active job found — resume monitoring
-        setProcessingPageIds(new Set(processingPages.map((p) => p.id)));
-        setProcessingStep('Zpracovávám…');
-        setProcessingProgress(0);
-
-        await consumeProcessingStream(response);
-
-        setProcessingPageIds(new Set());
-        setIsPaused(false);
-        setBatchInfo(null);
-        batchInfoRef.current = null;
-        setTimeout(() => {
-          setProcessingStep(undefined);
-          setProcessingProgress(undefined);
-        }, 2000);
-      } catch {
-        // ignore reconnection errors
-      }
-    };
-    void reconnect();
-  }, [hasProcessingPages, consumeProcessingStream]);
-
-  // ---- Detect interrupted (orphaned) processing pages on load ----
-  useEffect(() => {
-    if (loadingPages) return;
-    const checkInterrupted = async (): Promise<void> => {
-      try {
-        const res = await fetch('/api/pages/process/interrupted');
-        if (!res.ok) return;
-        const data = (await res.json()) as { count: number; pageIds: string[] };
-        setInterruptedPages(data.pageIds);
-      } catch {
-        // ignore
-      }
-    };
-    void checkInterrupted();
-  }, [loadingPages]);
-
-  const handleCancelProcessing = useCallback(async (): Promise<void> => {
-    try {
-      await fetch('/api/pages/process/cancel', { method: 'POST' });
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const handlePauseProcessing = useCallback(async (): Promise<void> => {
-    try {
-      await fetch('/api/pages/process/pause', { method: 'POST' });
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const handleResumeProcessing = useCallback(async (): Promise<void> => {
-    try {
-      await fetch('/api/pages/process/resume', { method: 'POST' });
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const handleResumeInterrupted = useCallback(async (): Promise<void> => {
-    const pageIds = [...interruptedPages];
-    setInterruptedPages([]);
-    try {
-      await fetch('/api/pages/process/interrupted', { method: 'POST' });
-      setPages((prev) => prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'pending' } : p)));
-      // Start processing
-      setProcessingPageIds(new Set(pageIds));
-      setProcessingStep('Spouštím zpracování…');
-      setProcessingProgress(0);
-      setError(null);
-      setPages((prev) =>
-        prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'processing' } : p)),
-      );
-      const response = await fetch('/api/pages/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds, language: 'cs', mode: processingMode }),
-      });
-      if (!response.ok || !response.body) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? `HTTP ${response.status}`);
-      }
-      await consumeProcessingStream(response);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
-    } finally {
-      setProcessingPageIds(new Set());
-      setBatchInfo(null);
-      batchInfoRef.current = null;
-      setIsPaused(false);
-      setTimeout(() => {
-        setProcessingStep(undefined);
-        setProcessingProgress(undefined);
-      }, 2000);
-    }
-  }, [interruptedPages, processingMode, consumeProcessingStream]);
-
-  const handleResetInterrupted = useCallback(async (): Promise<void> => {
-    const pageIds = [...interruptedPages];
-    setInterruptedPages([]);
-    try {
-      await fetch('/api/pages/process/interrupted', { method: 'POST' });
-      setPages((prev) => prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: 'pending' } : p)));
-    } catch {
-      // ignore
-    }
-  }, [interruptedPages]);
-
+  // ---- Blank detection & toggle ----
   const handleToggleBlank = useCallback(
     async (pageIds: string[], blank: boolean): Promise<void> => {
       const newStatus = blank ? 'blank' : 'pending';
@@ -856,8 +373,6 @@ export default function HomePage(): React.JSX.Element {
     }
     setSelected(new Set());
   }, [selected, handleDeletePage, setSelected]);
-  // Keep ref in sync
-  handleDeleteSelectedRef.current = handleDeleteSelected;
 
   // ---- Page double-click (open panel for any status) ----
   const handlePageDoubleClick = useCallback(async (page: PageItem): Promise<void> => {
@@ -943,9 +458,27 @@ export default function HomePage(): React.JSX.Element {
         // use what we have
       }
     }
-  }, []);
-  // Keep ref in sync
-  handlePageDoubleClickRef.current = handlePageDoubleClick;
+  }, [setError]);
+
+  // ---- Keyboard shortcuts hook ----
+  const {
+    focusedItemId,
+    setColumnsCount,
+  } = useWorkspaceKeyboard({
+    allItemIds,
+    collections,
+    pages,
+    selected,
+    handleSelectAll,
+    handleDeselectAll,
+    selectRange,
+    setSelected,
+    setAnchor,
+    lastClickedId,
+    onCollectionSelect: (id: string) => handleCollectionSelect(id),
+    onPageOpen: (page: PageItem) => { void handlePageDoubleClick(page); },
+    onDeleteSelected: () => { void handleDeleteSelected(); },
+  });
 
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
@@ -1105,11 +638,10 @@ export default function HomePage(): React.JSX.Element {
         setRegenerateProgress(undefined);
       }
     },
-    [pages],
+    [pages, setError],
   );
 
   // ---- Derived values ----
-  const isProcessing = processingPageIds.size > 0;
   const pendingSelectedCount = useMemo(() => {
     const selectedIds = Array.from(selected);
     const collectionIds = new Set(collections.map((c) => c.id));

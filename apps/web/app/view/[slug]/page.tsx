@@ -2,9 +2,8 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { prisma } from '@/lib/infrastructure/db';
-import { PublicResultViewer } from '@/components/PublicResultViewer';
-import ImageZoom from '@/components/ImageZoom';
 import { CollectionContextCard } from '@/components/CollectionContextCard';
+import { PublicPageLayout } from '@/components/PublicPageLayout';
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -126,6 +125,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                           src={page.thumbnailUrl ?? page.imageUrl}
                           alt={displayName}
                           className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          loading="lazy"
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center text-[#d4c5a9]">
@@ -177,47 +177,13 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
     const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Dokument';
 
     return (
-      <div className="flex min-h-screen flex-col bg-[#f0e6d0]">
-        <header className="shrink-0 border-b border-[#d4c5a9] bg-[#2c1810]">
-          <div className="mx-auto flex max-w-7xl items-center px-6 py-3">
-            <div>
-              <Link
-                href="/"
-                className="inline-flex items-center gap-1.5 text-sm text-[#a08060] transition-colors hover:text-[#d4a855]"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-                </svg>
-                AiSedlacek
-              </Link>
-              <h1 className="mt-0.5 font-serif text-base font-semibold text-[#f5edd6]">
-                {displayName}
-              </h1>
-            </div>
-          </div>
-        </header>
-
-        <div className="flex flex-1 gap-4 overflow-hidden p-4">
-          <div className="w-1/3 shrink-0 self-start overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6]">
-            <div className="border-b border-[#d4c5a9] bg-[#ebe0c8] px-5 py-3">
-              <h2 className="font-serif text-sm font-semibold text-[#3d2b1f]">Originál</h2>
-            </div>
-            <div className="bg-[#e8dcc4]">
-              <ImageZoom src={page.imageUrl} alt={displayName} />
-            </div>
-          </div>
-
-          <div className="flex w-2/3 flex-col overflow-y-auto">
-            {page.document ? (
-              <PublicResultViewer document={page.document} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-[#a08060]">
-                <p className="font-serif text-sm">Dokument zatím nebyl zpracován.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <PublicPageLayout
+        backHref="/"
+        backLabel="AiSedlacek"
+        title={displayName}
+        imageUrl={page.imageUrl}
+        document={page.document}
+      />
     );
   }
 

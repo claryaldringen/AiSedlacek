@@ -57,8 +57,26 @@ export default async function LandingPage(): Promise<React.ReactElement> {
 
   const [stats, collections] = await Promise.all([getStats(), getPublicCollections()]);
 
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'AiSedlacek',
+    description: 'Čtečka starých textů — přepis a překlad historických rukopisů pomocí AI',
+    url: 'https://aisedlacek.cz',
+    applicationCategory: 'UtilityApplication',
+    operatingSystem: 'Web',
+    creator: {
+      '@type': 'Organization',
+      name: 'Týřovští z.s.',
+    },
+  };
+
   return (
     <div className="min-h-screen bg-[#f0e6d0]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Header */}
       <header className="absolute left-0 right-0 top-0 z-10 bg-[#2c1810]/60 backdrop-blur-sm">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -214,6 +232,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                         src={col.pages[0]?.imageUrl}
                         alt={col.name}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        loading="lazy"
                       />
                     </div>
                     <div className="p-5">

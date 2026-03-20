@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { computeCostFromTokens } from '@/lib/pricing';
 
 export async function GET(): Promise<NextResponse> {
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   const collections = await prisma.collection.findMany({
     where: { userId },
@@ -40,8 +38,7 @@ export async function GET(): Promise<NextResponse> {
 
       const inputTokens = tokenAgg._sum.inputTokens ?? 0;
       const outputTokens = tokenAgg._sum.outputTokens ?? 0;
-      // Claude Opus: $15/1M input, $75/1M output
-      const costUsd = (inputTokens * 15 + outputTokens * 75) / 1_000_000;
+      const costUsd = computeCostFromTokens(inputTokens, outputTokens);
 
       return {
         ...c,
@@ -64,12 +61,9 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: unknown;
   try {

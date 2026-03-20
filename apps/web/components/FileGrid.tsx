@@ -392,7 +392,7 @@ const PageCard = memo(function PageCard({
       <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-slate-100">
         <img
           src={page.thumbnailUrl ?? page.imageUrl}
-          alt=""
+          alt={cleanFilename(page.filename)}
           className="h-full w-full object-cover"
           loading="lazy"
           draggable={false}
