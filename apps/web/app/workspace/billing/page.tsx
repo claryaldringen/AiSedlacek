@@ -174,17 +174,16 @@ export default function BillingPage(): React.JSX.Element {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amountCzk: effectiveAmount }),
       });
+      const data = (await res.json()) as CheckoutResponse & { error?: string };
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        alert(data.error ?? 'Chyba při vytváření platby');
+        setBanner({ type: 'cancelled', message: data.error ?? 'Chyba při vytváření platby' });
         return;
       }
-      const data = (await res.json()) as CheckoutResponse;
       if (data.url) {
         window.location.href = data.url;
       }
     } catch {
-      alert('Chyba při komunikaci se serverem');
+      setBanner({ type: 'cancelled', message: 'Chyba při komunikaci se serverem' });
     } finally {
       setCheckoutLoading(false);
     }
@@ -202,7 +201,7 @@ export default function BillingPage(): React.JSX.Element {
         return;
       }
       if (!res.ok) {
-        alert(data.error ?? 'Chyba');
+        setBanner({ type: 'cancelled', message: data.error ?? 'Chyba při ověřování platby' });
         return;
       }
 
@@ -211,7 +210,7 @@ export default function BillingPage(): React.JSX.Element {
       // Reload transactions
       void loadBalance();
     } catch {
-      alert('Chyba při komunikaci se serverem');
+      setBanner({ type: 'cancelled', message: 'Chyba při komunikaci se serverem' });
     } finally {
       setFioChecking(false);
     }

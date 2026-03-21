@@ -14,7 +14,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Neplatná částka (100–10 000 Kč)' }, { status: 400 });
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return NextResponse.json({ error: 'Platba kartou není nakonfigurována' }, { status: 503 });
+  }
+
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
   const checkoutSession = await stripe.checkout.sessions.create({
     payment_method_types: ['card'],
