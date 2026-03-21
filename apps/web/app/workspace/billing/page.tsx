@@ -225,6 +225,13 @@ export default function BillingPage(): React.JSX.Element {
 
   const formatTokens = (n: number): string => n.toLocaleString('cs-CZ');
 
+  const formatTokensCompact = (n: number): string => {
+    const abs = Math.abs(n);
+    if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace('.0', '')}M`;
+    if (abs >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+    return n.toString();
+  };
+
   const formatDate = (iso: string): string =>
     new Date(iso).toLocaleString('cs-CZ', {
       day: '2-digit',
@@ -323,7 +330,7 @@ export default function BillingPage(): React.JSX.Element {
                 </p>
                 {tokensPer100Czk > 0 && (
                   <p className="mt-1 text-xs text-slate-400">
-                    Cena: {formatTokens(tokensPer100Czk)} tokenů za 100 Kč
+                    Cena: {formatTokensCompact(tokensPer100Czk)} tokenů za 100 Kč
                   </p>
                 )}
               </>
@@ -361,7 +368,7 @@ export default function BillingPage(): React.JSX.Element {
                   {amount} Kč
                   {tokensPer100Czk > 0 && (
                     <span className="ml-1 text-xs opacity-60">
-                      ({formatTokens(Math.floor((amount / 100) * tokensPer100Czk))} t.)
+                      ({formatTokensCompact(Math.floor((amount / 100) * tokensPer100Czk))} t.)
                     </span>
                   )}
                 </button>
@@ -404,7 +411,7 @@ export default function BillingPage(): React.JSX.Element {
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
                   </svg>
-                  Zaplatit kartou{effectiveAmount >= 100 ? ` — ${effectiveAmount} Kč (${formatTokens(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)` : ''}
+                  Zaplatit kartou{effectiveAmount >= 100 ? ` — ${effectiveAmount} Kč (${formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)` : ''}
                 </>
               )}
             </button>
