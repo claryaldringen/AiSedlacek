@@ -119,8 +119,8 @@ export default function BillingPage(): React.JSX.Element {
       return;
     }
 
-    const accountNumber = process.env.NEXT_PUBLIC_FIO_ACCOUNT_IBAN ?? 'CZ3920100000002803462929';
-    const bankCode = process.env.NEXT_PUBLIC_FIO_BANK_CODE ?? 'FIOBCZPP';
+    const accountNumber = 'CZ3920100000002803462929';
+    const bankCode = 'FIOBCZPP';
 
     const spayd = [
       'SPD*1.0',
@@ -132,10 +132,17 @@ export default function BillingPage(): React.JSX.Element {
     ].join('*');
 
     // Generate QR via server-side API to avoid client-side canvas issues
-    void fetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }))
-      .then((r) => r.json())
+    const controller = new AbortController();
+    void fetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }), {
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`QR API: ${r.status}`);
+        return r.json();
+      })
       .then((d: { url: string }) => setQrDataUrl(d.url))
       .catch(() => setQrDataUrl(null));
+    return () => controller.abort();
   }, [variableSymbol, fioAmount]);
 
   // ---------------------------------------------------------------------------
@@ -365,7 +372,7 @@ export default function BillingPage(): React.JSX.Element {
                 }}
                 className="w-40 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
               />
-              <span className="text-sm text-slate-400">Kc</span>
+              <span className="text-sm text-slate-400">Kč</span>
             </div>
 
             {/* Pay button */}
@@ -420,7 +427,7 @@ export default function BillingPage(): React.JSX.Element {
                     onChange={(e) => setFioAmount(e.target.value)}
                     className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
                   />
-                  <span className="text-sm text-slate-400">Kc</span>
+                  <span className="text-sm text-slate-400">Kč</span>
                 </div>
                 {qrDataUrl ? (
                   <img src={qrDataUrl} alt="QR platba" className="h-[200px] w-[200px] rounded-lg border border-slate-100" />
@@ -438,7 +445,7 @@ export default function BillingPage(): React.JSX.Element {
                     Číslo účtu
                   </p>
                   <p className="mt-0.5 font-mono text-sm text-slate-700">
-                    {process.env.NEXT_PUBLIC_FIO_ACCOUNT_NUMBER ?? '(není nastaveno)'}
+                    2803462929/2010
                   </p>
                 </div>
                 {variableSymbol && (
