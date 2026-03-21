@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/infrastructure/db';
 import HeroCarousel from '@/components/HeroCarousel';
+import AnimatedCounter from '@/components/AnimatedCounter';
 
 async function getStats(): Promise<{
   pages: number;
@@ -154,22 +155,22 @@ export default async function LandingPage(): Promise<React.ReactElement> {
         <div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-[#d4c5a9] sm:grid-cols-4">
           {[
             {
-              value: stats.pages.toLocaleString('cs-CZ'),
+              value: stats.pages,
               label: 'Nahraných stránek',
               icon: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
             },
             {
-              value: stats.documents.toLocaleString('cs-CZ'),
+              value: stats.documents,
               label: 'Zpracovaných dokumentů',
               icon: 'M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.745 3.745 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z',
             },
             {
-              value: stats.collections.toLocaleString('cs-CZ'),
+              value: stats.collections,
               label: 'Svazků',
               icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
             },
             {
-              value: stats.languages.toLocaleString('cs-CZ'),
+              value: stats.languages,
               label: 'Jazyků',
               icon: 'm10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802',
             },
@@ -185,7 +186,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                 <path strokeLinecap="round" strokeLinejoin="round" d={stat.icon} />
               </svg>
               <p className="mt-3 font-serif text-3xl font-bold tracking-tight text-[#3d2b1f]">
-                {stat.value}
+                <AnimatedCounter value={stat.value} />
               </p>
               <p className="mt-1 text-sm text-[#7a6652]">{stat.label}</p>
             </div>
@@ -270,13 +271,13 @@ export default async function LandingPage(): Promise<React.ReactElement> {
               {
                 step: '01',
                 title: 'Nahrajte dokument',
-                desc: 'Nahrajte sken nebo fotografii historického textu. Podporujeme JPEG, PNG, TIFF i WebP. Můžete i vložit URL z digitálních knihoven.',
+                desc: 'Nahrajte sken nebo fotografii historického textu. Podporujeme JPEG, PNG, TIFF, WebP i PDF. Můžete i vložit URL z digitálních knihoven.',
                 icon: 'M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5',
               },
               {
                 step: '02',
                 title: 'AI zpracování',
-                desc: 'Claude Vision přečte text z obrázku, přeloží ho do moderního jazyka a doplní historický kontext s glosářem.',
+                desc: 'Multimodální jazykový model s transformer architekturou provede paleografickou analýzu rastru, tokenizaci historického textu a cross-lingvální překlad s kontextovou anotací.',
                 icon: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z',
               },
               {
