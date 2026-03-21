@@ -55,7 +55,7 @@ export default function BillingPage(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
 
   // Stripe state
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(100);
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(200);
   const [customAmount, setCustomAmount] = useState('');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
