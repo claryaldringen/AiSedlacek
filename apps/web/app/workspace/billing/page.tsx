@@ -39,7 +39,7 @@ interface FioCheckResponse {
 // Preset amounts
 // ---------------------------------------------------------------------------
 
-const PRESET_AMOUNTS = [50, 100, 200, 500];
+const PRESET_AMOUNTS = [200, 500, 1000, 2000];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -166,7 +166,7 @@ export default function BillingPage(): React.JSX.Element {
   const effectiveAmount = selectedAmount ?? (parseInt(customAmount) || 0);
 
   const handleCheckout = async (): Promise<void> => {
-    if (effectiveAmount < 10) return;
+    if (effectiveAmount < 100) return;
     setCheckoutLoading(true);
     try {
       const res = await fetch('/api/billing/checkout', {
@@ -358,7 +358,7 @@ export default function BillingPage(): React.JSX.Element {
             <div className="mb-4 flex items-center gap-2">
               <input
                 type="number"
-                min={10}
+                min={100}
                 max={10000}
                 placeholder="Vlastní částka"
                 value={customAmount}
@@ -374,7 +374,7 @@ export default function BillingPage(): React.JSX.Element {
             {/* Pay button */}
             <button
               onClick={() => void handleCheckout()}
-              disabled={checkoutLoading || effectiveAmount < 10}
+              disabled={checkoutLoading || effectiveAmount < 100}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {checkoutLoading ? (

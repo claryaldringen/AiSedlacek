@@ -10,8 +10,8 @@ export async function POST(request: Request) {
 
   const { amountCzk } = (await request.json()) as { amountCzk: number };
 
-  if (!amountCzk || amountCzk < 10 || amountCzk > 10000) {
-    return NextResponse.json({ error: 'Neplatná částka (10–10 000 Kč)' }, { status: 400 });
+  if (!amountCzk || amountCzk < 100 || amountCzk > 10000) {
+    return NextResponse.json({ error: 'Neplatná částka (100–10 000 Kč)' }, { status: 400 });
   }
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
