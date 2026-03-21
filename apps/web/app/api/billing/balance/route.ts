@@ -37,5 +37,7 @@ export async function GET(): Promise<Response> {
   // Price info: tokens per 100 CZK (1 CZK = 100 halire)
   const tokensPer100Czk = czkToTokens(100 * 100);
 
-  return Response.json({ balance, variableSymbol, tokensPer100Czk, transactions });
+  const fioEnabled = !!process.env.FIO_API_TOKEN;
+
+  return Response.json({ balance, variableSymbol, tokensPer100Czk, fioEnabled, transactions });
 }

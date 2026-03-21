@@ -22,6 +22,7 @@ interface BalanceResponse {
   balance: number;
   variableSymbol: number;
   tokensPer100Czk: number;
+  fioEnabled: boolean;
   transactions: TokenTransaction[];
 }
 
@@ -53,6 +54,7 @@ export default function BillingPage(): React.JSX.Element {
   const [balance, setBalance] = useState<number | null>(null);
   const [variableSymbol, setVariableSymbol] = useState<number | null>(null);
   const [tokensPer100Czk, setTokensPer100Czk] = useState<number>(0);
+  const [fioEnabled, setFioEnabled] = useState(false);
   const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -85,6 +87,7 @@ export default function BillingPage(): React.JSX.Element {
       setBalance(data.balance);
       setVariableSymbol(data.variableSymbol);
       setTokensPer100Czk(data.tokensPer100Czk);
+      setFioEnabled(data.fioEnabled);
       setTransactions(data.transactions);
     } catch {
       // ignore
@@ -419,7 +422,7 @@ export default function BillingPage(): React.JSX.Element {
         </div>
 
         {/* FIO bank transfer section */}
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        {fioEnabled && <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -526,7 +529,7 @@ export default function BillingPage(): React.JSX.Element {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Transaction history */}
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
