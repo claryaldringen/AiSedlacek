@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -48,6 +48,14 @@ const PRESET_AMOUNTS = [200, 500, 1000, 2000];
 // ---------------------------------------------------------------------------
 
 export default function BillingPage(): React.JSX.Element {
+  return (
+    <Suspense>
+      <BillingContent />
+    </Suspense>
+  );
+}
+
+function BillingContent(): React.JSX.Element {
   const searchParams = useSearchParams();
 
   // Data state
