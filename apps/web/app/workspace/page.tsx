@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
@@ -19,6 +19,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export default function HomePage(): React.JSX.Element {
+  return (
+    <Suspense>
+      <WorkspaceContent />
+    </Suspense>
+  );
+}
+
+function WorkspaceContent(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
 
