@@ -18,25 +18,33 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Platba kartou není nakonfigurována' }, { status: 503 });
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  const baseUrl = (process.env.NEXTAUTH_URL ?? 'http://localhost:3003').trim();
 
-  const checkoutSession = await stripe.checkout.sessions.create({
-    payment_method_types: ['card'],
-    line_items: [{
-      price_data: {
-        currency: 'czk',
-        product_data: { name: `Dobití ${amountCzk} Kč tokenů` },
-        unit_amount: amountCzk * 100,
-      },
-      quantity: 1,
-    }],
-    mode: 'payment',
-    customer_email: session.user.email ?? undefined,
-    locale: 'cs',
-    metadata: { userId: session.user.id },
-    success_url: `${process.env.NEXTAUTH_URL ?? 'http://localhost:3003'}/workspace/billing?success=true`,
-    cancel_url: `${process.env.NEXTAUTH_URL ?? 'http://localhost:3003'}/workspace/billing?cancelled=true`,
-  });
+  try {
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-  return NextResponse.json({ url: checkoutSession.url });
+    const checkoutSession = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'czk',
+          product_data: { name: `Dobití ${amountCzk} Kč tokenů` },
+          unit_amount: amountCzk * 100,
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      customer_email: session.user.email ?? undefined,
+      locale: 'cs',
+      metadata: { userId: session.user.id },
+      success_url: `${baseUrl}/workspace/billing?success=true`,
+      cancel_url: `${baseUrl}/workspace/billing?cancelled=true`,
+    });
+
+    return NextResponse.json({ url: checkoutSession.url });
+  } catch (e) {
+    console.error('Stripe checkout error:', e);
+    const message = e instanceof Error ? e.message : 'Stripe chyba';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
