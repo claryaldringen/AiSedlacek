@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
-import { getTokenBalance, generateVariableSymbol } from '@/lib/infrastructure/billing';
+import { getTokenBalance, generateVariableSymbol, czkToTokens } from '@/lib/infrastructure/billing';
 
 export async function GET(): Promise<Response> {
   const session = await auth();
@@ -34,5 +34,8 @@ export async function GET(): Promise<Response> {
     take: 50,
   });
 
-  return Response.json({ balance, variableSymbol, transactions });
+  // Price info: tokens per 100 CZK (1 CZK = 100 halire)
+  const tokensPer100Czk = czkToTokens(100 * 100);
+
+  return Response.json({ balance, variableSymbol, tokensPer100Czk, transactions });
 }

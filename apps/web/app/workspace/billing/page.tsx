@@ -21,6 +21,7 @@ interface TokenTransaction {
 interface BalanceResponse {
   balance: number;
   variableSymbol: number;
+  tokensPer100Czk: number;
   transactions: TokenTransaction[];
 }
 
@@ -51,6 +52,7 @@ export default function BillingPage(): React.JSX.Element {
   // Data state
   const [balance, setBalance] = useState<number | null>(null);
   const [variableSymbol, setVariableSymbol] = useState<number | null>(null);
+  const [tokensPer100Czk, setTokensPer100Czk] = useState<number>(0);
   const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -82,6 +84,7 @@ export default function BillingPage(): React.JSX.Element {
       const data = (await res.json()) as BalanceResponse;
       setBalance(data.balance);
       setVariableSymbol(data.variableSymbol);
+      setTokensPer100Czk(data.tokensPer100Czk);
       setTransactions(data.transactions);
     } catch {
       // ignore
@@ -313,10 +316,17 @@ export default function BillingPage(): React.JSX.Element {
             {loading ? (
               <div className="h-9 w-48 animate-pulse rounded bg-slate-100" />
             ) : (
-              <p className="text-3xl font-bold tabular-nums text-slate-800">
-                {formatTokens(balance ?? 0)}{' '}
-                <span className="text-lg font-normal text-slate-400">tokenů</span>
-              </p>
+              <>
+                <p className="text-3xl font-bold tabular-nums text-slate-800">
+                  {formatTokens(balance ?? 0)}{' '}
+                  <span className="text-lg font-normal text-slate-400">tokenů</span>
+                </p>
+                {tokensPer100Czk > 0 && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Cena: {formatTokens(tokensPer100Czk)} tokenů za 100 Kč
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -349,6 +359,11 @@ export default function BillingPage(): React.JSX.Element {
                   ].join(' ')}
                 >
                   {amount} Kč
+                  {tokensPer100Czk > 0 && (
+                    <span className="ml-1 text-xs opacity-60">
+                      ({formatTokens(Math.floor((amount / 100) * tokensPer100Czk))} t.)
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -389,7 +404,7 @@ export default function BillingPage(): React.JSX.Element {
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
                   </svg>
-                  Zaplatit kartou{effectiveAmount >= 10 ? ` (${effectiveAmount} Kč)` : ''}
+                  Zaplatit kartou{effectiveAmount >= 100 ? ` — ${effectiveAmount} Kč (${formatTokens(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)` : ''}
                 </>
               )}
             </button>

@@ -31,9 +31,11 @@ export async function POST(request: Request) {
       quantity: 1,
     }],
     mode: 'payment',
+    customer_email: session.user.email ?? undefined,
+    locale: 'cs',
     metadata: { userId: session.user.id },
-    success_url: `${process.env.NEXTAUTH_URL}/workspace/billing?success=true`,
-    cancel_url: `${process.env.NEXTAUTH_URL}/workspace/billing?cancelled=true`,
+    success_url: `${process.env.NEXTAUTH_URL ?? 'http://localhost:3003'}/workspace/billing?success=true`,
+    cancel_url: `${process.env.NEXTAUTH_URL ?? 'http://localhost:3003'}/workspace/billing?cancelled=true`,
   });
 
   return NextResponse.json({ url: checkoutSession.url });
