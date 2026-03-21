@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import QRCode from 'qrcode';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -132,9 +131,11 @@ export default function BillingPage(): React.JSX.Element {
       'MSG:Dobit tokeny',
     ].join('*');
 
-    void QRCode.toDataURL(spayd, { width: 200, margin: 2 }).then((url) => {
-      setQrDataUrl(url);
-    });
+    // Generate QR via server-side API to avoid client-side canvas issues
+    void fetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }))
+      .then((r) => r.json())
+      .then((d: { url: string }) => setQrDataUrl(d.url))
+      .catch(() => setQrDataUrl(null));
   }, [variableSymbol, fioAmount]);
 
   // ---------------------------------------------------------------------------
