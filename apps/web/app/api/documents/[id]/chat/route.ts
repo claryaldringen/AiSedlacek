@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+
+export const maxDuration = 120;
 import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';

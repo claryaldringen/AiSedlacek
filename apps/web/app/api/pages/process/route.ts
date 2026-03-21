@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+
+export const maxDuration = 120;
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { processWithClaude, processWithClaudeBatch } from '@/lib/adapters/ocr/claude-vision';

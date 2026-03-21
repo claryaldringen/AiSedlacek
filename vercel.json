@@ -2,11 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npx turbo build --filter=@ai-sedlacek/web",
   "outputDirectory": "apps/web/.next",
-  "installCommand": "npm install && npx prisma generate --schema=apps/web/prisma/schema.prisma",
-  "functions": {
-    "apps/web/app/api/**": {
-      "memory": 1024,
-      "maxDuration": 120
-    }
-  }
+  "installCommand": "npm install && npx prisma generate --schema=apps/web/prisma/schema.prisma"
 }
