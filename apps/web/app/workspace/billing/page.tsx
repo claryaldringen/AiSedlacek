@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,7 +21,6 @@ interface TokenTransaction {
 
 interface BalanceResponse {
   balance: number;
-  variableSymbol: number;
   transactions: TokenTransaction[];
 }
 
@@ -47,10 +47,11 @@ const PRESET_AMOUNTS = [50, 100, 200, 500];
 
 export default function BillingPage(): React.JSX.Element {
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
 
   // Data state
   const [balance, setBalance] = useState<number | null>(null);
-  const [variableSymbol, setVariableSymbol] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -81,7 +82,6 @@ export default function BillingPage(): React.JSX.Element {
       if (!res.ok) return;
       const data = (await res.json()) as BalanceResponse;
       setBalance(data.balance);
-      setVariableSymbol(data.variableSymbol);
       setTransactions(data.transactions);
     } catch {
       // ignore
@@ -112,26 +112,22 @@ export default function BillingPage(): React.JSX.Element {
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!variableSymbol) return;
+    if (!userId) return;
     const amount = parseInt(fioAmount) || 0;
     if (amount <= 0) {
       setQrDataUrl(null);
       return;
     }
 
-    const accountNumber = 'CZ3920100000002803462929';
-    const bankCode = 'FIOBCZPP';
-
     const spayd = [
       'SPD*1.0',
-      `ACC:${accountNumber}+${bankCode}`,
+      'ACC:CZ3920100000002803462929+FIOBCZPP',
       `AM:${amount}.00`,
       'CC:CZK',
-      `X-VS:${variableSymbol}`,
+      `X-VS:${userId}`,
       'MSG:Dobit tokeny',
     ].join('*');
 
-    // Generate QR via server-side API to avoid client-side canvas issues
     const controller = new AbortController();
     void fetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }), {
       signal: controller.signal,
@@ -143,7 +139,7 @@ export default function BillingPage(): React.JSX.Element {
       .then((d: { url: string }) => setQrDataUrl(d.url))
       .catch(() => setQrDataUrl(null));
     return () => controller.abort();
-  }, [variableSymbol, fioAmount]);
+  }, [userId, fioAmount]);
 
   // ---------------------------------------------------------------------------
   // FIO countdown timer
@@ -448,13 +444,13 @@ export default function BillingPage(): React.JSX.Element {
                     2803462929/2010
                   </p>
                 </div>
-                {variableSymbol && (
+                {userId && (
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
                       Variabilní symbol
                     </p>
-                    <p className="mt-0.5 font-mono text-lg font-semibold text-slate-800">
-                      {variableSymbol}
+                    <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800">
+                      {userId}
                     </p>
                   </div>
                 )}

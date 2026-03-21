@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
-import { getTokenBalance, generateVariableSymbol } from '@/lib/infrastructure/billing';
+import { getTokenBalance } from '@/lib/infrastructure/billing';
 
 export async function GET(): Promise<Response> {
   const session = await auth();
@@ -12,27 +12,11 @@ export async function GET(): Promise<Response> {
 
   const balance = await getTokenBalance(userId);
 
-  // Ensure user has a variable symbol
-  let user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { variableSymbol: true },
-  });
-
-  let variableSymbol = user?.variableSymbol ?? null;
-
-  if (variableSymbol === null) {
-    variableSymbol = await generateVariableSymbol();
-    await prisma.user.update({
-      where: { id: userId },
-      data: { variableSymbol },
-    });
-  }
-
   const transactions = await prisma.tokenTransaction.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
 
-  return Response.json({ balance, variableSymbol, transactions });
+  return Response.json({ balance, transactions });
 }
