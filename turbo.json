@@ -1,1 +1,30 @@
-{"$schema":"https://turbo.build/schema.json","tasks":{"build":{"dependsOn":["^build"],"outputs":[".next/**","dist/**"]},"dev":{"cache":false,"persistent":true},"lint":{"dependsOn":["^build"]},"format:check":{},"format":{"cache":false},"typecheck":{"dependsOn":["^build"]},"test":{"dependsOn":["^build"]}}}
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "ANTHROPIC_API_KEY",
+    "AUTH_SECRET",
+    "NEXTAUTH_URL",
+    "LLM_PROVIDER",
+    "MAX_FILE_SIZE_MB",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "FIO_API_TOKEN",
+    "TOKEN_MULTIPLIER",
+    "TOKEN_PRICE_PER_MILLION",
+    "R2_ACCOUNT_ID",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
+    "R2_PUBLIC_URL"
+  ],
+  "tasks": {
+    "build": { "dependsOn": ["^build"], "outputs": [".next/**", "dist/**"] },
+    "dev": { "cache": false, "persistent": true },
+    "lint": { "dependsOn": ["^build"] },
+    "format:check": {},
+    "format": { "cache": false },
+    "typecheck": { "dependsOn": ["^build"] },
+    "test": { "dependsOn": ["^build"] }
+  }
+}

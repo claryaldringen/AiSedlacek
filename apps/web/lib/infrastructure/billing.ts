@@ -23,7 +23,7 @@ export async function createTransaction(data: {
   description: string;
   referenceId?: string;
   amountCzk?: number;
-}) {
+}): Promise<{ id: string; userId: string; type: string; amount: number; description: string; referenceId: string | null; amountCzk: number | null; createdAt: Date }> {
   try {
     return await prisma.tokenTransaction.create({ data });
   } catch (e: unknown) {
@@ -44,7 +44,7 @@ export async function deductTokens(
   outputTokens: number,
   description: string,
   referenceId?: string,
-) {
+): ReturnType<typeof createTransaction> {
   const amount = -Math.ceil((inputTokens + outputTokens) * TOKEN_MULTIPLIER);
   return createTransaction({
     userId,
