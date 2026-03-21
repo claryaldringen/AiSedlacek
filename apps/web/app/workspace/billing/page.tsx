@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +20,7 @@ interface TokenTransaction {
 
 interface BalanceResponse {
   balance: number;
+  variableSymbol: number;
   transactions: TokenTransaction[];
 }
 
@@ -47,11 +47,10 @@ const PRESET_AMOUNTS = [50, 100, 200, 500];
 
 export default function BillingPage(): React.JSX.Element {
   const searchParams = useSearchParams();
-  const { data: session } = useSession();
-  const userId = session?.user?.id ?? null;
 
   // Data state
   const [balance, setBalance] = useState<number | null>(null);
+  const [variableSymbol, setVariableSymbol] = useState<number | null>(null);
   const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -82,6 +81,7 @@ export default function BillingPage(): React.JSX.Element {
       if (!res.ok) return;
       const data = (await res.json()) as BalanceResponse;
       setBalance(data.balance);
+      setVariableSymbol(data.variableSymbol);
       setTransactions(data.transactions);
     } catch {
       // ignore
@@ -112,7 +112,7 @@ export default function BillingPage(): React.JSX.Element {
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!userId) return;
+    if (!variableSymbol) return;
     const amount = parseInt(fioAmount) || 0;
     if (amount <= 0) {
       setQrDataUrl(null);
@@ -124,7 +124,7 @@ export default function BillingPage(): React.JSX.Element {
       'ACC:CZ3920100000002803462929+FIOBCZPP',
       `AM:${amount}.00`,
       'CC:CZK',
-      `X-VS:${userId}`,
+      `X-VS:${variableSymbol}`,
       'MSG:Dobit tokeny',
     ].join('*');
 
@@ -139,7 +139,7 @@ export default function BillingPage(): React.JSX.Element {
       .then((d: { url: string }) => setQrDataUrl(d.url))
       .catch(() => setQrDataUrl(null));
     return () => controller.abort();
-  }, [userId, fioAmount]);
+  }, [variableSymbol, fioAmount]);
 
   // ---------------------------------------------------------------------------
   // FIO countdown timer
@@ -444,13 +444,13 @@ export default function BillingPage(): React.JSX.Element {
                     2803462929/2010
                   </p>
                 </div>
-                {userId && (
+                {variableSymbol && (
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
                       Variabilní symbol
                     </p>
-                    <p className="mt-0.5 font-mono text-sm font-semibold text-slate-800">
-                      {userId}
+                    <p className="mt-0.5 font-mono text-lg font-semibold text-slate-800">
+                      {variableSymbol}
                     </p>
                   </div>
                 )}

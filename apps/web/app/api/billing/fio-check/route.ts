@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth';
 import { NextResponse } from 'next/server';
-import { createTransaction, czkToTokens, getTokenBalance } from '@/lib/infrastructure/billing';
+import { prisma } from '@/lib/infrastructure/db';
+import { createTransaction, czkToTokens, getTokenBalance, generateVariableSymbol } from '@/lib/infrastructure/billing';
 
 const lastFioCallByUser = new Map<string, number>();
 
@@ -18,6 +19,14 @@ export async function POST() {
   if (elapsed < 30_000) {
     const retryAfterSeconds = Math.ceil((30_000 - elapsed) / 1000);
     return NextResponse.json({ error: 'rate_limited', retryAfterSeconds }, { status: 429 });
+  }
+
+  // Ensure user has a numeric variable symbol
+  let user = await prisma.user.findUnique({ where: { id: userId }, select: { variableSymbol: true } });
+  if (!user?.variableSymbol) {
+    const vs = await generateVariableSymbol();
+    await prisma.user.update({ where: { id: userId }, data: { variableSymbol: vs } });
+    user = { variableSymbol: vs };
   }
 
   const fioToken = process.env.FIO_API_TOKEN;
@@ -44,13 +53,12 @@ export async function POST() {
   let credited = 0;
 
   for (const tx of transactions) {
-    // VS is now the userId string
-    const vs = tx.column5?.value as string | undefined; // variable symbol
-    const amount = tx.column1?.value as number | undefined; // amount in CZK
+    const vs = tx.column5?.value as string | undefined;
+    const amount = tx.column1?.value as number | undefined;
     const txId = (tx.column22?.value as string | number | undefined)?.toString();
 
     if (!vs || !txId || !amount) continue;
-    if (vs !== userId) continue; // match VS = userId
+    if (parseInt(vs) !== user.variableSymbol) continue;
     if (amount <= 0) continue;
 
     const amountHalire = Math.round(amount * 100);
