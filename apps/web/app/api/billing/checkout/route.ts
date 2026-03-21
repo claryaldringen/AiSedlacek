@@ -2,7 +2,7 @@ import { auth } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Neautorizováno' }, { status: 401 });

@@ -5,7 +5,7 @@ import { createTransaction, czkToTokens, getTokenBalance, generateVariableSymbol
 
 const lastFioCallByUser = new Map<string, number>();
 
-export async function POST() {
+export async function POST(): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Neautorizováno' }, { status: 401 });

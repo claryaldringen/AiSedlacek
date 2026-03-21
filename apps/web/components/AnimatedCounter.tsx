@@ -8,7 +8,7 @@ export default function AnimatedCounter({
 }: {
   value: number;
   duration?: number;
-}) {
+}): React.ReactElement {
   const [display, setDisplay] = useState(0);
   const ref = useRef<HTMLSpanElement>(null);
   const hasAnimated = useRef(false);
@@ -18,12 +18,12 @@ export default function AnimatedCounter({
     if (!el) return;
 
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !hasAnimated.current) {
+      ([entry]: IntersectionObserverEntry[]) => {
+        if (entry?.isIntersecting && !hasAnimated.current) {
           hasAnimated.current = true;
           const start = performance.now();
 
-          const tick = (now: number) => {
+          const tick = (now: number): void => {
             const elapsed = now - start;
             const progress = Math.min(elapsed / duration, 1);
             // ease-out cubic

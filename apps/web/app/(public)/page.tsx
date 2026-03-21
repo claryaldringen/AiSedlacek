@@ -28,7 +28,16 @@ async function getStats(): Promise<{
   }
 }
 
-async function getPublicCollections() {
+async function getPublicCollections(): Promise<
+  {
+    id: string;
+    name: string;
+    slug: string | null;
+    context: string | null;
+    pages: { imageUrl: string }[];
+    _count: { pages: number };
+  }[]
+> {
   try {
     const collections = await prisma.collection.findMany({
       where: { isPublic: true },
@@ -228,7 +237,6 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                     className="group overflow-hidden rounded-xl border border-[#d4c5a9] bg-[#f5edd6] transition-all hover:border-[#a08060] hover:shadow-lg"
                   >
                     <div className="aspect-[4/3] overflow-hidden bg-[#e8dcc4]">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={col.pages[0]?.imageUrl}
                         alt={col.name}
