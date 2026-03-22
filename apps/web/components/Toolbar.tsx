@@ -85,7 +85,7 @@ export function Toolbar({
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            Vlozit
+            Vložit
           </button>
 
           {onCreateCollection && (
@@ -103,7 +103,7 @@ export function Toolbar({
                   d="M12 10.5v6m3-3H9m4.06-7.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"
                 />
               </svg>
-              Novy svazek
+              Nový svazek
             </button>
           )}
         </div>
@@ -113,7 +113,7 @@ export function Toolbar({
         {/* Group 2: Tools */}
         <div className="flex items-center gap-1">
           {hasCollection && onEditContext && (
-            <button onClick={onEditContext} title="Kontext dila" className={btnDefault}>
+            <button onClick={onEditContext} title="Kontext díla" className={btnDefault}>
               <svg
                 className="h-3.5 w-3.5"
                 fill="none"
@@ -134,7 +134,7 @@ export function Toolbar({
           {onShareCollection && (
             <button
               onClick={onShareCollection}
-              title={isCollectionPublic ? 'Nastaveni sdileni' : 'Sdilet verejne'}
+              title={isCollectionPublic ? 'Nastavení sdílení' : 'Sdílet veřejně'}
               className={
                 isCollectionPublic ? `${btnBase} text-blue-500 hover:bg-blue-50` : btnDefault
               }
@@ -152,7 +152,7 @@ export function Toolbar({
                   d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
                 />
               </svg>
-              Sdilet
+              Sdílet
             </button>
           )}
 
@@ -160,7 +160,7 @@ export function Toolbar({
             <button
               onClick={onDetectBlank}
               disabled={detectingBlank || isProcessing}
-              title="Detekovat prazdne stranky"
+              title="Detekovat prázdné stránky"
               className={`${btnDefault} ${btnDisabled}`}
             >
               {detectingBlank ? (
@@ -265,7 +265,7 @@ export function Toolbar({
                       />
                     </svg>
                   )}
-                  {generatingContext ? 'Generuji...' : `Kontext z vybranych (${doneSelectedCount})`}
+                  {generatingContext ? 'Generuji...' : `Kontext z vybraných (${doneSelectedCount})`}
                 </button>
               )}
 
@@ -284,7 +284,7 @@ export function Toolbar({
                       d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"
                     />
                   </svg>
-                  Prejmenovat
+                  Přejmenovat
                 </button>
               )}
 
@@ -313,10 +313,10 @@ export function Toolbar({
 
         {/* Stats */}
         <span className="text-xs text-slate-500">
-          {totalCount} {totalCount === 1 ? 'polozka' : totalCount < 5 ? 'polozky' : 'polozek'}
-          {doneCount > 0 && <span className="ml-1 text-slate-400">· {doneCount} zpracovano</span>}
+          {totalCount} {totalCount === 1 ? 'položka' : totalCount < 5 ? 'položky' : 'položek'}
+          {doneCount > 0 && <span className="ml-1 text-slate-400">· {doneCount} zpracováno</span>}
           {selectedCount > 0 && (
-            <span className="ml-1 text-blue-600">· {selectedCount} vybrano</span>
+            <span className="ml-1 text-blue-600">· {selectedCount} vybráno</span>
           )}
         </span>
 
@@ -326,7 +326,7 @@ export function Toolbar({
         <div className="flex overflow-hidden rounded-md border border-slate-200">
           <button
             onClick={() => onViewModeChange('grid')}
-            title="Mrizka"
+            title="Mřížka"
             className={[
               'p-1.5 transition-colors',
               viewMode === 'grid'
@@ -410,7 +410,7 @@ export function Toolbar({
                 ' ',
               )}
             >
-              {processingStep ?? 'Zpracovavam...'}
+              {processingStep ?? 'Zpracovávám...'}
             </span>
             {processingProgress != null && (
               <span
@@ -424,19 +424,19 @@ export function Toolbar({
               ? onResumeProcessing && (
                   <button
                     onClick={onResumeProcessing}
-                    title="Pokracovat ve zpracovani"
+                    title="Pokračovat ve zpracování"
                     className={`${btnBase} border border-blue-200 bg-white text-blue-600 hover:bg-blue-50`}
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
                     </svg>
-                    Pokracovat
+                    Pokračovat
                   </button>
                 )
               : onPauseProcessing && (
                   <button
                     onClick={onPauseProcessing}
-                    title="Pozastavit zpracovani"
+                    title="Pozastavit zpracování"
                     className={`${btnBase} border border-amber-200 bg-white text-amber-600 hover:bg-amber-50`}
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -449,13 +449,13 @@ export function Toolbar({
             {onCancelProcessing && (
               <button
                 onClick={onCancelProcessing}
-                title="Zrusit zpracovani"
+                title="Zrušit zpracování"
                 className={`${btnBase} border border-red-200 bg-white text-red-600 hover:bg-red-50`}
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M6 6h12v12H6V6z" />
                 </svg>
-                Zrusit
+                Zrušit
               </button>
             )}
           </div>

@@ -146,7 +146,7 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
     default:
       return (
         <span
-          title="Ceka na zpracovani"
+          title="Čeká na zpracování"
           className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-400 shadow"
         >
           <svg
@@ -409,10 +409,7 @@ const PageCard = memo(function PageCard({
 
         {/* Public share badge (top-right) */}
         {page.isPublic === true && (
-          <div
-            className="absolute right-1.5 top-1.5"
-            title="Veřejně sdíleno"
-          >
+          <div className="absolute right-1.5 top-1.5" title="Veřejně sdíleno">
             <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
               <svg
                 className="h-3 w-3 text-white"
@@ -643,7 +640,7 @@ export function FileGrid({
       const items: ContextMenuEntry[] = [];
 
       items.push({
-        label: 'Otevrit',
+        label: 'Otevřít',
         icon: <OpenIcon />,
         onClick: () => onPageDoubleClick(page),
       });
@@ -702,12 +699,12 @@ export function FileGrid({
     (col: Collection): ContextMenuEntry[] => {
       const items: ContextMenuEntry[] = [
         {
-          label: 'Otevrit',
+          label: 'Otevřít',
           icon: <OpenIcon />,
           onClick: () => onCollectionDoubleClick(col.id),
         },
         {
-          label: 'Prejmenovat',
+          label: 'Přejmenovat',
           icon: <RenameIcon />,
           onClick: () => {
             // Placeholder for rename
@@ -1050,10 +1047,7 @@ export function FileGrid({
                       {col._count.pages} str.
                     </span>
                     {col.isPublic && (
-                      <div
-                        className="absolute right-1.5 top-1.5"
-                        title="Veřejně sdíleno"
-                      >
+                      <div className="absolute right-1.5 top-1.5" title="Veřejně sdíleno">
                         <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
                           <svg
                             className="h-3 w-3 text-white"
@@ -1144,7 +1138,7 @@ export function FileGrid({
               onDeselectAll();
             }}
           >
-            Zrusit
+            Zrušit
           </button>
         </div>
       )}

@@ -71,7 +71,13 @@ function WorkspaceIcon({ type }: { type: 'home' | 'public' | 'shared' }): React.
   if (type === 'home') {
     // House icon
     return (
-      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <svg
+        className="h-4 w-4 shrink-0"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.5}
+      >
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -83,7 +89,13 @@ function WorkspaceIcon({ type }: { type: 'home' | 'public' | 'shared' }): React.
   if (type === 'public') {
     // Globe icon
     return (
-      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <svg
+        className="h-4 w-4 shrink-0"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.5}
+      >
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -94,7 +106,13 @@ function WorkspaceIcon({ type }: { type: 'home' | 'public' | 'shared' }): React.
   }
   // Users icon (shared)
   return (
-    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <svg
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -142,7 +160,7 @@ export function Sidebar({
     : '?';
 
   const displayName = user?.name ?? user?.email ?? '';
-  const formattedBalance = balance !== null ? formatBalance(balance) + ' tokenu' : null;
+  const formattedBalance = balance !== null ? formatBalance(balance) + ' tokenů' : null;
 
   // Sort workspaces: home first, then public, then shared
   const sortedWorkspaces = [...workspaces].sort((a, b) => {
@@ -174,9 +192,7 @@ export function Sidebar({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-slate-800">{displayName}</p>
-              {formattedBalance && (
-                <p className="text-xs text-slate-500">{formattedBalance}</p>
-              )}
+              {formattedBalance && <p className="text-xs text-slate-500">{formattedBalance}</p>}
             </div>
           </div>
           <div className="mt-2 flex items-center gap-3 text-xs">
@@ -184,13 +200,13 @@ export function Sidebar({
               href="/workspace/billing"
               className="font-medium text-blue-600 transition-colors hover:text-blue-800"
             >
-              Dobit
+              Dobít
             </Link>
             <button
               onClick={() => void signOut()}
               className="font-medium text-slate-500 transition-colors hover:text-slate-700"
             >
-              Odhlasit
+              Odhlásit
             </button>
           </div>
         </div>
@@ -204,7 +220,7 @@ export function Sidebar({
         </div>
 
         {loadingWorkspaces ? (
-          <div className="px-2 py-2 text-xs text-slate-400">Nacitam...</div>
+          <div className="px-2 py-2 text-xs text-slate-400">Načítám...</div>
         ) : (
           <>
             {/* Home workspace */}
@@ -221,9 +237,7 @@ export function Sidebar({
               >
                 <WorkspaceIcon type="home" />
                 <span className="truncate">{ws.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-slate-400">
-                  {ws._count.items}
-                </span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
               </button>
             ))}
 
@@ -241,9 +255,7 @@ export function Sidebar({
               >
                 <WorkspaceIcon type="public" />
                 <span className="truncate">{ws.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-slate-400">
-                  {ws._count.items}
-                </span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
               </button>
             ))}
 
@@ -264,9 +276,7 @@ export function Sidebar({
               >
                 <WorkspaceIcon type="shared" />
                 <span className="truncate">{ws.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-slate-400">
-                  {ws._count.items}
-                </span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
               </button>
             ))}
           </>
@@ -279,10 +289,16 @@ export function Sidebar({
           onClick={onCreateWorkspace}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
         >
-          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg
+            className="h-4 w-4 shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          <span>Novy workspace</span>
+          <span>Nový workspace</span>
         </button>
       </div>
     </aside>

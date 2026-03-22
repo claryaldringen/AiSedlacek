@@ -52,7 +52,7 @@ export function CreateCollectionDialog({
       onCreated(data);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznama chyba');
+      setError(err instanceof Error ? err.message : 'Neznámá chyba');
     } finally {
       setSaving(false);
     }
@@ -67,11 +67,11 @@ export function CreateCollectionDialog({
 
       {/* Dialog */}
       <div className="relative w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold text-slate-800">Novy svazek</h2>
+        <h2 className="mb-4 text-lg font-semibold text-slate-800">Nový svazek</h2>
 
         <input
           type="text"
-          placeholder="Nazev svazku..."
+          placeholder="Název svazku..."
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
@@ -94,14 +94,14 @@ export function CreateCollectionDialog({
             onClick={onClose}
             className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
           >
-            Zrusit
+            Zrušit
           </button>
           <button
             onClick={() => void handleCreate()}
             disabled={!name.trim() || saving}
             className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
           >
-            {saving ? 'Vytvarim...' : 'Vytvorit'}
+            {saving ? 'Vytvářím...' : 'Vytvořit'}
           </button>
         </div>
       </div>

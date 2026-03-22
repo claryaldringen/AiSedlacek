@@ -111,7 +111,10 @@ function BillingContent(): React.JSX.Element {
   // Check for Stripe redirect banners
   useEffect(() => {
     if (searchParams.get('success') === 'true') {
-      setBanner({ type: 'success', message: 'Platba byla úspěšně provedena! Tokeny budou přičteny během chvíle.' });
+      setBanner({
+        type: 'success',
+        message: 'Platba byla úspěšně provedena! Tokeny budou přičteny během chvíle.',
+      });
       // Refresh balance after a short delay (webhook needs time)
       const timer = setTimeout(() => void loadBalance(), 3000);
       return () => clearTimeout(timer);
@@ -139,7 +142,7 @@ function BillingContent(): React.JSX.Element {
       `AM:${amount}.00`,
       'CC:CZK',
       `X-VS:${variableSymbol}`,
-      'MSG:Dobit tokeny',
+      'MSG:Dobít tokeny',
     ].join('*');
 
     const controller = new AbortController();
@@ -309,12 +312,32 @@ function BillingContent(): React.JSX.Element {
             ].join(' ')}
           >
             {banner.type === 'success' ? (
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              <svg
+                className="h-4 w-4 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                />
               </svg>
             ) : (
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              <svg
+                className="h-4 w-4 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                />
               </svg>
             )}
             <span>{banner.message}</span>
@@ -353,8 +376,18 @@ function BillingContent(): React.JSX.Element {
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+              <svg
+                className="h-4 w-4 text-slate-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
+                />
               </svg>
               Platba kartou
             </h2>
@@ -412,17 +445,41 @@ function BillingContent(): React.JSX.Element {
               {checkoutLoading ? (
                 <>
                   <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                   Přesměrování…
                 </>
               ) : (
                 <>
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
+                    />
                   </svg>
-                  Zaplatit kartou{effectiveAmount >= 100 ? ` — ${effectiveAmount} Kč (${formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)` : ''}
+                  Zaplatit kartou
+                  {effectiveAmount >= 100
+                    ? ` — ${effectiveAmount} Kč (${formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)`
+                    : ''}
                 </>
               )}
             </button>
@@ -430,121 +487,167 @@ function BillingContent(): React.JSX.Element {
         </div>
 
         {/* FIO bank transfer section */}
-        {fioEnabled && <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z" />
-              </svg>
-              Bankovní převod
-            </h2>
-          </div>
-          <div className="px-5 py-4">
-            <div className="flex flex-col gap-6 sm:flex-row">
-              {/* QR code */}
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <label htmlFor="fio-amount" className="text-sm text-slate-500">
-                    Částka:
-                  </label>
-                  <input
-                    id="fio-amount"
-                    type="number"
-                    min={1}
-                    value={fioAmount}
-                    onChange={(e) => setFioAmount(e.target.value)}
-                    className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+        {fioEnabled && (
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <svg
+                  className="h-4 w-4 text-slate-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z"
                   />
-                  <span className="text-sm text-slate-400">Kč</span>
-                </div>
-                {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="QR platba" className="h-[200px] w-[200px] rounded-lg border border-slate-100" />
-                ) : (
-                  <div className="flex h-[200px] w-[200px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
-                    Zadejte částku
+                </svg>
+                Bankovní převod
+              </h2>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex flex-col gap-6 sm:flex-row">
+                {/* QR code */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="fio-amount" className="text-sm text-slate-500">
+                      Částka:
+                    </label>
+                    <input
+                      id="fio-amount"
+                      type="number"
+                      min={1}
+                      value={fioAmount}
+                      onChange={(e) => setFioAmount(e.target.value)}
+                      className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                    />
+                    <span className="text-sm text-slate-400">Kč</span>
                   </div>
-                )}
-              </div>
-
-              {/* Account details */}
-              <div className="flex-1 space-y-3">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                    Číslo účtu
-                  </p>
-                  <p className="mt-0.5 font-mono text-sm text-slate-700">
-                    2803462929/2010
-                  </p>
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt="QR platba"
+                      className="h-[200px] w-[200px] rounded-lg border border-slate-100"
+                    />
+                  ) : (
+                    <div className="flex h-[200px] w-[200px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
+                      Zadejte částku
+                    </div>
+                  )}
                 </div>
-                {variableSymbol && (
+
+                {/* Account details */}
+                <div className="flex-1 space-y-3">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                      Variabilní symbol
+                      Číslo účtu
                     </p>
-                    <p className="mt-0.5 font-mono text-lg font-semibold text-slate-800">
-                      {variableSymbol}
-                    </p>
+                    <p className="mt-0.5 font-mono text-sm text-slate-700">2803462929/2010</p>
                   </div>
-                )}
-                <p className="text-xs text-slate-400">
-                  Naskenujte QR kód v bankovní aplikaci nebo zadejte údaje manuálně. Po odeslání
-                  platby klikněte na &quot;Ověřit platbu&quot;.
-                </p>
-
-                {/* Verify button */}
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => void handleFioCheck()}
-                    disabled={fioChecking || fioCountdown > 0}
-                    className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {fioChecking ? (
-                      <>
-                        <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Ověřuji…
-                      </>
-                    ) : fioCountdown > 0 ? (
-                      <>Ověřit ({fioCountdown}s)</>
-                    ) : (
-                      <>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
-                        </svg>
-                        Ověřit platbu
-                      </>
-                    )}
-                  </button>
-
-                  {/* FIO result */}
-                  {fioResult && (
-                    <span className="text-sm">
-                      {fioResult.credited > 0 ? (
-                        <span className="text-green-600">
-                          Připsáno {fioResult.credited} {fioResult.credited === 1 ? 'platba' : 'platby'}. Zůstatek:{' '}
-                          {formatTokens(fioResult.balance)} tokenů.
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">
-                          Žádné nové platby. Zůstatek: {formatTokens(fioResult.balance)} tokenů.
-                        </span>
-                      )}
-                    </span>
+                  {variableSymbol && (
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                        Variabilní symbol
+                      </p>
+                      <p className="mt-0.5 font-mono text-lg font-semibold text-slate-800">
+                        {variableSymbol}
+                      </p>
+                    </div>
                   )}
+                  <p className="text-xs text-slate-400">
+                    Naskenujte QR kód v bankovní aplikaci nebo zadejte údaje manuálně. Po odeslání
+                    platby klikněte na &quot;Ověřit platbu&quot;.
+                  </p>
+
+                  {/* Verify button */}
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => void handleFioCheck()}
+                      disabled={fioChecking || fioCountdown > 0}
+                      className="flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {fioChecking ? (
+                        <>
+                          <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                            />
+                          </svg>
+                          Ověřuji…
+                        </>
+                      ) : fioCountdown > 0 ? (
+                        <>Ověřit ({fioCountdown}s)</>
+                      ) : (
+                        <>
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
+                            />
+                          </svg>
+                          Ověřit platbu
+                        </>
+                      )}
+                    </button>
+
+                    {/* FIO result */}
+                    {fioResult && (
+                      <span className="text-sm">
+                        {fioResult.credited > 0 ? (
+                          <span className="text-green-600">
+                            Připsáno {fioResult.credited}{' '}
+                            {fioResult.credited === 1 ? 'platba' : 'platby'}. Zůstatek:{' '}
+                            {formatTokens(fioResult.balance)} tokenů.
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">
+                            Žádné nové platby. Zůstatek: {formatTokens(fioResult.balance)} tokenů.
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>}
+        )}
 
         {/* Transaction history */}
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-5 py-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              <svg
+                className="h-4 w-4 text-slate-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                />
               </svg>
               Historie transakcí
             </h2>
@@ -552,9 +655,24 @@ function BillingContent(): React.JSX.Element {
           <div className="overflow-x-auto">
             {loading ? (
               <div className="flex items-center justify-center py-12">
-                <svg className="h-5 w-5 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <svg
+                  className="h-5 w-5 animate-spin text-slate-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
                 </svg>
               </div>
             ) : transactions.length === 0 ? (
@@ -581,9 +699,7 @@ function BillingContent(): React.JSX.Element {
                         <span
                           className={[
                             'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                            tx.amount > 0
-                              ? 'bg-green-50 text-green-700'
-                              : 'bg-red-50 text-red-600',
+                            tx.amount > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600',
                           ].join(' ')}
                         >
                           {typeLabel(tx.type)}

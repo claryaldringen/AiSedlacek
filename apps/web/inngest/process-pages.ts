@@ -1,6 +1,6 @@
 import { inngest } from '@/lib/infrastructure/inngest';
 import { prisma } from '@/lib/infrastructure/db';
-import { processWithClaude } from '@/lib/adapters/ocr/claude-vision';
+import { processWithClaudeBatch } from '@/lib/adapters/ocr/claude-vision';
 import type { ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import {
@@ -9,6 +9,17 @@ import {
   copyDocumentForPage,
   loadImageAndHash,
 } from '@/lib/infrastructure/processing-helpers';
+import { createBatches, estimateImageTokens } from '@/lib/batch-utils';
+
+interface PreparedPage {
+  pageId: string;
+  imageBuffer: string; // base64-encoded buffer for serialization across steps
+  imageHash: string;
+  fileSize: number;
+  collectionId: string | null;
+  collectionContext: string | null;
+  existingDocId: string | null;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const processPages: any = inngest.createFunction(
@@ -24,7 +35,14 @@ export const processPages: any = inngest.createFunction(
     triggers: [{ event: 'pages.process' }],
   },
   async ({ event, step }) => {
-    const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = event.data as {
+    const {
+      jobId,
+      userId,
+      pageIds: rawPageIds,
+      collectionId,
+      language,
+      mode,
+    } = event.data as {
       jobId: string;
       userId: string;
       pageIds: string[];
@@ -33,14 +51,13 @@ export const processPages: any = inngest.createFunction(
       mode: ProcessingMode;
     };
 
-    // Sort pageIds by their page's order field so processing follows natural order
-    const pageIds = await step.run('sort-pages-by-order', async () => {
+    // ── Step 1: Sort pages by order ──────────────────────────────
+    const pageIds = await step.run('sort-pages', async () => {
       const pages = await prisma.page.findMany({
         where: { id: { in: rawPageIds } },
         select: { id: true, order: true },
         orderBy: { order: 'asc' },
       });
-      // Keep pages with order first (sorted), then append any without order in original order
       const ordered = pages.filter((p) => p.order !== null).map((p) => p.id);
       const orderedSet = new Set(ordered);
       const unordered = rawPageIds.filter((id) => !orderedSet.has(id));
@@ -51,265 +68,348 @@ export const processPages: any = inngest.createFunction(
     let completed = 0;
     const errors: string[] = [];
 
-    // Get average output tokens for estimation
-    const avgResult = await step.run('get-avg-tokens', async () => {
-      const result = await prisma.document.aggregate({
+    // ── Step 2: Prepare pages (skip blank, already-translated, dedup, load images) ──
+    const prepareResult = await step.run('prepare-pages', async () => {
+      const avgResult = await prisma.document.aggregate({
         _avg: { outputTokens: true },
         where: { outputTokens: { not: null } },
       });
-      return Math.round(result._avg.outputTokens ?? 1500);
-    });
-    const estimatedTokens = avgResult;
+      const avgOutputPerPage = Math.round(avgResult._avg.outputTokens ?? 1500);
 
-    for (let i = 0; i < pageIds.length; i++) {
-      const pageId = pageIds[i]!;
+      const pagesToProcess: PreparedPage[] = [];
+      const skippedCount = { blank: 0, alreadyTranslated: 0, deduped: 0, notFound: 0 };
 
-      await step.run(`process-page-${i}-${pageId}`, async () => {
-        // Check if job was cancelled
-        const job = await prisma.processingJob.findUnique({
-          where: { id: jobId },
-          select: { status: true },
-        });
-        if (!job || job.status === 'cancelled') {
-          // Mark remaining pages back to pending
-          const remainingIds = pageIds.slice(i);
-          await prisma.page.updateMany({
-            where: { id: { in: remainingIds }, status: 'processing' },
-            data: { status: 'pending' },
-          });
-          return { action: 'cancelled' as const };
+      for (let i = 0; i < pageIds.length; i++) {
+        const pageId = pageIds[i]!;
+
+        if (typeof pageId !== 'string') {
+          skippedCount.notFound++;
+          continue;
         }
 
-        // Update job progress
-        await prisma.processingJob.update({
-          where: { id: jobId },
-          data: {
-            currentPageId: pageId,
-            currentStep: `Zpracovávám stránku ${i + 1}/${total}…`,
+        const page = await prisma.page.findUnique({
+          where: { id: pageId },
+          include: {
+            collection: { select: { id: true, context: true } },
+            document: {
+              include: {
+                translations: { select: { language: true } },
+                glossary: true,
+              },
+            },
           },
         });
 
-        if (typeof pageId !== 'string') {
-          errors.push(`Neplatné ID stránky: ${pageId}`);
-          completed++;
-          await prisma.processingJob.update({
-            where: { id: jobId },
-            data: { completedPages: completed, errors },
-          });
-          return { action: 'skipped' as const, reason: 'invalid-id' };
+        if (!page) {
+          errors.push(`Stránka ${pageId} nenalezena`);
+          skippedCount.notFound++;
+          continue;
         }
 
-        try {
-          // Load page from DB
-          const page = await prisma.page.findUnique({
-            where: { id: pageId },
-            include: {
-              collection: { select: { id: true, context: true } },
-              document: {
-                include: {
-                  translations: { select: { language: true } },
-                  glossary: true,
-                },
-              },
-            },
-          });
+        // Skip blank pages
+        if (page.status === 'blank') {
+          skippedCount.blank++;
+          continue;
+        }
 
-          if (!page) {
-            errors.push(`Stránka ${pageId} nenalezena`);
-            completed++;
-            await prisma.processingJob.update({
-              where: { id: jobId },
-              data: { completedPages: completed, errors },
-            });
-            return { action: 'skipped' as const, reason: 'not-found' };
+        // Skip pages with existing translation
+        if (page.document !== null) {
+          const hasTranslation = page.document.translations.some(
+            (t: { language: string }) => t.language === language,
+          );
+          if (hasTranslation) {
+            skippedCount.alreadyTranslated++;
+            continue;
           }
+        }
 
-          // Skip blank pages
-          if (page.status === 'blank') {
-            completed++;
-            await prisma.processingJob.update({
-              where: { id: jobId },
-              data: {
-                completedPages: completed,
-                currentStep: `Přeskakuji prázdnou stránku ${i + 1}/${total}`,
-              },
-            });
-            return { action: 'skipped' as const, reason: 'blank' };
-          }
+        // Set page to processing
+        await prisma.page.update({
+          where: { id: pageId },
+          data: { status: 'processing', errorMessage: null },
+        });
 
-          // Skip already-done pages with existing translation
-          if (page.document !== null) {
-            const targetLang = language;
-            const hasTranslation = page.document.translations.some(
-              (t: { language: string }) => t.language === targetLang,
+        // Load image and compute hash
+        const { imageBuffer, imageHash } = await loadImageAndHash(page.imageUrl);
+
+        // Check for existing document with same hash (cross-user dedup)
+        const existingByHash = await prisma.document.findFirst({
+          where: { hash: imageHash },
+          include: { translations: true, glossary: true },
+        });
+
+        if (existingByHash !== null && page.document === null) {
+          // Dedup: copy existing document instead of re-processing
+          const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
+
+          const origInput = existingByHash.inputTokens ?? 0;
+          const origOutput = existingByHash.outputTokens ?? 0;
+          if (origInput + origOutput > 0) {
+            await deductTokensIfSufficient(
+              userId,
+              origInput,
+              origOutput,
+              `OCR stránky ${pageId} (deduplikace)`,
+              `copy-${copiedDoc.id}`,
             );
-            if (hasTranslation) {
-              completed++;
-              await prisma.processingJob.update({
-                where: { id: jobId },
-                data: {
-                  completedPages: completed,
-                  currentStep: `Přeskakuji – překlad existuje ${i + 1}/${total}`,
-                },
-              });
-              return { action: 'skipped' as const, reason: 'already-translated' };
-            }
           }
 
-          // Set page status to processing
           await prisma.page.update({
             where: { id: pageId },
-            data: { status: 'processing', errorMessage: null },
+            data: { status: 'done', errorMessage: null },
           });
 
-          await prisma.processingJob.update({
-            where: { id: jobId },
-            data: { currentStep: `Načítám obrázek ${i + 1}/${total}…` },
-          });
+          skippedCount.deduped++;
+          continue;
+        }
 
-          // Load image and compute hash
-          const { imageBuffer, imageHash } = await loadImageAndHash(page.imageUrl);
+        pagesToProcess.push({
+          pageId,
+          imageBuffer: imageBuffer.toString('base64'),
+          imageHash,
+          fileSize: imageBuffer.length,
+          collectionId: page.collection?.id ?? collectionId ?? null,
+          collectionContext: page.collection?.context ?? null,
+          existingDocId: page.document?.id ?? null,
+        });
+      }
 
-          // Check for existing document with same hash (cross-user dedup)
-          const existingByHash = await prisma.document.findFirst({
-            where: { hash: imageHash },
-            include: { translations: true, glossary: true },
-          });
+      // Update job progress for skipped pages
+      const totalSkipped =
+        skippedCount.blank +
+        skippedCount.alreadyTranslated +
+        skippedCount.deduped +
+        skippedCount.notFound;
 
-          if (existingByHash !== null && page.document === null) {
-            // Dedup: copy existing document
-            await prisma.processingJob.update({
-              where: { id: jobId },
-              data: {
-                currentStep: `Kopíruji existující dokument (deduplikace) ${i + 1}/${total}…`,
-              },
-            });
+      await prisma.processingJob.update({
+        where: { id: jobId },
+        data: {
+          completedPages: totalSkipped,
+          currentStep: `Připraveno ${pagesToProcess.length} stránek ke zpracování (${totalSkipped} přeskočeno)`,
+        },
+      });
 
-            const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
+      return { pagesToProcess, skippedCount, avgOutputPerPage };
+    });
 
-            // Charge tokens based on original document's usage
-            const origInput = existingByHash.inputTokens ?? 0;
-            const origOutput = existingByHash.outputTokens ?? 0;
-            if (origInput + origOutput > 0) {
-              await deductTokensIfSufficient(
-                userId,
-                origInput,
-                origOutput,
-                `OCR stránky ${pageId} (deduplikace)`,
-                `copy-${copiedDoc.id}`,
-              );
-            }
+    const { pagesToProcess, skippedCount, avgOutputPerPage } = prepareResult;
+    completed =
+      skippedCount.blank +
+      skippedCount.alreadyTranslated +
+      skippedCount.deduped +
+      skippedCount.notFound;
 
-            await prisma.page.update({
-              where: { id: pageId },
-              data: { status: 'done', errorMessage: null },
-            });
+    // If nothing to process, finish early
+    if (pagesToProcess.length === 0) {
+      await step.run('complete-job', async () => {
+        await prisma.processingJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'completed',
+            currentStep: 'Hotovo',
+            completedPages: total,
+          },
+        });
+      });
+      return { status: 'completed', completed: total, total };
+    }
 
-            completed++;
-            await prisma.processingJob.update({
-              where: { id: jobId },
-              data: {
-                completedPages: completed,
-                currentStep: `Hotovo (deduplikace) ${i + 1}/${total}`,
-              },
-            });
-            return { action: 'done' as const, documentId: copiedDoc.id, cached: true };
-          }
+    // ── Step 3: Create batches ───────────────────────────────────
+    const batchPages = pagesToProcess.map((p) => ({
+      ...p,
+      id: p.pageId,
+    }));
 
-          // Check balance before calling Claude
-          const { sufficient: hasTokens } = await checkBalance(userId);
-          if (!hasTokens) {
-            await prisma.page.update({
-              where: { id: pageId },
+    const batches = createBatches(batchPages, {
+      inputTokenBudget: 180_000,
+      maxOutputTokens: 16_000,
+      avgOutputPerPage,
+    });
+
+    // ── Step 4: Process each batch ───────────────────────────────
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx]!;
+
+      // Check balance before each batch
+      const balanceOk = await step.run(`check-balance-${batchIdx}`, async () => {
+        const { sufficient } = await checkBalance(userId);
+        if (!sufficient) {
+          // Reset remaining pages to pending
+          const remainingPageIds = batches
+            .slice(batchIdx)
+            .flat()
+            .map((p) => p.pageId);
+          if (remainingPageIds.length > 0) {
+            await prisma.page.updateMany({
+              where: { id: { in: remainingPageIds }, status: 'processing' },
               data: { status: 'pending' },
             });
-            // Also reset remaining pages
-            const remainingIds = pageIds.slice(i + 1);
-            if (remainingIds.length > 0) {
-              await prisma.page.updateMany({
-                where: { id: { in: remainingIds }, status: 'processing' },
-                data: { status: 'pending' },
-              });
-            }
-            errors.push('Nedostatečný kredit pro zpracování');
-            await prisma.processingJob.update({
-              where: { id: jobId },
-              data: {
-                status: 'error',
-                completedPages: completed,
-                errors,
-                currentStep: 'Nedostatečný kredit',
-              },
-            });
-            return { action: 'insufficient-tokens' as const };
           }
-
-          // Call Claude for OCR
+          errors.push('Nedostatečný kredit pro zpracování');
           await prisma.processingJob.update({
             where: { id: jobId },
-            data: { currentStep: `Volám model… ${i + 1}/${total}` },
+            data: {
+              status: 'error',
+              completedPages: completed,
+              errors,
+              currentStep: 'Nedostatečný kredit',
+            },
+          });
+          return false;
+        }
+        return true;
+      });
+
+      if (!balanceOk) {
+        return { status: 'error', completed, errors };
+      }
+
+      // Process the batch
+      const batchResult = await step.run(`batch-${batchIdx}`, async () => {
+        const batchPageIds = batch.map((p) => p.pageId);
+
+        await prisma.processingJob.update({
+          where: { id: jobId },
+          data: {
+            currentStep: `Zpracovávám dávku ${batchIdx + 1}/${batches.length} (${batch.length} stránek)…`,
+          },
+        });
+
+        // Get previous context from the first page's collection
+        const firstPage = batch[0]!;
+        const previousContext = await getPreviousPageContext(
+          firstPage.collectionId,
+          firstPage.pageId,
+        );
+
+        // Build user prompt
+        let userPrompt = 'Přepiš text z tohoto rukopisu.';
+        const batchCollectionContext = firstPage.collectionContext;
+        if (batchCollectionContext) {
+          userPrompt = `Kontext díla (použij pro lepší porozumění dokumentu):\n${batchCollectionContext}\n\n---\n\nPřepiš text z tohoto rukopisu.`;
+        }
+
+        // Prepare images for the batch call
+        const images = batch.map((p, idx) => ({
+          buffer: Buffer.from(p.imageBuffer, 'base64'),
+          pageId: p.pageId,
+          index: idx,
+        }));
+
+        // Call Claude with all images in the batch at once
+        const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
+          await processWithClaudeBatch(images, userPrompt, {
+            collectionContext: batchCollectionContext ?? undefined,
+            previousContext,
+            estimatedOutputTokens: avgOutputPerPage * batch.length,
+            mode,
           });
 
-          const previousContext = await getPreviousPageContext(
-            page.collection?.id ?? collectionId ?? null,
-            pageId,
-          );
+        // Distribute tokens proportionally across pages in the batch
+        const perPageInputTokens = Math.round(inputTokens / batch.length);
+        const perPageOutputTokens = Math.round(outputTokens / batch.length);
+        const perPageProcessingTimeMs = Math.round(processingTimeMs / batch.length);
 
-          let userPrompt = 'Přepiš text z tohoto rukopisu.';
-          const collectionContext = page.collection?.context;
-          if (collectionContext) {
-            userPrompt = `Kontext díla (použij pro lepší porozumění dokumentu):\n${collectionContext}\n\n---\n\nPřepiš text z tohoto rukopisu.`;
-          }
+        // Save results for each page
+        const savedDocs: { pageId: string; docId: string }[] = [];
+        for (const { index, result } of results) {
+          const pageInfo = batch[index];
+          if (!pageInfo) continue;
 
-          const { result, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
-            await processWithClaude(
-              imageBuffer,
-              userPrompt,
-              undefined, // no onProgress callback in Inngest (no SSE)
-              estimatedTokens,
-              previousContext,
-              mode,
+          try {
+            const doc = await saveDocumentResult(
+              pageInfo.pageId,
+              pageInfo.existingDocId ? { id: pageInfo.existingDocId } : null,
+              pageInfo.imageHash,
+              result,
+              rawResponse,
+              {
+                model,
+                inputTokens: perPageInputTokens,
+                outputTokens: perPageOutputTokens,
+                processingTimeMs: perPageProcessingTimeMs,
+              },
+              language,
             );
 
-          console.log(
-            `[Inngest] Page ${pageId} done in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
-          );
+            savedDocs.push({ pageId: pageInfo.pageId, docId: doc.id });
 
-          // Save result
-          const doc = await saveDocumentResult(
-            pageId,
-            page.document,
-            imageHash,
-            result,
-            rawResponse,
-            { model, inputTokens, outputTokens, processingTimeMs },
-            language,
-          );
-
-          // Deduct tokens
-          const deductResult = await deductTokensIfSufficient(
-            userId,
-            inputTokens,
-            outputTokens,
-            `OCR stránky ${pageId}`,
-            doc.id,
-          );
-
-          if (!deductResult.success) {
-            // Work already done, mark as done but stop further processing
             await prisma.page.update({
-              where: { id: pageId },
+              where: { id: pageInfo.pageId },
               data: { status: 'done', errorMessage: null },
             });
-            completed++;
-            // Reset remaining pages
-            const remainingIds = pageIds.slice(i + 1);
-            if (remainingIds.length > 0) {
-              await prisma.page.updateMany({
-                where: { id: { in: remainingIds }, status: 'processing' },
-                data: { status: 'pending' },
-              });
-            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Neznámá chyba';
+            console.error(`[Inngest] Save failed for page ${pageInfo.pageId}:`, message);
+            errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
+
+            await prisma.page.update({
+              where: { id: pageInfo.pageId },
+              data: { status: 'error', errorMessage: message },
+            });
+          }
+        }
+
+        // Handle pages that didn't get a result (model returned fewer results than images)
+        const processedIndices = new Set(results.map((r) => r.index));
+        for (let idx = 0; idx < batch.length; idx++) {
+          if (!processedIndices.has(idx)) {
+            const pageInfo = batch[idx]!;
+            const message = 'Model nevrátil výsledek pro tuto stránku';
+            errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
+            await prisma.page.update({
+              where: { id: pageInfo.pageId },
+              data: { status: 'error', errorMessage: message },
+            });
+          }
+        }
+
+        // Deduct tokens for the whole batch
+        const deductResult = await deductTokensIfSufficient(
+          userId,
+          inputTokens,
+          outputTokens,
+          `OCR dávka ${batchIdx + 1} (${batch.length} stránek)`,
+          savedDocs.length > 0 ? savedDocs[0]!.docId : `batch-${batchIdx}`,
+        );
+
+        // Update completed count
+        const batchCompleted = batch.length;
+
+        await prisma.processingJob.update({
+          where: { id: jobId },
+          data: {
+            completedPages: completed + batchCompleted,
+            currentStep: `Dávka ${batchIdx + 1}/${batches.length} hotova`,
+          },
+        });
+
+        console.log(
+          `[Inngest] Batch ${batchIdx + 1}/${batches.length} done: ${batch.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
+        );
+
+        return {
+          pagesProcessed: batchCompleted,
+          insufficientTokens: !deductResult.success,
+          savedDocs,
+        };
+      });
+
+      completed += batchResult.pagesProcessed;
+
+      // If deduction failed, stop further batches
+      if (batchResult.insufficientTokens) {
+        // Reset remaining batches' pages to pending
+        const remainingPageIds = batches
+          .slice(batchIdx + 1)
+          .flat()
+          .map((p) => p.pageId);
+        if (remainingPageIds.length > 0) {
+          await step.run(`reset-remaining-${batchIdx}`, async () => {
+            await prisma.page.updateMany({
+              where: { id: { in: remainingPageIds }, status: 'processing' },
+              data: { status: 'pending' },
+            });
             errors.push('Nedostatečný kredit pro další zpracování');
             await prisma.processingJob.update({
               where: { id: jobId },
@@ -320,51 +420,13 @@ export const processPages: any = inngest.createFunction(
                 currentStep: 'Nedostatečný kredit',
               },
             });
-            return { action: 'insufficient-tokens' as const };
-          }
-
-          // Mark page as done
-          await prisma.page.update({
-            where: { id: pageId },
-            data: { status: 'done', errorMessage: null },
           });
-
-          completed++;
-          await prisma.processingJob.update({
-            where: { id: jobId },
-            data: {
-              completedPages: completed,
-              currentStep: `Hotovo ${i + 1}/${total}`,
-            },
-          });
-
-          return { action: 'done' as const, documentId: doc.id, cached: false };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Neznámá chyba';
-          console.error(`[Inngest] Page ${pageId} error:`, message);
-
-          try {
-            await prisma.page.update({
-              where: { id: pageId },
-              data: { status: 'error', errorMessage: message },
-            });
-          } catch {
-            // ignore
-          }
-
-          errors.push(`Stránka ${pageId}: ${message}`);
-          completed++;
-          await prisma.processingJob.update({
-            where: { id: jobId },
-            data: { completedPages: completed, errors },
-          });
-
-          return { action: 'error' as const, error: message };
         }
-      });
+        return { status: 'error', completed, errors };
+      }
 
-      // After each step, re-check if cancelled (job status might have changed)
-      const jobStatus = await step.run(`check-cancel-${i}`, async () => {
+      // Check if job was cancelled between batches
+      const jobStatus = await step.run(`check-cancel-${batchIdx}`, async () => {
         const job = await prisma.processingJob.findUnique({
           where: { id: jobId },
           select: { status: true },
@@ -373,12 +435,14 @@ export const processPages: any = inngest.createFunction(
       });
 
       if (jobStatus === 'cancelled') {
-        // Mark remaining processing pages back to pending
         await step.run('cancel-cleanup', async () => {
-          const remainingIds = pageIds.slice(i + 1);
-          if (remainingIds.length > 0) {
+          const remainingPageIds = batches
+            .slice(batchIdx + 1)
+            .flat()
+            .map((p) => p.pageId);
+          if (remainingPageIds.length > 0) {
             await prisma.page.updateMany({
-              where: { id: { in: remainingIds }, status: 'processing' },
+              where: { id: { in: remainingPageIds }, status: 'processing' },
               data: { status: 'pending' },
             });
           }
@@ -391,14 +455,14 @@ export const processPages: any = inngest.createFunction(
       }
     }
 
-    // All pages processed — mark job completed
+    // ── Step 5: Complete job ─────────────────────────────────────
     await step.run('complete-job', async () => {
       await prisma.processingJob.update({
         where: { id: jobId },
         data: {
           status: 'completed',
           currentStep: 'Hotovo',
-          completedPages: completed,
+          completedPages: total,
         },
       });
     });

@@ -386,9 +386,9 @@ function WorkspaceContent(): React.JSX.Element {
       try {
         data = (await res.json()) as { context?: string; error?: string };
       } catch {
-        throw new Error(`Server vratil ${res.status} bez platne odpovedi`);
+        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
       }
-      if (!res.ok) throw new Error(data.error ?? 'Generovani kontextu selhalo');
+      if (!res.ok) throw new Error(data.error ?? 'Generování kontextu selhalo');
       const newContext = data.context ?? '';
       // Update collection in local state
       setCollections((prev) =>
@@ -411,7 +411,7 @@ function WorkspaceContent(): React.JSX.Element {
 
     // Use the title from metadata if available, otherwise the current name
     const currentName = col.title ?? col.name;
-    const newName = window.prompt('Novy nazev svazku:', currentName);
+    const newName = window.prompt('Nový název svazku:', currentName);
     if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
 
     try {
@@ -507,7 +507,7 @@ function WorkspaceContent(): React.JSX.Element {
         setPanelLoading(true);
         try {
           const res = await fetch(`/api/documents/${page.document.id}`);
-          if (!res.ok) throw new Error('Nepodarilo se nacist dokument');
+          if (!res.ok) throw new Error('Nepodařilo se načíst dokument');
           const doc = (await res.json()) as {
             id: string;
             transcription: string;
@@ -560,7 +560,7 @@ function WorkspaceContent(): React.JSX.Element {
             translationOutputTokens: translation?.outputTokens,
           });
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Neznama chyba');
+          setError(err instanceof Error ? err.message : 'Neznámá chyba');
         } finally {
           setPanelLoading(false);
         }
@@ -610,14 +610,14 @@ function WorkspaceContent(): React.JSX.Element {
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
       setRegenerating(true);
-      setRegenerateStep('Pripravuji...');
+      setRegenerateStep('Připravuji...');
       setRegenerateProgress(0);
       setPanelResult(null);
       try {
         // Try re-parsing from stored rawResponse first (free, no API call)
         const page = pages.find((p) => p.id === pageId);
         if (page?.document) {
-          setRegenerateStep('Zkousim opravit parsovani...');
+          setRegenerateStep('Zkouším opravit parsování...');
           const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, {
             method: 'POST',
           });
@@ -694,7 +694,7 @@ function WorkspaceContent(): React.JSX.Element {
           body: JSON.stringify({ status: 'pending' }),
         });
         // Process again via Inngest background job
-        setRegenerateStep('Volam model...');
+        setRegenerateStep('Volám model...');
         const response = await fetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -761,7 +761,7 @@ function WorkspaceContent(): React.JSX.Element {
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Pregenerovani selhalo');
+        setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
       } finally {
         setRegenerating(false);
         setRegenerateStep(undefined);
@@ -946,11 +946,11 @@ function WorkspaceContent(): React.JSX.Element {
         {/* Collection info cards: structured data + context + metadata (3-column) */}
         {selectedCollection && (
           <div className="mx-4 mt-3 grid gap-3 lg:grid-cols-3">
-            {/* Strukturovana data — 1/3 */}
+            {/* Strukturovaná data — 1/3 */}
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
                 <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                  Strukturovana data
+                  Strukturovaná data
                 </summary>
                 <div className="border-t border-slate-100 px-4 py-3">
                   <CollectionMetadataEditor
@@ -969,12 +969,12 @@ function WorkspaceContent(): React.JSX.Element {
               </details>
             </div>
 
-            {/* Kontext dila — 1/3 */}
+            {/* Kontext díla — 1/3 */}
             {selectedCollection.context ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext dila: {selectedCollection.name}
+                    Kontext díla: {selectedCollection.name}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 prose prose-sm prose-stone max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1021,7 +1021,7 @@ function WorkspaceContent(): React.JSX.Element {
                               d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
                             />
                           </svg>
-                          Opravit kontext dokumentu podle kontextu dila
+                          Opravit kontext dokumentu podle kontextu díla
                         </>
                       )}
                     </button>
@@ -1032,7 +1032,7 @@ function WorkspaceContent(): React.JSX.Element {
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext dila: {selectedCollection.name}
+                    Kontext díla: {selectedCollection.name}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 text-sm text-slate-400">
                     Kontext nebyl nastaven.
@@ -1051,7 +1051,7 @@ function WorkspaceContent(): React.JSX.Element {
                   {/* Status counts */}
                   <div>
                     <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Stav stranek
+                      Stav stránek
                     </h4>
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between">
@@ -1070,7 +1070,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats.pending > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Ceka</span>
+                          <span className="text-slate-500">Čeká</span>
                           <span className="font-medium text-slate-700">
                             {selectedCollection.stats.pending}
                           </span>
@@ -1086,7 +1086,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats.blank > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Prazdne</span>
+                          <span className="text-slate-400">Prázdné</span>
                           <span className="font-medium text-slate-500">
                             {selectedCollection.stats.blank}
                           </span>
@@ -1129,7 +1129,7 @@ function WorkspaceContent(): React.JSX.Element {
                     selectedCollection.stats.outputTokens > 0) && (
                     <div>
                       <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Spotreba
+                        Spotřeba
                       </h4>
                       <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
@@ -1227,7 +1227,7 @@ function WorkspaceContent(): React.JSX.Element {
         {contentDragOver && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="rounded-xl bg-blue-600/90 px-8 py-4 text-white shadow-xl">
-              <p className="text-lg font-semibold">Pustte soubory pro nahrani</p>
+              <p className="text-lg font-semibold">Pusťte soubory pro nahrání</p>
             </div>
           </div>
         )}
