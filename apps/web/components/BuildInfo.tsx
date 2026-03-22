@@ -15,7 +15,7 @@ export function BuildInfo(): React.ReactElement {
     : '–';
 
   return (
-    <div className="fixed bottom-2 left-2 z-50 rounded bg-black/60 px-2 py-1 font-mono text-[10px] text-white/50">
+    <div className="fixed bottom-2 right-2 z-50 rounded bg-black/60 px-2 py-1 font-mono text-[10px] text-white/50">
       {formatted} · {buildHash ?? '–'}
     </div>
   );
