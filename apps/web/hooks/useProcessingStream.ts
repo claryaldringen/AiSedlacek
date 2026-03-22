@@ -64,6 +64,8 @@ export function useProcessingStream({
     const decoder = new TextDecoder();
     let buffer = '';
 
+    let receivedDone = false;
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -166,6 +168,7 @@ export function useProcessingStream({
             setProcessingProgress(Math.round((data.outputTokens / data.estimatedTotal) * 100));
           }
         } else if (eventType === 'done') {
+          receivedDone = true;
           setBatchInfo(null);
           batchInfoRef.current = null;
           setProcessingStep('Hotovo');
@@ -187,6 +190,19 @@ export function useProcessingStream({
           setIsPaused(false);
         }
       }
+    }
+
+    // Stream ended — check if it was graceful (received 'done' event) or abrupt (timeout/error)
+    if (!receivedDone) {
+      setError('Spojení se serverem bylo přerušeno. Některé stránky nebyly zpracovány.');
+      setProcessingStep('Přerušeno');
+      setProcessingProgress(undefined);
+      // Reset pages still in 'processing' back to 'pending' so user can retry
+      setPages((prev) =>
+        prev.map((p) => (p.status === 'processing' ? { ...p, status: 'pending' } : p)),
+      );
+      // Also reset on server
+      void fetch('/api/pages/process/interrupted', { method: 'POST' }).catch(() => {});
     }
   }, [setPages]);
 
