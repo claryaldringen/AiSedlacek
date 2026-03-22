@@ -92,12 +92,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } else {
     // Find the most recent running job for this user
     job = await prisma.processingJob.findFirst({
-      where: { userId, status: 'running' },
+      where: { userId, status: { in: ['running', 'queued'] } },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  if (!job || job.status !== 'running') {
+  if (!job || (job.status !== 'running' && job.status !== 'queued')) {
     return NextResponse.json({ error: 'Žádné aktivní zpracování' }, { status: 404 });
   }
 

@@ -4,7 +4,6 @@ import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
 import { requireUserId } from '@/lib/auth';
 import { checkBalance } from '@/lib/infrastructure/billing';
-import { getProcessingQueue } from '@/lib/infrastructure/queue';
 
 // ── POST: Start processing via BullMQ ───────────────────────
 
@@ -65,7 +64,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // Check for already running job
   const existingRunningJob = await prisma.processingJob.findFirst({
-    where: { userId, status: 'running' },
+    where: { userId, status: { in: ['running', 'queued'] } },
     select: { id: true },
   });
   if (existingRunningJob) {
@@ -84,18 +83,18 @@ export async function POST(request: NextRequest): Promise<Response> {
       ? rawCollectionId
       : (ownedPages[0]?.collectionId ?? undefined);
 
-  // Create ProcessingJob in DB
+  // Create ProcessingJob in DB with status 'queued' — worker picks it up
   const job = await prisma.processingJob.create({
     data: {
       userId,
-      status: 'running',
+      status: 'queued',
       totalPages: (pageIds as string[]).length,
       completedPages: 0,
       pageIds: pageIds as string[],
       language: targetLang,
       mode: processingMode,
       collectionId: collectionId ?? null,
-      currentStep: 'Spouštím zpracování…',
+      currentStep: 'Ve frontě — čeká na zpracování…',
     },
   });
 
@@ -103,17 +102,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   await prisma.page.updateMany({
     where: { id: { in: pageIds as string[] } },
     data: { status: 'processing', errorMessage: null },
-  });
-
-  // Enqueue BullMQ job
-  const queue = getProcessingQueue();
-  await queue.add('process-pages', {
-    jobId: job.id,
-    userId,
-    pageIds: pageIds as string[],
-    collectionId: collectionId ?? undefined,
-    language: targetLang,
-    mode: processingMode,
   });
 
   return Response.json({ jobId: job.id });
@@ -130,7 +118,7 @@ export async function GET(): Promise<Response> {
   }
 
   const runningJob = await prisma.processingJob.findFirst({
-    where: { userId, status: 'running' },
+    where: { userId, status: { in: ['running', 'queued'] } },
     orderBy: { createdAt: 'desc' },
   });
 

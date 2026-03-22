@@ -1,23 +1,21 @@
 /**
- * BullMQ job handler for OCR page processing.
+ * OCR page processing job handler.
  *
- * Ported from apps/web/inngest/process-pages.ts — same logic,
- * but without Inngest step.run() wrappers. Runs as plain async code
- * in a long-lived worker process (no serverless timeout).
+ * Runs as plain async code in a long-lived worker process (no timeout).
+ * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
-import type { Job } from 'bullmq';
-import { prisma } from '@/lib/infrastructure/db';
-import { processWithClaudeBatch } from '@/lib/adapters/ocr/claude-vision';
-import type { ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { prisma } from '../lib/infrastructure/db';
+import { processWithClaudeBatch } from '../lib/adapters/ocr/claude-vision';
+import type { ProcessingMode } from '../lib/adapters/ocr/claude-vision';
+import { checkBalance, deductTokensIfSufficient } from '../lib/infrastructure/billing';
 import {
   getPreviousPageContext,
   saveDocumentResult,
   copyDocumentForPage,
   loadImageAndHash,
-} from '@/lib/infrastructure/processing-helpers';
-import { createBatches } from '@/lib/batch-utils';
+} from '../lib/infrastructure/processing-helpers';
+import { createBatches } from '../lib/batch-utils';
 
 interface PreparedPage {
   pageId: string;
@@ -38,8 +36,8 @@ export interface ProcessPagesJobData {
   mode: ProcessingMode;
 }
 
-export async function processPages(job: Job<ProcessPagesJobData>): Promise<void> {
-  const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = job.data;
+export async function processPages(data: ProcessPagesJobData): Promise<void> {
+  const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = data;
 
   const errors: string[] = [];
 

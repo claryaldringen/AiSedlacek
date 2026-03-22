@@ -30,12 +30,6 @@ vi.mock('@/lib/infrastructure/billing', () => ({
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
-const mockQueueAdd = vi.fn();
-vi.mock('@/lib/infrastructure/queue', () => ({
-  getProcessingQueue: () => ({
-    add: (...args: unknown[]) => mockQueueAdd(...args),
-  }),
-}));
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -58,8 +52,7 @@ describe('POST /api/pages/process', () => {
     vi.clearAllMocks();
     mockPageUpdateMany.mockResolvedValue({ count: 0 });
     mockProcessingJobFindFirst.mockResolvedValue(null); // No running job
-    mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'running' });
-    mockQueueAdd.mockResolvedValue(undefined);
+    mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'queued' });
     // Default: ownership check returns matching pages
     mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
       const where = args?.where as Record<string, unknown> | undefined;
@@ -100,19 +93,19 @@ describe('POST /api/pages/process', () => {
     expect(json.jobId).toBe('existing-job');
   });
 
-  it('creates a ProcessingJob and enqueues BullMQ job', async () => {
+  it('creates a queued ProcessingJob in DB', async () => {
     const res = await POST(makeRequest({ pageIds: ['page-1', 'page-2'] }));
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.jobId).toBe('job-123');
 
-    // Verify ProcessingJob was created
+    // Verify ProcessingJob was created with status 'queued'
     expect(mockProcessingJobCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           userId: 'test-user-id',
-          status: 'running',
+          status: 'queued',
           totalPages: 2,
           pageIds: ['page-1', 'page-2'],
           language: 'cs',
@@ -126,18 +119,6 @@ describe('POST /api/pages/process', () => {
       where: { id: { in: ['page-1', 'page-2'] } },
       data: { status: 'processing', errorMessage: null },
     });
-
-    // Verify BullMQ job was enqueued
-    expect(mockQueueAdd).toHaveBeenCalledWith(
-      'process-pages',
-      expect.objectContaining({
-        jobId: 'job-123',
-        userId: 'test-user-id',
-        pageIds: ['page-1', 'page-2'],
-        language: 'cs',
-        mode: 'transcribe+translate',
-      }),
-    );
   });
 
   it('defaults target language to cs when not provided', async () => {
