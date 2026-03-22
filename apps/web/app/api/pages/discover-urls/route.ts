@@ -324,7 +324,8 @@ export async function POST(request: NextRequest): Promise<Response> {
             n: number,
             side: string,
           ): { candidateStr: string; candidate: string; newSegments: string[] } => {
-            const candidate = `${prefix}${String(n).padStart(pad, '0')}${side}`;
+            const ext = pageSegment.fileExtension ?? '';
+            const candidate = `${prefix}${String(n).padStart(pad, '0')}${side}${ext}`;
             const newSegments = [...segments];
             newSegments[index] = candidate;
             const candidateUrl = new URL(newSegments.join('/'), parsed.origin);
@@ -567,26 +568,45 @@ interface PageSegment {
   num: number;
   pad: number;
   suffix: string; // 'R', 'V', or ''
+  fileExtension?: string; // '.jpg', '.png', etc.
 }
 
 /**
  * Scan URL path segments to find one that looks like a page identifier.
  * Matches patterns like: ID0009V, f001r, page003, 0042, folio12v
+ * Also matches filenames with numbers before extension: 1.jpg, page_03.png
  * Skips segments that are clearly not page IDs (full, default, 0, etc.)
  */
 function findPageSegment(segments: string[]): PageSegment | null {
   const SKIP = new Set(['', 'full', 'default', 'max', 'native', 'color', 'gray', 'bitonal']);
 
+  // First pass: try to match filename (last segment) with number before extension
+  // e.g. "1.jpg" → num=1, "page_03.png" → prefix="page_", num=3
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i]!;
+    if (SKIP.has(seg.toLowerCase())) continue;
+
+    const fileMatch = seg.match(/^([A-Za-z_-]*)(\d+)([RVrv])?(\.[a-z0-9]{2,4})$/i);
+    if (fileMatch) {
+      return {
+        index: i,
+        prefix: fileMatch[1]!,
+        num: parseInt(fileMatch[2]!, 10),
+        pad: fileMatch[2]!.length,
+        suffix: (fileMatch[3] ?? '').toUpperCase(),
+        fileExtension: fileMatch[4]!,
+      };
+    }
+  }
+
+  // Second pass: match bare numeric segments without extension
   for (let i = segments.length - 1; i >= 0; i--) {
     const seg = segments[i]!;
     if (SKIP.has(seg.toLowerCase())) continue;
     // Skip pure single-digit segments (like IIIF rotation "0")
     if (/^\d$/.test(seg)) continue;
-    // Skip file extensions
-    if (/\.[a-z]{2,4}$/i.test(seg)) {
-      // Check if filename itself has a page pattern — handled by fallback
-      continue;
-    }
+    // Skip segments with file extensions (handled in first pass)
+    if (/\.[a-z]{2,4}$/i.test(seg)) continue;
 
     // Match: optional prefix + digits + optional R/V suffix
     const match = seg.match(/^([A-Za-z_-]*)(\d{2,})([RVrv])?$/);
