@@ -16,6 +16,7 @@ import { useDesktopSelection } from '@/hooks/useDesktopSelection';
 import { useProcessingJob } from '@/hooks/useProcessingJob';
 import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
+import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -64,10 +65,8 @@ function WorkspaceContent(): React.JSX.Element {
   // Generate context from selected pages
   const [generatingContext, setGeneratingContext] = useState(false);
 
-  // Processing mode
-  const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>(
-    'transcribe+translate',
-  );
+  // Create collection dialog
+  const [createCollectionDialogOpen, setCreateCollectionDialogOpen] = useState(false);
 
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
@@ -125,7 +124,6 @@ function WorkspaceContent(): React.JSX.Element {
     setPages,
     selected,
     collections,
-    processingMode,
     loadingPages,
   });
 
@@ -352,6 +350,35 @@ function WorkspaceContent(): React.JSX.Element {
       setGeneratingContext(false);
     }
   }, [selectedCollectionId, selected, pages, setError]);
+
+  // ---- Rename collection ----
+  const handleRenameCollection = useCallback(async (): Promise<void> => {
+    // Determine which collection to rename: the one navigated into, or the one selected in grid
+    const colId = selectedCollectionId ?? selectedGridCollection?.id;
+    if (!colId) return;
+    const col = collections.find((c) => c.id === colId);
+    if (!col) return;
+
+    // Use the title from metadata if available, otherwise the current name
+    const currentName = col.title ?? col.name;
+    const newName = window.prompt('Novy nazev svazku:', currentName);
+    if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
+
+    try {
+      const res = await fetch(`/api/collections/${colId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      if (res.ok) {
+        setCollections((prev) =>
+          prev.map((c) => (c.id === colId ? { ...c, name: newName.trim() } : c)),
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedCollectionId, selectedGridCollection, collections]);
 
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
@@ -802,42 +829,11 @@ function WorkspaceContent(): React.JSX.Element {
         onImportClick={() => setUploadOpen(true)}
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
-        onCreateCollection={async (name) => {
-          const res = await fetch('/api/collections', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name }),
-          });
-          if (res.ok) {
-            const data = (await res.json()) as { id: string };
-            void loadCollections();
-            handleCollectionSelect(data.id);
-          }
-        }}
-        onSortByName={async () => {
-          const sorted = [...pages].sort((a, b) => {
-            const nameA = (a.displayName || a.filename).toLowerCase();
-            const nameB = (b.displayName || b.filename).toLowerCase();
-            return nameA.localeCompare(nameB, 'cs', { numeric: true });
-          });
-          setPages(sorted);
-          // Persist new order
-          await Promise.all(
-            sorted.map((p, i) =>
-              fetch(`/api/pages/${p.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ order: i }),
-              }),
-            ),
-          );
-        }}
+        onCreateCollection={() => setCreateCollectionDialogOpen(true)}
         onEditContext={() => setContextDialogOpen(true)}
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}
         processingProgress={processingProgress}
-        processingMode={processingMode}
-        onProcessingModeChange={setProcessingMode}
         onCancelProcessing={isProcessing ? handleCancelProcessing : undefined}
         onPauseProcessing={undefined}
         onResumeProcessing={undefined}
@@ -859,6 +855,11 @@ function WorkspaceContent(): React.JSX.Element {
         onGenerateContext={selectedCollectionId ? () => void handleGenerateContext() : undefined}
         generatingContext={generatingContext}
         doneSelectedCount={doneSelectedCount}
+        onRenameCollection={
+          (selectedCollectionId ?? selectedGridCollection)
+            ? () => void handleRenameCollection()
+            : undefined
+        }
       />
 
       {/* Error banner */}
@@ -1224,6 +1225,16 @@ function WorkspaceContent(): React.JSX.Element {
           onUpdate={handleShareUpdate}
         />
       )}
+
+      {/* Create collection dialog */}
+      <CreateCollectionDialog
+        open={createCollectionDialogOpen}
+        onClose={() => setCreateCollectionDialogOpen(false)}
+        onCreated={(collection) => {
+          void loadCollections();
+          handleCollectionSelect(collection.id);
+        }}
+      />
 
       {/* Document panel */}
       <DocumentPanel

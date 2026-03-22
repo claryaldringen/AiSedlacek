@@ -9,7 +9,6 @@ interface UseProcessingJobOptions {
   setPages: React.Dispatch<React.SetStateAction<PageItem[]>>;
   selected: Set<string>;
   collections: Collection[];
-  processingMode: 'transcribe+translate' | 'translate';
   loadingPages: boolean;
 }
 
@@ -43,7 +42,6 @@ export function useProcessingJob({
   setPages,
   selected,
   collections,
-  processingMode,
   loadingPages,
 }: UseProcessingJobOptions): UseProcessingJobReturn {
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
@@ -244,7 +242,7 @@ export function useProcessingJob({
       const response = await fetch('/api/pages/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds, language: 'cs', mode: processingMode }),
+        body: JSON.stringify({ pageIds, language: 'cs', mode: 'transcribe+translate' }),
       });
 
       if (!response.ok) {
@@ -275,7 +273,7 @@ export function useProcessingJob({
         ),
       );
     }
-  }, [selected, pages, collections, processingMode, setPages, startPolling]);
+  }, [selected, pages, collections, setPages, startPolling]);
 
   /** Cancel the current processing job */
   const handleCancelProcessing = useCallback(async (): Promise<void> => {

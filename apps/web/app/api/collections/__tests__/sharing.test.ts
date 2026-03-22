@@ -19,6 +19,13 @@ const txMock = {
     deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
     create: (...args: unknown[]) => mockPublicSlugCreate(...args),
   },
+  workspace: {
+    upsert: vi.fn().mockResolvedValue({ id: 'public-workspace' }),
+  },
+  workspaceItem: {
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    create: vi.fn().mockResolvedValue({ id: 'wi-1' }),
+  },
 };
 
 const mockTransaction = vi.fn().mockImplementation(async (cb: (tx: typeof txMock) => unknown) => {

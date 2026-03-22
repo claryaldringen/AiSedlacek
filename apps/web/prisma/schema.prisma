@@ -26,6 +26,8 @@ model User {
   pages         Page[]
   tokenTransactions TokenTransaction[]
   processingJobs ProcessingJob[]
+  workspaces           Workspace[]
+  workspaceMemberships WorkspaceMember[]
 }
 
 model Account {
@@ -86,6 +88,8 @@ model Collection {
   librarySignature  String?   // Označení v knihovně (např. MS.7756)
   abstract          String?   // Krátký shrnující popis
 
+  workspaceItems WorkspaceItem[]
+
   @@index([userId])
 }
 
@@ -113,6 +117,7 @@ model Page {
   height    Int?     // pixels
   isPublic  Boolean  @default(false)
   slug      String?  @unique
+  workspaceItems WorkspaceItem[]
 
   @@index([userId])
   @@index([collectionId])
@@ -240,4 +245,51 @@ model TokenTransaction {
 
   @@unique([userId, referenceId])
   @@index([userId, createdAt])
+}
+
+// ---- Workspaces ----
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // 'home' | 'public' | 'shared'
+  ownerId     String?
+  owner       User?    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  inviteCode  String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  members     WorkspaceMember[]
+  items       WorkspaceItem[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String    @default("member")
+  joinedAt    DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceItem {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  pageId       String?
+  page         Page?       @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  addedAt      DateTime    @default(now())
+
+  @@unique([workspaceId, collectionId])
+  @@unique([workspaceId, pageId])
+  @@index([workspaceId])
+  @@index([collectionId])
+  @@index([pageId])
 }

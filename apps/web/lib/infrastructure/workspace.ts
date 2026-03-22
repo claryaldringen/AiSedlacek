@@ -1,0 +1,53 @@
+import { prisma } from './db';
+import crypto from 'crypto';
+
+const PUBLIC_WORKSPACE_ID = 'public-workspace';
+
+/**
+ * Ensure user has a home workspace. Creates one if missing.
+ * Also ensures the global public workspace exists.
+ */
+export async function ensureWorkspaces(
+  userId: string,
+): Promise<{ homeId: string; publicId: string }> {
+  // Ensure public workspace exists
+  await prisma.workspace.upsert({
+    where: { id: PUBLIC_WORKSPACE_ID },
+    create: { id: PUBLIC_WORKSPACE_ID, name: 'Veřejné dokumenty', type: 'public' },
+    update: {},
+  });
+
+  // Ensure user has home workspace
+  let home = await prisma.workspace.findFirst({
+    where: { ownerId: userId, type: 'home' },
+  });
+  if (!home) {
+    home = await prisma.workspace.create({
+      data: {
+        name: 'Můj workspace',
+        type: 'home',
+        ownerId: userId,
+        members: { create: { userId, role: 'owner' } },
+      },
+    });
+    // Backfill: add all user's existing collections to home workspace
+    const collections = await prisma.collection.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    if (collections.length > 0) {
+      await prisma.workspaceItem.createMany({
+        data: collections.map((c) => ({ workspaceId: home!.id, collectionId: c.id })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  return { homeId: home.id, publicId: PUBLIC_WORKSPACE_ID };
+}
+
+export function generateInviteCode(): string {
+  return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+}
+
+export { PUBLIC_WORKSPACE_ID };

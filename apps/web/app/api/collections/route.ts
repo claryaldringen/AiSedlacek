@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { computeCostFromTokens } from '@/lib/pricing';
+import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(): Promise<NextResponse> {
   const auth = await getAuthenticatedUserId();
@@ -76,7 +77,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
   }
 
-  const { name, description } = body as { name?: unknown; description?: unknown };
+  const { name, description, workspaceId } = body as {
+    name?: unknown;
+    description?: unknown;
+    workspaceId?: unknown;
+  };
 
   if (typeof name !== 'string' || name.trim() === '') {
     return NextResponse.json({ error: 'Název svazku je povinný' }, { status: 400 });
@@ -89,6 +94,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       description: typeof description === 'string' ? description.trim() : '',
     },
   });
+
+  // Add collection to workspace (specified or user's home workspace)
+  try {
+    let targetWorkspaceId: string;
+    if (typeof workspaceId === 'string' && workspaceId.trim() !== '') {
+      // Verify user has access to the target workspace
+      const member = await prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId: workspaceId.trim(), userId } },
+      });
+      if (!member) {
+        // Fallback to home workspace if user is not a member
+        const { homeId } = await ensureWorkspaces(userId);
+        targetWorkspaceId = homeId;
+      } else {
+        targetWorkspaceId = workspaceId.trim();
+      }
+    } else {
+      const { homeId } = await ensureWorkspaces(userId);
+      targetWorkspaceId = homeId;
+    }
+
+    await prisma.workspaceItem.create({
+      data: { workspaceId: targetWorkspaceId, collectionId: collection.id },
+    });
+  } catch (err) {
+    // Non-critical: log but don't fail collection creation
+    console.error('[collections/POST] Failed to add WorkspaceItem:', err);
+  }
 
   return NextResponse.json(collection, { status: 201 });
 }

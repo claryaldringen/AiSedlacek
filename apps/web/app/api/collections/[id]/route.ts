@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { requireUserId } from '@/lib/auth';
+import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -67,7 +68,20 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
     }
 
-    const { name, description, context, contextUrls, isPublic, slug, title, author, yearFrom, yearTo, librarySignature, abstract: abstractText } = body as {
+    const {
+      name,
+      description,
+      context,
+      contextUrls,
+      isPublic,
+      slug,
+      title,
+      author,
+      yearFrom,
+      yearTo,
+      librarySignature,
+      abstract: abstractText,
+    } = body as {
       name?: unknown;
       description?: unknown;
       context?: unknown;
@@ -195,6 +209,25 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
               targetType: 'collection',
               targetId: id,
             },
+          });
+
+          // Add to public workspace (ensure it exists first)
+          await tx.workspace.upsert({
+            where: { id: PUBLIC_WORKSPACE_ID },
+            create: { id: PUBLIC_WORKSPACE_ID, name: 'Veřejné dokumenty', type: 'public' },
+            update: {},
+          });
+          // Use upsert-like pattern: delete then create to avoid unique constraint errors
+          await tx.workspaceItem.deleteMany({
+            where: { workspaceId: PUBLIC_WORKSPACE_ID, collectionId: id },
+          });
+          await tx.workspaceItem.create({
+            data: { workspaceId: PUBLIC_WORKSPACE_ID, collectionId: id },
+          });
+        } else {
+          // Remove from public workspace when unpublishing
+          await tx.workspaceItem.deleteMany({
+            where: { workspaceId: PUBLIC_WORKSPACE_ID, collectionId: id },
           });
         }
 
