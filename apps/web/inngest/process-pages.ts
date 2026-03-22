@@ -297,12 +297,31 @@ export const processPages: any = inngest.createFunction(
         }));
 
         // Call Claude with all images in the batch at once
+        const estimatedTotal = avgOutputPerPage * batch.length;
+        let lastProgressUpdate = 0;
+
         const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
           await processWithClaudeBatch(images, userPrompt, {
             collectionContext: batchCollectionContext ?? undefined,
             previousContext,
-            estimatedOutputTokens: avgOutputPerPage * batch.length,
+            estimatedOutputTokens: estimatedTotal,
             mode,
+            onProgress: (currentTokens, estimated) => {
+              // Throttle DB updates to every 2 seconds
+              const now = Date.now();
+              if (now - lastProgressUpdate < 2000) return;
+              lastProgressUpdate = now;
+
+              const pct = Math.min(99, Math.round((currentTokens / estimated) * 100));
+              void prisma.processingJob
+                .update({
+                  where: { id: jobId },
+                  data: {
+                    currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
+                  },
+                })
+                .catch(() => {});
+            },
           });
 
         // Distribute tokens proportionally across pages in the batch
