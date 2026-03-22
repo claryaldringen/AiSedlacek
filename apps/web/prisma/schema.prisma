@@ -25,6 +25,7 @@ model User {
   collections   Collection[]
   pages         Page[]
   tokenTransactions TokenTransaction[]
+  processingJobs ProcessingJob[]
 }
 
 model Account {
@@ -185,6 +186,28 @@ model GlossaryEntry {
   definition String
 
   @@index([documentId])
+}
+
+// ---- Processing Jobs (Inngest) ----
+
+model ProcessingJob {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         String   @default("running")  // running, completed, cancelled, error
+  totalPages     Int
+  completedPages Int      @default(0)
+  currentPageId  String?
+  currentStep    String?  // Human-readable current step description
+  errors         String[] // Array of error messages
+  pageIds        String[] // Original page IDs for reference
+  language       String   @default("cs")
+  mode           String   @default("transcribe+translate")
+  collectionId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, status])
 }
 
 // ---- Token Billing ----

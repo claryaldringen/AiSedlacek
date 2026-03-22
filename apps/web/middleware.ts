@@ -7,7 +7,8 @@ export function middleware(req: NextRequest): NextResponse {
     req.nextUrl.pathname.startsWith('/view') ||
     req.nextUrl.pathname.startsWith('/api/auth') ||
     req.nextUrl.pathname.startsWith('/api/public') ||
-    req.nextUrl.pathname.startsWith('/api/billing/webhook');
+    req.nextUrl.pathname.startsWith('/api/billing/webhook') ||
+    req.nextUrl.pathname.startsWith('/api/inngest');
 
   if (isPublic) {
     return NextResponse.next();
@@ -15,8 +16,7 @@ export function middleware(req: NextRequest): NextResponse {
 
   // Check for session cookie (NextAuth v5 uses authjs.session-token)
   const hasSession =
-    req.cookies.has('authjs.session-token') ||
-    req.cookies.has('__Secure-authjs.session-token');
+    req.cookies.has('authjs.session-token') || req.cookies.has('__Secure-authjs.session-token');
 
   if (!hasSession) {
     const loginUrl = new URL('/login', req.nextUrl.origin);

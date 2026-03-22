@@ -1,0 +1,123 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireUserId } from '@/lib/auth';
+import { prisma } from '@/lib/infrastructure/db';
+
+// GET /api/pages/process/status?jobId=xxx
+// Returns current job status from DB
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
+  const jobId = request.nextUrl.searchParams.get('jobId');
+  if (!jobId) {
+    return NextResponse.json({ error: 'Chybí jobId' }, { status: 400 });
+  }
+
+  const job = await prisma.processingJob.findUnique({
+    where: { id: jobId },
+  });
+
+  if (!job) {
+    return NextResponse.json({ error: 'Job nenalezen' }, { status: 404 });
+  }
+
+  // Verify job belongs to user
+  if (job.userId !== userId) {
+    return NextResponse.json({ error: 'Přístup zamítnut' }, { status: 403 });
+  }
+
+  // Fetch current state of pages for progress detail
+  const pages = await prisma.page.findMany({
+    where: { id: { in: job.pageIds } },
+    select: { id: true, status: true },
+  });
+
+  const donePages = pages.filter((p) => p.status === 'done').map((p) => p.id);
+  const errorPages = pages.filter((p) => p.status === 'error').map((p) => p.id);
+
+  return NextResponse.json({
+    jobId: job.id,
+    status: job.status,
+    totalPages: job.totalPages,
+    completedPages: job.completedPages,
+    currentPageId: job.currentPageId,
+    currentStep: job.currentStep,
+    errors: job.errors,
+    pageIds: job.pageIds,
+    progress: job.totalPages > 0 ? Math.round((job.completedPages / job.totalPages) * 100) : 0,
+    donePages,
+    errorPages,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+  });
+}
+
+// POST /api/pages/process/status — cancel a job
+// Body: { jobId, action: "cancel" }
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+  }
+
+  let body: { jobId?: string; action?: string } = {};
+  try {
+    body = await request.json();
+  } catch {
+    // No body
+  }
+
+  const { jobId, action } = body;
+
+  if (action !== 'cancel') {
+    return NextResponse.json({ error: 'Neznámá akce' }, { status: 400 });
+  }
+
+  let job;
+  if (jobId) {
+    job = await prisma.processingJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job || job.userId !== userId) {
+      return NextResponse.json({ error: 'Job nenalezen' }, { status: 404 });
+    }
+  } else {
+    // Find the most recent running job for this user
+    job = await prisma.processingJob.findFirst({
+      where: { userId, status: 'running' },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  if (!job || job.status !== 'running') {
+    return NextResponse.json({ error: 'Žádné aktivní zpracování' }, { status: 404 });
+  }
+
+  // Set job status to cancelled
+  await prisma.processingJob.update({
+    where: { id: job.id },
+    data: {
+      status: 'cancelled',
+      currentStep: 'Zrušeno uživatelem',
+    },
+  });
+
+  // Reset any processing pages back to pending
+  await prisma.page.updateMany({
+    where: {
+      id: { in: job.pageIds },
+      status: 'processing',
+    },
+    data: { status: 'pending' },
+  });
+
+  return NextResponse.json({ status: 'cancelled', jobId: job.id });
+}
