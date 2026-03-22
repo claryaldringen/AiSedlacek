@@ -82,6 +82,16 @@ export const processPages: any = inngest.createFunction(
       for (let i = 0; i < pageIds.length; i++) {
         const pageId = pageIds[i]!;
 
+        // Update progress during preparation
+        if (i % 3 === 0 || i === pageIds.length - 1) {
+          await prisma.processingJob.update({
+            where: { id: jobId },
+            data: {
+              currentStep: `Příprava stránek ${i + 1}/${pageIds.length}…`,
+            },
+          });
+        }
+
         if (typeof pageId !== 'string') {
           skippedCount.notFound++;
           continue;
