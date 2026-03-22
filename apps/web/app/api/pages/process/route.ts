@@ -4,9 +4,9 @@ import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
 import { requireUserId } from '@/lib/auth';
 import { checkBalance } from '@/lib/infrastructure/billing';
-import { inngest } from '@/lib/infrastructure/inngest';
+import { getProcessingQueue } from '@/lib/infrastructure/queue';
 
-// ── POST: Start processing via Inngest ───────────────────────
+// ── POST: Start processing via BullMQ ───────────────────────
 
 export async function POST(request: NextRequest): Promise<Response> {
   let userId: string;
@@ -105,17 +105,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     data: { status: 'processing', errorMessage: null },
   });
 
-  // Send event to Inngest
-  await inngest.send({
-    name: 'pages.process',
-    data: {
-      jobId: job.id,
-      userId,
-      pageIds: pageIds as string[],
-      collectionId: collectionId ?? undefined,
-      language: targetLang,
-      mode: processingMode,
-    },
+  // Enqueue BullMQ job
+  const queue = getProcessingQueue();
+  await queue.add('process-pages', {
+    jobId: job.id,
+    userId,
+    pageIds: pageIds as string[],
+    collectionId: collectionId ?? undefined,
+    language: targetLang,
+    mode: processingMode,
   });
 
   return Response.json({ jobId: job.id });

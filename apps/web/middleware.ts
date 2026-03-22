@@ -7,8 +7,7 @@ export function middleware(req: NextRequest): NextResponse {
     req.nextUrl.pathname.startsWith('/view') ||
     req.nextUrl.pathname.startsWith('/api/auth') ||
     req.nextUrl.pathname.startsWith('/api/public') ||
-    req.nextUrl.pathname.startsWith('/api/billing/webhook') ||
-    req.nextUrl.pathname.startsWith('/api/inngest');
+    req.nextUrl.pathname.startsWith('/api/billing/webhook');
 
   if (isPublic) {
     return NextResponse.next();

@@ -30,11 +30,11 @@ vi.mock('@/lib/infrastructure/billing', () => ({
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
-const mockInngestSend = vi.fn();
-vi.mock('@/lib/infrastructure/inngest', () => ({
-  inngest: {
-    send: (...args: unknown[]) => mockInngestSend(...args),
-  },
+const mockQueueAdd = vi.fn();
+vi.mock('@/lib/infrastructure/queue', () => ({
+  getProcessingQueue: () => ({
+    add: (...args: unknown[]) => mockQueueAdd(...args),
+  }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────
@@ -59,7 +59,7 @@ describe('POST /api/pages/process', () => {
     mockPageUpdateMany.mockResolvedValue({ count: 0 });
     mockProcessingJobFindFirst.mockResolvedValue(null); // No running job
     mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'running' });
-    mockInngestSend.mockResolvedValue(undefined);
+    mockQueueAdd.mockResolvedValue(undefined);
     // Default: ownership check returns matching pages
     mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
       const where = args?.where as Record<string, unknown> | undefined;
@@ -100,7 +100,7 @@ describe('POST /api/pages/process', () => {
     expect(json.jobId).toBe('existing-job');
   });
 
-  it('creates a ProcessingJob and sends Inngest event', async () => {
+  it('creates a ProcessingJob and enqueues BullMQ job', async () => {
     const res = await POST(makeRequest({ pageIds: ['page-1', 'page-2'] }));
 
     expect(res.status).toBe(200);
@@ -127,17 +127,15 @@ describe('POST /api/pages/process', () => {
       data: { status: 'processing', errorMessage: null },
     });
 
-    // Verify Inngest event was sent
-    expect(mockInngestSend).toHaveBeenCalledWith(
+    // Verify BullMQ job was enqueued
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'process-pages',
       expect.objectContaining({
-        name: 'pages.process',
-        data: expect.objectContaining({
-          jobId: 'job-123',
-          userId: 'test-user-id',
-          pageIds: ['page-1', 'page-2'],
-          language: 'cs',
-          mode: 'transcribe+translate',
-        }),
+        jobId: 'job-123',
+        userId: 'test-user-id',
+        pageIds: ['page-1', 'page-2'],
+        language: 'cs',
+        mode: 'transcribe+translate',
       }),
     );
   });

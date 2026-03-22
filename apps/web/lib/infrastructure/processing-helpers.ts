@@ -1,6 +1,6 @@
 /**
  * Shared helper functions for OCR page processing.
- * Used by both the API route (POST /api/pages/process) and the Inngest function.
+ * Used by the BullMQ worker (apps/web/worker/process-pages.ts).
  */
 
 import crypto from 'crypto';
