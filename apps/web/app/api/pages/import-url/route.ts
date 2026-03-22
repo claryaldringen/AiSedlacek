@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
-import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
@@ -193,7 +193,7 @@ async function handleImport(
   }
 
   // Save to local storage + run sharp operations with concurrency limit
-  const storage = new LocalStorageProvider();
+  const storage = getStorage();
   const storageResult = await storage.upload(buffer, urlFilename);
 
   const [thumbnailUrl, detectedBlank, dimensions] = await withSharpLimit(async () => {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
-import { LocalStorageProvider } from '@/lib/adapters/storage/local-storage';
+import { getStorage } from '@/lib/adapters/storage';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -211,7 +211,7 @@ export async function DELETE(
     }
 
     // Delete file from storage
-    const storage = new LocalStorageProvider();
+    const storage = getStorage();
     const filename = page.imageUrl.replace('/api/images/', '');
     try {
       await storage.delete(filename);
