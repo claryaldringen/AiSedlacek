@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { requireUserId } from '@/lib/auth';
-import { getActiveJob } from '@/lib/infrastructure/processing-jobs';
 import { prisma } from '@/lib/infrastructure/db';
+
+// On Vercel serverless, there is no persistent in-memory state.
+// We cannot tell if a 'processing' page is actively being handled
+// by another function instance. To avoid false positives (reporting
+// pages as interrupted while they are still processing), we simply
+// return empty — the automatic interruption banner won't trigger.
+//
+// Users can still manually reset stuck pages via POST to this endpoint.
 
 export async function GET(): Promise<NextResponse> {
   let userId: string;
@@ -11,21 +18,9 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
   }
 
-  // If there's an active job, pages aren't truly interrupted
-  const job = getActiveJob(userId);
-  if (job && !job.completed) {
-    return NextResponse.json({ count: 0, pageIds: [] });
-  }
-
-  const pages = await prisma.page.findMany({
-    where: { userId, status: 'processing' },
-    select: { id: true },
-  });
-
-  return NextResponse.json({
-    count: pages.length,
-    pageIds: pages.map((p) => p.id),
-  });
+  // Never auto-detect interrupted pages on serverless
+  void userId;
+  return NextResponse.json({ count: 0, pageIds: [] });
 }
 
 export async function POST(): Promise<NextResponse> {
