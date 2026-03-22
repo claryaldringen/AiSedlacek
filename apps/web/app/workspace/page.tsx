@@ -10,13 +10,14 @@ import { ImportDialog, type UploadedPage } from '@/components/ImportDialog';
 import { DocumentPanel } from '@/components/DocumentPanel';
 import { CollectionContextDialog } from '@/components/CollectionContextDialog';
 import { ShareDialog } from '@/components/ShareDialog';
-import type { Collection } from '@/components/Sidebar';
+import type { Collection, Workspace } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
 import { useProcessingJob } from '@/hooks/useProcessingJob';
 import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
+import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -32,10 +33,16 @@ function WorkspaceContent(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Navigation state – synced with URL ?collection=ID
+  // Workspace state
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const selectedWorkspaceId = searchParams.get('workspace');
+
+  // Navigation state – synced with URL ?workspace=WSID&collection=CID
   const selectedCollectionId = searchParams.get('collection');
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [loadingCollections, setLoadingCollections] = useState(true);
+  // Loading state managed internally by loadCollections callback
+  const [, setLoadingCollections] = useState(true);
 
   // Pages
   const [pages, setPages] = useState<PageItem[]>([]);
@@ -67,6 +74,9 @@ function WorkspaceContent(): React.JSX.Element {
 
   // Create collection dialog
   const [createCollectionDialogOpen, setCreateCollectionDialogOpen] = useState(false);
+
+  // Create workspace dialog
+  const [createWorkspaceDialogOpen, setCreateWorkspaceDialogOpen] = useState(false);
 
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
@@ -127,6 +137,35 @@ function WorkspaceContent(): React.JSX.Element {
     loadingPages,
   });
 
+  // ---- Load workspaces ----
+  const loadWorkspaces = useCallback(async (): Promise<void> => {
+    setLoadingWorkspaces(true);
+    try {
+      const res = await fetch('/api/workspaces');
+      if (!res.ok) return;
+      const data = (await res.json()) as Workspace[];
+      setWorkspaces(data);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingWorkspaces(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
+
+  // Auto-select home workspace when workspaces load and none is selected
+  useEffect(() => {
+    if (loadingWorkspaces || workspaces.length === 0) return;
+    if (selectedWorkspaceId !== null) return;
+    const home = workspaces.find((ws) => ws.type === 'home');
+    if (home) {
+      router.replace(`/workspace?workspace=${home.id}`);
+    }
+  }, [loadingWorkspaces, workspaces, selectedWorkspaceId, router]);
+
   // ---- Load collections ----
   const loadCollections = useCallback(async (): Promise<void> => {
     setLoadingCollections(true);
@@ -174,6 +213,15 @@ function WorkspaceContent(): React.JSX.Element {
     void loadPages(selectedCollectionId);
   }, [loadPages, selectedCollectionId]);
 
+  // ---- Workspace navigation ----
+  const handleWorkspaceSelect = useCallback(
+    (id: string): void => {
+      router.push(`/workspace?workspace=${id}`);
+      setPanelResult(null);
+    },
+    [router],
+  );
+
   // ---- Collection navigation (URL-based for browser back/forward) ----
   const fixDocumentContexts = useCallback(
     async (collectionId: string): Promise<void> => {
@@ -184,7 +232,7 @@ function WorkspaceContent(): React.JSX.Element {
           method: 'POST',
         });
         if (!res.ok || !res.body) {
-          setError('Oprava kontextů selhala');
+          setError('Oprava kontextu selhala');
           return;
         }
         const reader = res.body.getReader();
@@ -215,14 +263,16 @@ function WorkspaceContent(): React.JSX.Element {
 
   const handleCollectionSelect = useCallback(
     (id: string | null): void => {
+      const wsParam = selectedWorkspaceId ? `workspace=${selectedWorkspaceId}` : '';
       if (id === null) {
-        router.push('/workspace');
+        router.push(wsParam ? `/workspace?${wsParam}` : '/workspace');
       } else {
-        router.push(`/workspace?collection=${id}`);
+        const params = wsParam ? `${wsParam}&collection=${id}` : `collection=${id}`;
+        router.push(`/workspace?${params}`);
       }
       setPanelResult(null);
     },
-    [router],
+    [router, selectedWorkspaceId],
   );
 
   const selectedCollection =
@@ -336,9 +386,9 @@ function WorkspaceContent(): React.JSX.Element {
       try {
         data = (await res.json()) as { context?: string; error?: string };
       } catch {
-        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+        throw new Error(`Server vratil ${res.status} bez platne odpovedi`);
       }
-      if (!res.ok) throw new Error(data.error ?? 'Generování kontextu selhalo');
+      if (!res.ok) throw new Error(data.error ?? 'Generovani kontextu selhalo');
       const newContext = data.context ?? '';
       // Update collection in local state
       setCollections((prev) =>
@@ -560,14 +610,14 @@ function WorkspaceContent(): React.JSX.Element {
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
       setRegenerating(true);
-      setRegenerateStep('Připravuji…');
+      setRegenerateStep('Pripravuji...');
       setRegenerateProgress(0);
       setPanelResult(null);
       try {
         // Try re-parsing from stored rawResponse first (free, no API call)
         const page = pages.find((p) => p.id === pageId);
         if (page?.document) {
-          setRegenerateStep('Zkouším opravit parsování…');
+          setRegenerateStep('Zkousim opravit parsovani...');
           const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, {
             method: 'POST',
           });
@@ -644,7 +694,7 @@ function WorkspaceContent(): React.JSX.Element {
           body: JSON.stringify({ status: 'pending' }),
         });
         // Process again via Inngest background job
-        setRegenerateStep('Volám model…');
+        setRegenerateStep('Volam model...');
         const response = await fetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -711,7 +761,7 @@ function WorkspaceContent(): React.JSX.Element {
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
+        setError(err instanceof Error ? err.message : 'Pregenerovani selhalo');
       } finally {
         setRegenerating(false);
         setRegenerateStep(undefined);
@@ -810,12 +860,11 @@ function WorkspaceContent(): React.JSX.Element {
 
   return (
     <AppShell
-      selectedCollectionId={selectedCollectionId}
-      selectedCollection={selectedCollection}
-      collections={collections}
-      loadingCollections={loadingCollections}
-      onCollectionSelect={handleCollectionSelect}
-      onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
+      workspaces={workspaces}
+      selectedWorkspaceId={selectedWorkspaceId}
+      onWorkspaceSelect={handleWorkspaceSelect}
+      onCreateWorkspace={() => setCreateWorkspaceDialogOpen(true)}
+      loadingWorkspaces={loadingWorkspaces}
     >
       {/* Toolbar */}
       <Toolbar
@@ -897,11 +946,11 @@ function WorkspaceContent(): React.JSX.Element {
         {/* Collection info cards: structured data + context + metadata (3-column) */}
         {selectedCollection && (
           <div className="mx-4 mt-3 grid gap-3 lg:grid-cols-3">
-            {/* Strukturovaná data — 1/3 */}
+            {/* Strukturovana data — 1/3 */}
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
                 <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                  Strukturovaná data
+                  Strukturovana data
                 </summary>
                 <div className="border-t border-slate-100 px-4 py-3">
                   <CollectionMetadataEditor
@@ -920,12 +969,12 @@ function WorkspaceContent(): React.JSX.Element {
               </details>
             </div>
 
-            {/* Kontext díla — 1/3 */}
+            {/* Kontext dila — 1/3 */}
             {selectedCollection.context ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext díla: {selectedCollection.name}
+                    Kontext dila: {selectedCollection.name}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 prose prose-sm prose-stone max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -955,7 +1004,7 @@ function WorkspaceContent(): React.JSX.Element {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                             />
                           </svg>
-                          {fixingContextsProgress ?? 'Opravuji…'}
+                          {fixingContextsProgress ?? 'Opravuji...'}
                         </>
                       ) : (
                         <>
@@ -972,7 +1021,7 @@ function WorkspaceContent(): React.JSX.Element {
                               d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
                             />
                           </svg>
-                          Opravit kontext dokumentů podle kontextu díla
+                          Opravit kontext dokumentu podle kontextu dila
                         </>
                       )}
                     </button>
@@ -983,7 +1032,7 @@ function WorkspaceContent(): React.JSX.Element {
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext díla: {selectedCollection.name}
+                    Kontext dila: {selectedCollection.name}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 text-sm text-slate-400">
                     Kontext nebyl nastaven.
@@ -1002,7 +1051,7 @@ function WorkspaceContent(): React.JSX.Element {
                   {/* Status counts */}
                   <div>
                     <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Stav stránek
+                      Stav stranek
                     </h4>
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between">
@@ -1021,7 +1070,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats.pending > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Čeká</span>
+                          <span className="text-slate-500">Ceka</span>
                           <span className="font-medium text-slate-700">
                             {selectedCollection.stats.pending}
                           </span>
@@ -1037,7 +1086,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats.blank > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Prázdné</span>
+                          <span className="text-slate-400">Prazdne</span>
                           <span className="font-medium text-slate-500">
                             {selectedCollection.stats.blank}
                           </span>
@@ -1080,7 +1129,7 @@ function WorkspaceContent(): React.JSX.Element {
                     selectedCollection.stats.outputTokens > 0) && (
                     <div>
                       <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Spotřeba
+                        Spotreba
                       </h4>
                       <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
@@ -1233,6 +1282,16 @@ function WorkspaceContent(): React.JSX.Element {
         onCreated={(collection) => {
           void loadCollections();
           handleCollectionSelect(collection.id);
+        }}
+      />
+
+      {/* Create workspace dialog */}
+      <CreateWorkspaceDialog
+        open={createWorkspaceDialogOpen}
+        onClose={() => setCreateWorkspaceDialogOpen(false)}
+        onCreated={(workspace) => {
+          setWorkspaces((prev) => [...prev, workspace]);
+          handleWorkspaceSelect(workspace.id);
         }}
       />
 

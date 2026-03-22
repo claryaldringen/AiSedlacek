@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import Link from 'next/link';
 
 export interface Collection {
   id: string;
@@ -32,145 +34,256 @@ export interface Collection {
   abstract?: string | null;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  type: 'home' | 'public' | 'shared';
+  ownerId: string | null;
+  inviteCode: string | null;
+  createdAt: string;
+  _count: { items: number; members: number };
+  owner: { id: string; name: string | null; email: string | null } | null;
+}
+
+interface BalanceData {
+  balance: number;
+}
+
 interface SidebarProps {
-  selectedCollectionId: string | null;
-  onCollectionSelect: (id: string | null) => void;
-  collections: Collection[];
-  loadingCollections: boolean;
-  onMovePages?: (pageIds: string[], targetCollectionId: string | null) => void;
+  workspaces: Workspace[];
+  selectedWorkspaceId: string | null;
+  onWorkspaceSelect: (id: string) => void;
+  onCreateWorkspace: () => void;
+  loadingWorkspaces: boolean;
+}
+
+function formatBalance(balance: number): string {
+  if (balance >= 1_000_000) {
+    return (balance / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  }
+  if (balance >= 1_000) {
+    return (balance / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
+  }
+  return balance.toLocaleString('cs-CZ');
+}
+
+function WorkspaceIcon({ type }: { type: 'home' | 'public' | 'shared' }): React.JSX.Element {
+  if (type === 'home') {
+    // House icon
+    return (
+      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+        />
+      </svg>
+    );
+  }
+  if (type === 'public') {
+    // Globe icon
+    return (
+      <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5a17.92 17.92 0 0 1-8.716-2.247m0 0A8.966 8.966 0 0 1 3 12c0-1.97.633-3.794 1.708-5.278"
+        />
+      </svg>
+    );
+  }
+  // Users icon (shared)
+  return (
+    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
+      />
+    </svg>
+  );
 }
 
 export function Sidebar({
-  selectedCollectionId,
-  onCollectionSelect,
-  collections,
-  loadingCollections,
-  onMovePages,
+  workspaces,
+  selectedWorkspaceId,
+  onWorkspaceSelect,
+  onCreateWorkspace,
+  loadingWorkspaces,
 }: SidebarProps): React.JSX.Element {
-  const [dragOverId, setDragOverId] = useState<string | 'all' | null>(null);
+  const { data: session } = useSession();
+  const [balance, setBalance] = useState<number | null>(null);
 
-  const getDraggedPageIds = useCallback((e: React.DragEvent): string[] => {
-    try {
-      const raw = e.dataTransfer.getData('application/x-page-ids');
-      if (raw) return JSON.parse(raw) as string[];
-    } catch {
-      // ignore
-    }
-    return [];
-  }, []);
+  // Fetch balance on mount
+  useEffect(() => {
+    if (!session?.user) return;
+    const fetchBalance = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/billing/balance');
+        if (res.ok) {
+          const data = (await res.json()) as BalanceData;
+          setBalance(data.balance);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void fetchBalance();
+  }, [session?.user]);
+
+  const user = session?.user;
+  const initials = user
+    ? (user.name ?? user.email ?? '?')
+        .split(/[\s@]/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((s) => s[0]?.toUpperCase() ?? '')
+        .join('')
+    : '?';
+
+  const displayName = user?.name ?? user?.email ?? '';
+  const formattedBalance = balance !== null ? formatBalance(balance) + ' tokenu' : null;
+
+  // Sort workspaces: home first, then public, then shared
+  const sortedWorkspaces = [...workspaces].sort((a, b) => {
+    const order = { home: 0, public: 1, shared: 2 };
+    return (order[a.type] ?? 3) - (order[b.type] ?? 3);
+  });
+
+  const homeWorkspaces = sortedWorkspaces.filter((ws) => ws.type === 'home');
+  const publicWorkspaces = sortedWorkspaces.filter((ws) => ws.type === 'public');
+  const sharedWorkspaces = sortedWorkspaces.filter((ws) => ws.type === 'shared');
 
   return (
-    <aside className="flex h-full w-56 flex-col bg-slate-800 text-slate-200">
-      {/* Sidebar content */}
-      <div className="flex-1 overflow-y-auto py-3">
-        {/* All items */}
-        <button
-          onClick={() => onCollectionSelect(null)}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            setDragOverId('all');
-          }}
-          onDragLeave={() => setDragOverId(null)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOverId(null);
-            const ids = getDraggedPageIds(e);
-            if (ids.length > 0) onMovePages?.(ids, null);
-          }}
-          className={[
-            'flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-            dragOverId === 'all'
-              ? 'bg-blue-500/30 text-white ring-1 ring-inset ring-blue-400'
-              : selectedCollectionId === null
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-300 hover:bg-slate-700 hover:text-white',
-          ].join(' ')}
-        >
-          <svg
-            className="h-4 w-4 shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"
-            />
-          </svg>
-          <span className="truncate font-medium">Všechny dokumenty</span>
-        </button>
+    <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-50">
+      {/* User info */}
+      {user && (
+        <div className="border-b border-slate-200 p-3">
+          <div className="flex items-center gap-2">
+            {/* Avatar */}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-semibold text-white">
+              {user.image ? (
+                <img
+                  src={user.image}
+                  alt={user.name ?? 'Avatar'}
+                  className="h-8 w-8 rounded-full"
+                />
+              ) : (
+                initials
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-slate-800">{displayName}</p>
+              {formattedBalance && (
+                <p className="text-xs text-slate-500">{formattedBalance}</p>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-3 text-xs">
+            <Link
+              href="/workspace/billing"
+              className="font-medium text-blue-600 transition-colors hover:text-blue-800"
+            >
+              Dobit
+            </Link>
+            <button
+              onClick={() => void signOut()}
+              className="font-medium text-slate-500 transition-colors hover:text-slate-700"
+            >
+              Odhlasit
+            </button>
+          </div>
+        </div>
+      )}
 
-        {/* Divider */}
-        <div className="mx-4 my-2 border-t border-slate-700" />
-
-        {/* Collections label */}
-        <div className="mb-1 px-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          Svazky
+      {/* Workspace list */}
+      <nav className="flex-1 overflow-y-auto p-2">
+        {/* Label */}
+        <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Workspaces
         </div>
 
-        {loadingCollections ? (
-          <div className="px-4 py-2 text-xs text-slate-500">Načítám…</div>
-        ) : collections.length === 0 ? (
-          <div className="px-4 py-2 text-xs text-slate-500">Žádné svazky</div>
+        {loadingWorkspaces ? (
+          <div className="px-2 py-2 text-xs text-slate-400">Nacitam...</div>
         ) : (
-          collections.map((col) => (
-            <React.Fragment key={col.id}>
-            <button
-              onClick={() => onCollectionSelect(col.id)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                setDragOverId(col.id);
-              }}
-              onDragLeave={() => setDragOverId(null)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOverId(null);
-                const ids = getDraggedPageIds(e);
-                if (ids.length > 0) onMovePages?.(ids, col.id);
-              }}
-              className={[
-                'flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-                dragOverId === col.id
-                  ? 'bg-blue-500/30 text-white ring-1 ring-inset ring-blue-400'
-                  : selectedCollectionId === col.id
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-700 hover:text-white',
-              ].join(' ')}
-            >
-              <svg
-                className="h-4 w-4 shrink-0 text-yellow-400"
-                fill="currentColor"
-                viewBox="0 0 24 24"
+          <>
+            {/* Home workspace */}
+            {homeWorkspaces.map((ws) => (
+              <button
+                key={ws.id}
+                onClick={() => onWorkspaceSelect(ws.id)}
+                className={[
+                  'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+                  selectedWorkspaceId === ws.id
+                    ? 'bg-slate-200 font-medium text-slate-900'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                ].join(' ')}
               >
-                <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 12h-15a4.483 4.483 0 0 0-3 1.146Z" />
-              </svg>
-              <span className="flex-1 truncate">{col.name}</span>
-              {col.isPublic && (
-                <svg
-                  className="h-3 w-3 shrink-0 text-blue-400"
-                  aria-label="Veřejně sdíleno"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <title>Veřejně sdíleno</title>
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
-                  />
-                </svg>
-              )}
-              <span className="shrink-0 text-xs opacity-60">{col._count.pages}</span>
-            </button>
-            </React.Fragment>
-          ))
+                <WorkspaceIcon type="home" />
+                <span className="truncate">{ws.name}</span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">
+                  {ws._count.items}
+                </span>
+              </button>
+            ))}
+
+            {/* Public workspace */}
+            {publicWorkspaces.map((ws) => (
+              <button
+                key={ws.id}
+                onClick={() => onWorkspaceSelect(ws.id)}
+                className={[
+                  'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+                  selectedWorkspaceId === ws.id
+                    ? 'bg-slate-200 font-medium text-slate-900'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                ].join(' ')}
+              >
+                <WorkspaceIcon type="public" />
+                <span className="truncate">{ws.name}</span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">
+                  {ws._count.items}
+                </span>
+              </button>
+            ))}
+
+            {/* Divider before shared workspaces */}
+            {sharedWorkspaces.length > 0 && <div className="my-2 h-px bg-slate-200" />}
+
+            {/* Shared workspaces */}
+            {sharedWorkspaces.map((ws) => (
+              <button
+                key={ws.id}
+                onClick={() => onWorkspaceSelect(ws.id)}
+                className={[
+                  'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+                  selectedWorkspaceId === ws.id
+                    ? 'bg-slate-200 font-medium text-slate-900'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                ].join(' ')}
+              >
+                <WorkspaceIcon type="shared" />
+                <span className="truncate">{ws.name}</span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">
+                  {ws._count.items}
+                </span>
+              </button>
+            ))}
+          </>
         )}
+      </nav>
+
+      {/* Create workspace button at bottom */}
+      <div className="border-t border-slate-200 p-2">
+        <button
+          onClick={onCreateWorkspace}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+        >
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          <span>Novy workspace</span>
+        </button>
       </div>
     </aside>
   );
