@@ -230,22 +230,32 @@ export const processPages: any = inngest.createFunction(
       id: p.pageId,
     }));
 
+    // Keep batches small for serverless — max 3 pages per batch.
+    // Large batches (10+ images) cause Claude API timeouts on Vercel.
     const batches = createBatches(batchPages, {
-      inputTokenBudget: 180_000,
-      maxOutputTokens: 16_000,
-      avgOutputPerPage,
+      inputTokenBudget: 60_000,
+      maxOutputTokens: 8_000,
+      avgOutputPerPage: Math.max(avgOutputPerPage, 2500),
     });
+    // Hard cap: split any batch larger than 3 pages
+    const cappedBatches: typeof batches = [];
+    for (const batch of batches) {
+      for (let i = 0; i < batch.length; i += 3) {
+        cappedBatches.push(batch.slice(i, i + 3));
+      }
+    }
+    const finalBatches = cappedBatches;
 
     // ── Step 4: Process each batch ───────────────────────────────
-    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-      const batch = batches[batchIdx]!;
+    for (let batchIdx = 0; batchIdx < finalBatches.length; batchIdx++) {
+      const batch = finalBatches[batchIdx]!;
 
       // Check balance before each batch
       const balanceOk = await step.run(`check-balance-${batchIdx}`, async () => {
         const { sufficient } = await checkBalance(userId);
         if (!sufficient) {
           // Reset remaining pages to pending
-          const remainingPageIds = batches
+          const remainingPageIds = finalBatches
             .slice(batchIdx)
             .flat()
             .map((p) => p.pageId);
@@ -281,7 +291,7 @@ export const processPages: any = inngest.createFunction(
         await prisma.processingJob.update({
           where: { id: jobId },
           data: {
-            currentStep: `Zpracovávám dávku ${batchIdx + 1}/${batches.length} (${batch.length} stránek)…`,
+            currentStep: `Zpracovávám dávku ${batchIdx + 1}/${finalBatches.length} (${batch.length} stránek)…`,
           },
         });
 
@@ -327,7 +337,7 @@ export const processPages: any = inngest.createFunction(
                 .update({
                   where: { id: jobId },
                   data: {
-                    currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
+                    currentStep: `Dávka ${batchIdx + 1}/${finalBatches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
                   },
                 })
                 .catch(() => {});
@@ -409,12 +419,12 @@ export const processPages: any = inngest.createFunction(
           where: { id: jobId },
           data: {
             completedPages: completed + batchCompleted,
-            currentStep: `Dávka ${batchIdx + 1}/${batches.length} hotova`,
+            currentStep: `Dávka ${batchIdx + 1}/${finalBatches.length} hotova`,
           },
         });
 
         console.log(
-          `[Inngest] Batch ${batchIdx + 1}/${batches.length} done: ${batch.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
+          `[Inngest] Batch ${batchIdx + 1}/${finalBatches.length} done: ${batch.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
         );
 
         return {
@@ -429,7 +439,7 @@ export const processPages: any = inngest.createFunction(
       // If deduction failed, stop further batches
       if (batchResult.insufficientTokens) {
         // Reset remaining batches' pages to pending
-        const remainingPageIds = batches
+        const remainingPageIds = finalBatches
           .slice(batchIdx + 1)
           .flat()
           .map((p) => p.pageId);
@@ -465,7 +475,7 @@ export const processPages: any = inngest.createFunction(
 
       if (jobStatus === 'cancelled') {
         await step.run('cancel-cleanup', async () => {
-          const remainingPageIds = batches
+          const remainingPageIds = finalBatches
             .slice(batchIdx + 1)
             .flat()
             .map((p) => p.pageId);
