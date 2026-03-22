@@ -163,19 +163,27 @@ async function handleImport(
     'gray',
     'bitonal',
   ]);
-  const ext = (pathParts[pathParts.length - 1] ?? '').match(/\.[a-zA-Z]+$/)?.[0] ?? '.jpg';
-  const pageIdSegment = [...pathParts]
-    .reverse()
-    .find(
-      (seg) =>
-        !SKIP_SEGMENTS.has(seg.toLowerCase()) &&
-        !/^\d$/.test(seg) &&
-        !/\.[a-z]{2,4}$/i.test(seg) &&
-        /\d/.test(seg),
-    );
+  const lastSegment = pathParts[pathParts.length - 1] ?? '';
+  const ext = lastSegment.match(/\.[a-zA-Z0-9]+$/)?.[0] ?? '.jpg';
+
+  // Prefer the actual filename (last segment) if it contains a number
+  const filenameHasNumber = /\d/.test(lastSegment) && /\.[a-z0-9]{2,4}$/i.test(lastSegment);
+  const pageIdSegment = filenameHasNumber
+    ? null // skip path scan, use filename directly
+    : [...pathParts]
+        .reverse()
+        .find(
+          (seg) =>
+            !SKIP_SEGMENTS.has(seg.toLowerCase()) &&
+            !/^\d$/.test(seg) &&
+            !/\.[a-z]{2,4}$/i.test(seg) &&
+            /\d/.test(seg),
+        );
   let urlFilename: string;
   if (cdFilename) {
     urlFilename = cdFilename;
+  } else if (filenameHasNumber) {
+    urlFilename = decodeURIComponent(lastSegment);
   } else if (pageIdSegment) {
     urlFilename = decodeURIComponent(pageIdSegment) + ext;
   } else {
