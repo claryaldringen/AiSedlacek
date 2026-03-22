@@ -166,6 +166,24 @@ export function CollectionContextDialog({
             </div>
           )}
 
+          {(fetching || merging) && (
+            <div className="mb-3 overflow-hidden rounded border border-blue-200 bg-blue-50">
+              <div className="flex items-center gap-2 px-3 py-2 text-sm text-blue-700">
+                <svg className="h-4 w-4 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span>{fetching ? 'Stahuji a zpracovávám kontext z URL...' : 'Slučuji text s kontextem...'}</span>
+              </div>
+              <div className="h-1 bg-blue-200">
+                <div
+                  className="h-full w-2/5 rounded-full bg-blue-600"
+                  style={{ animation: 'indeterminate 1.5s ease-in-out infinite' }}
+                />
+              </div>
+            </div>
+          )}
+
           {editing ? (
             <textarea
               value={context}
