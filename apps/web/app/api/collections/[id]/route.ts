@@ -67,13 +67,19 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
     }
 
-    const { name, description, context, contextUrls, isPublic, slug } = body as {
+    const { name, description, context, contextUrls, isPublic, slug, title, author, yearFrom, yearTo, librarySignature, abstract: abstractText } = body as {
       name?: unknown;
       description?: unknown;
       context?: unknown;
       contextUrls?: unknown;
       isPublic?: unknown;
       slug?: unknown;
+      title?: unknown;
+      author?: unknown;
+      yearFrom?: unknown;
+      yearTo?: unknown;
+      librarySignature?: unknown;
+      abstract?: unknown;
     };
 
     const data: {
@@ -83,6 +89,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       contextUrls?: string[];
       isPublic?: boolean;
       slug?: string | null;
+      title?: string | null;
+      author?: string | null;
+      yearFrom?: number | null;
+      yearTo?: number | null;
+      librarySignature?: string | null;
+      abstract?: string | null;
     } = {};
 
     if (typeof name === 'string' && name.trim() !== '') {
@@ -98,6 +110,38 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       data.contextUrls = contextUrls
         .filter((u): u is string => typeof u === 'string' && u.trim() !== '')
         .map((u) => u.trim());
+    }
+
+    // Structured metadata fields
+    if (typeof title === 'string') {
+      data.title = title.trim() || null;
+    } else if (title === null) {
+      data.title = null;
+    }
+    if (typeof author === 'string') {
+      data.author = author.trim() || null;
+    } else if (author === null) {
+      data.author = null;
+    }
+    if (typeof yearFrom === 'number') {
+      data.yearFrom = yearFrom;
+    } else if (yearFrom === null) {
+      data.yearFrom = null;
+    }
+    if (typeof yearTo === 'number') {
+      data.yearTo = yearTo;
+    } else if (yearTo === null) {
+      data.yearTo = null;
+    }
+    if (typeof librarySignature === 'string') {
+      data.librarySignature = librarySignature.trim() || null;
+    } else if (librarySignature === null) {
+      data.librarySignature = null;
+    }
+    if (typeof abstractText === 'string') {
+      data.abstract = abstractText.trim() || null;
+    } else if (abstractText === null) {
+      data.abstract = null;
     }
 
     // Process sharing fields before empty-check

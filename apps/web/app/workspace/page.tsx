@@ -15,6 +15,7 @@ import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
 import { useProcessingJob } from '@/hooks/useProcessingJob';
 import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
+import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -59,6 +60,9 @@ function WorkspaceContent(): React.JSX.Element {
 
   // Blank detection
   const [detectingBlank, setDetectingBlank] = useState(false);
+
+  // Generate context from selected pages
+  const [generatingContext, setGeneratingContext] = useState(false);
 
   // Processing mode
   const [processingMode, setProcessingMode] = useState<'transcribe+translate' | 'translate'>(
@@ -312,6 +316,42 @@ function WorkspaceContent(): React.JSX.Element {
       setDetectingBlank(false);
     }
   }, [pages]);
+
+  // ---- Generate context from selected pages ----
+  const handleGenerateContext = useCallback(async (): Promise<void> => {
+    if (!selectedCollectionId) return;
+    const donePageIds = Array.from(selected).filter((id) => {
+      const p = pages.find((pg) => pg.id === id);
+      return p && p.status === 'done';
+    });
+    if (donePageIds.length === 0) return;
+
+    setGeneratingContext(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/collections/${selectedCollectionId}/generate-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageIds: donePageIds }),
+      });
+      let data: { context?: string; error?: string };
+      try {
+        data = (await res.json()) as { context?: string; error?: string };
+      } catch {
+        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+      }
+      if (!res.ok) throw new Error(data.error ?? 'Generování kontextu selhalo');
+      const newContext = data.context ?? '';
+      // Update collection in local state
+      setCollections((prev) =>
+        prev.map((c) => (c.id === selectedCollectionId ? { ...c, context: newContext } : c)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Chyba');
+    } finally {
+      setGeneratingContext(false);
+    }
+  }, [selectedCollectionId, selected, pages, setError]);
 
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
@@ -680,6 +720,12 @@ function WorkspaceContent(): React.JSX.Element {
     return localPending + collectionPageEstimate;
   }, [selected, collections, pages]);
   const doneCount = pages.filter((p) => p.status === 'done').length;
+  const doneSelectedCount = useMemo(() => {
+    return Array.from(selected).filter((id) => {
+      const p = pages.find((pg) => pg.id === id);
+      return p && p.status === 'done';
+    }).length;
+  }, [selected, pages]);
 
   // Drag-and-drop on content area to open upload
   const handleContentDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
@@ -810,6 +856,9 @@ function WorkspaceContent(): React.JSX.Element {
             ? (collections.find((c) => c.id === selectedCollectionId)?.isPublic ?? false)
             : (selectedGridCollection?.isPublic ?? false)
         }
+        onGenerateContext={selectedCollectionId ? () => void handleGenerateContext() : undefined}
+        generatingContext={generatingContext}
+        doneSelectedCount={doneSelectedCount}
       />
 
       {/* Error banner */}
@@ -844,12 +893,35 @@ function WorkspaceContent(): React.JSX.Element {
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
       >
-        {/* Collection info cards: context + metadata */}
+        {/* Collection info cards: structured data + context + metadata (3-column) */}
         {selectedCollection && (
-          <div className="mx-4 mt-3 flex flex-col gap-3 lg:flex-row">
-            {/* Context card — 2/3 */}
-            {selectedCollection.context && (
-              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:w-2/3">
+          <div className="mx-4 mt-3 grid gap-3 lg:grid-cols-3">
+            {/* Strukturovaná data — 1/3 */}
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+              <details>
+                <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                  Strukturovaná data
+                </summary>
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <CollectionMetadataEditor
+                    collectionId={selectedCollection.id}
+                    metadata={{
+                      title: selectedCollection.title,
+                      author: selectedCollection.author,
+                      yearFrom: selectedCollection.yearFrom,
+                      yearTo: selectedCollection.yearTo,
+                      librarySignature: selectedCollection.librarySignature,
+                      abstract: selectedCollection.abstract,
+                    }}
+                    onSaved={() => void loadCollections()}
+                  />
+                </div>
+              </details>
+            </div>
+
+            {/* Kontext díla — 1/3 */}
+            {selectedCollection.context ? (
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
                     Kontext díla: {selectedCollection.name}
@@ -906,15 +978,21 @@ function WorkspaceContent(): React.JSX.Element {
                   </div>
                 </details>
               </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                <details>
+                  <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                    Kontext díla: {selectedCollection.name}
+                  </summary>
+                  <div className="border-t border-slate-100 px-4 py-3 text-sm text-slate-400">
+                    Kontext nebyl nastaven.
+                  </div>
+                </details>
+              </div>
             )}
 
             {/* Metadata card — 1/3 */}
-            <div
-              className={[
-                'overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm',
-                selectedCollection.context ? 'lg:w-1/3' : 'w-full',
-              ].join(' ')}
-            >
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
                 <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
                   Metadata svazku

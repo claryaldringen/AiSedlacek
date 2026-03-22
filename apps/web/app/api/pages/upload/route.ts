@@ -5,6 +5,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
+import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
@@ -134,6 +135,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Neznámá chyba';
       errors.push({ filename, error: message });
+    }
+  }
+
+  // Auto-set order for created pages using natural sort by filename
+  if (created.length > 0 && resolvedCollectionId) {
+    const maxOrderResult = await prisma.page.aggregate({
+      where: { collectionId: resolvedCollectionId, id: { notIn: created.map((p) => p.id) } },
+      _max: { order: true },
+    });
+    const startOrder = (maxOrderResult._max.order ?? -1) + 1;
+
+    const sorted = [...created].sort((a, b) => naturalCompare(a.filename, b.filename));
+    for (let i = 0; i < sorted.length; i++) {
+      await prisma.page.update({
+        where: { id: sorted[i]!.id },
+        data: { order: startOrder + i },
+      });
     }
   }
 

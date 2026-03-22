@@ -24,7 +24,7 @@ export const processPages: any = inngest.createFunction(
     triggers: [{ event: 'pages.process' }],
   },
   async ({ event, step }) => {
-    const { jobId, userId, pageIds, collectionId, language, mode } = event.data as {
+    const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = event.data as {
       jobId: string;
       userId: string;
       pageIds: string[];
@@ -32,6 +32,20 @@ export const processPages: any = inngest.createFunction(
       language: string;
       mode: ProcessingMode;
     };
+
+    // Sort pageIds by their page's order field so processing follows natural order
+    const pageIds = await step.run('sort-pages-by-order', async () => {
+      const pages = await prisma.page.findMany({
+        where: { id: { in: rawPageIds } },
+        select: { id: true, order: true },
+        orderBy: { order: 'asc' },
+      });
+      // Keep pages with order first (sorted), then append any without order in original order
+      const ordered = pages.filter((p) => p.order !== null).map((p) => p.id);
+      const orderedSet = new Set(ordered);
+      const unordered = rawPageIds.filter((id) => !orderedSet.has(id));
+      return [...ordered, ...unordered];
+    });
 
     const total = pageIds.length;
     let completed = 0;

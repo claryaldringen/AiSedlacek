@@ -30,6 +30,9 @@ interface ToolbarProps {
   detectingBlank?: boolean;
   onShareCollection?: () => void;
   isCollectionPublic?: boolean;
+  onGenerateContext?: () => void;
+  generatingContext?: boolean;
+  doneSelectedCount?: number;
 }
 
 export function Toolbar({
@@ -59,6 +62,9 @@ export function Toolbar({
   detectingBlank,
   onShareCollection,
   isCollectionPublic,
+  onGenerateContext,
+  generatingContext,
+  doneSelectedCount,
 }: ToolbarProps): React.JSX.Element {
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
@@ -326,6 +332,50 @@ export function Toolbar({
               </svg>
               Smazat ({selectedCount})
             </button>
+
+            {/* Generate context from selected done pages */}
+            {onGenerateContext && (doneSelectedCount ?? 0) > 0 && (
+              <button
+                onClick={onGenerateContext}
+                disabled={generatingContext || isProcessing}
+                className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {generatingContext ? (
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
+                    />
+                  </svg>
+                )}
+                {generatingContext
+                  ? 'Generuji kontext…'
+                  : `Kontext z vybraných (${doneSelectedCount})`}
+              </button>
+            )}
           </>
         )}
 
@@ -396,10 +446,12 @@ export function Toolbar({
 
       {/* Processing status bar */}
       {isProcessing && (
-        <div className={[
-          'border-t px-4 py-2',
-          isPaused ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-blue-50',
-        ].join(' ')}>
+        <div
+          className={[
+            'border-t px-4 py-2',
+            isPaused ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-blue-50',
+          ].join(' ')}
+        >
           <div className="flex items-center gap-3">
             {isPaused ? (
               <svg className="h-4 w-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
@@ -407,46 +459,61 @@ export function Toolbar({
               </svg>
             ) : (
               <svg className="h-4 w-4 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
               </svg>
             )}
-            <span className={['flex-1 text-sm', isPaused ? 'text-amber-700' : 'text-blue-700'].join(' ')}>
+            <span
+              className={['flex-1 text-sm', isPaused ? 'text-amber-700' : 'text-blue-700'].join(
+                ' ',
+              )}
+            >
               {processingStep ?? 'Zpracovávám…'}
             </span>
             {processingProgress != null && (
-              <span className={['text-xs', isPaused ? 'text-amber-600' : 'text-blue-600'].join(' ')}>
+              <span
+                className={['text-xs', isPaused ? 'text-amber-600' : 'text-blue-600'].join(' ')}
+              >
                 {Math.round(processingProgress)}%
               </span>
             )}
             {/* Pause / Resume button */}
-            {isPaused ? (
-              onResumeProcessing && (
-                <button
-                  onClick={onResumeProcessing}
-                  title="Pokračovat ve zpracování"
-                  className="flex items-center gap-1 rounded border border-blue-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
-                >
-                  <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-                  </svg>
-                  Pokračovat
-                </button>
-              )
-            ) : (
-              onPauseProcessing && (
-                <button
-                  onClick={onPauseProcessing}
-                  title="Pozastavit zpracování"
-                  className="flex items-center gap-1 rounded border border-amber-200 bg-white px-2.5 py-1 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-50"
-                >
-                  <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                  </svg>
-                  Pozastavit
-                </button>
-              )
-            )}
+            {isPaused
+              ? onResumeProcessing && (
+                  <button
+                    onClick={onResumeProcessing}
+                    title="Pokračovat ve zpracování"
+                    className="flex items-center gap-1 rounded border border-blue-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                    </svg>
+                    Pokračovat
+                  </button>
+                )
+              : onPauseProcessing && (
+                  <button
+                    onClick={onPauseProcessing}
+                    title="Pozastavit zpracování"
+                    className="flex items-center gap-1 rounded border border-amber-200 bg-white px-2.5 py-1 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-50"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                    </svg>
+                    Pozastavit
+                  </button>
+                )}
             {/* Stop / Cancel button */}
             {onCancelProcessing && (
               <button
@@ -462,10 +529,12 @@ export function Toolbar({
             )}
           </div>
           {processingProgress != null && (
-            <div className={[
-              'mt-1.5 h-1.5 overflow-hidden rounded-full',
-              isPaused ? 'bg-amber-200' : 'bg-blue-200',
-            ].join(' ')}>
+            <div
+              className={[
+                'mt-1.5 h-1.5 overflow-hidden rounded-full',
+                isPaused ? 'bg-amber-200' : 'bg-blue-200',
+              ].join(' ')}
+            >
               <div
                 className={[
                   'h-full rounded-full transition-all duration-500',

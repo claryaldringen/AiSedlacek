@@ -428,7 +428,7 @@ export function ImportDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+      <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
         {/* Header with tabs */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
           <div className="flex items-center gap-4">
@@ -543,7 +543,7 @@ export function ImportDialog({
 
               {/* File list */}
               {fileStatuses.length > 0 && (
-                <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                <div className="max-h-72 space-y-1.5 overflow-y-auto">
                   {fileStatuses.map((s, i) => (
                     <FileStatusRow key={i} status={s} />
                   ))}
@@ -619,7 +619,7 @@ export function ImportDialog({
                       </button>
                     </div>
                   </div>
-                  <div className="grid max-h-64 grid-cols-5 gap-2 overflow-y-auto">
+                  <div className="grid max-h-96 grid-cols-5 gap-2 overflow-y-auto">
                     {discovered.map((d) => (
                       <button
                         key={d.url}

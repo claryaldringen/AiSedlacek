@@ -78,6 +78,14 @@ model Collection {
   isPublic    Boolean  @default(false)
   slug        String?  @unique
 
+  // Structured metadata
+  title             String?   // Název díla
+  author            String?   // Autor
+  yearFrom          Int?      // Minimální rok sepsání
+  yearTo            Int?      // Maximální rok sepsání
+  librarySignature  String?   // Označení v knihovně (např. MS.7756)
+  abstract          String?   // Krátký shrnující popis
+
   @@index([userId])
 }
 

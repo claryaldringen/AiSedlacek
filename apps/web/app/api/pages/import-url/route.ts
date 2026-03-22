@@ -230,6 +230,16 @@ async function handleImport(
     }
   }
 
+  // Determine next order value for the collection
+  let nextOrder: number | undefined;
+  if (resolvedCollectionId) {
+    const maxOrderResult = await prisma.page.aggregate({
+      where: { collectionId: resolvedCollectionId },
+      _max: { order: true },
+    });
+    nextOrder = (maxOrderResult._max.order ?? -1) + 1;
+  }
+
   const page = await prisma.page.create({
     data: {
       userId,
@@ -248,6 +258,7 @@ async function handleImport(
       fileSize: buffer.length,
       width: dimensions.width,
       height: dimensions.height,
+      order: nextOrder,
     },
   });
 

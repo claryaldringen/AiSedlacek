@@ -16,12 +16,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (ps.targetType === 'collection') {
     const collection = await prisma.collection.findUnique({
       where: { id: ps.targetId },
-      select: { name: true, description: true },
+      select: { name: true, title: true, description: true, abstract: true },
     });
     if (!collection) return { title: 'Nenalezeno' };
+    const displayTitle = collection.title || collection.name;
     return {
-      title: `${collection.name} — AiSedlacek`,
-      description: collection.description || `Veřejná kolekce: ${collection.name}`,
+      title: `${displayTitle} — AiSedlacek`,
+      description: collection.abstract || collection.description || `Veřejná kolekce: ${displayTitle}`,
     };
   }
 
@@ -80,11 +81,42 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
               </svg>
               AiSedlacek
             </Link>
-            <h1 className="mt-3 font-serif text-3xl font-bold text-[#f5edd6]">{collection.name}</h1>
-            {collection.description && (
+            <h1 className="mt-3 font-serif text-3xl font-bold text-[#f5edd6]">
+              {collection.title || collection.name}
+            </h1>
+            {collection.abstract && (
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#c8b898]">
+                {collection.abstract}
+              </p>
+            )}
+            {!collection.abstract && collection.description && (
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#a08060]">
                 {collection.description}
               </p>
+            )}
+            {/* Metadata badges */}
+            {(collection.author || collection.yearFrom || collection.yearTo || collection.librarySignature) && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {collection.author && (
+                  <span className="inline-flex items-center rounded-full bg-[#3d2b1f] px-2.5 py-0.5 text-xs font-medium text-[#d4a855]">
+                    {collection.author}
+                  </span>
+                )}
+                {(collection.yearFrom || collection.yearTo) && (
+                  <span className="inline-flex items-center rounded-full bg-[#3d2b1f] px-2.5 py-0.5 text-xs font-medium text-[#d4a855]">
+                    {collection.yearFrom && collection.yearTo
+                      ? `${collection.yearFrom}–${collection.yearTo}`
+                      : collection.yearFrom
+                        ? `od ${collection.yearFrom}`
+                        : `do ${collection.yearTo}`}
+                  </span>
+                )}
+                {collection.librarySignature && (
+                  <span className="inline-flex items-center rounded-full bg-[#3d2b1f] px-2.5 py-0.5 text-xs font-medium text-[#d4a855]">
+                    {collection.librarySignature}
+                  </span>
+                )}
+              </div>
             )}
             <p className="mt-3 text-xs text-[#7a6652]">
               {doneCount}{' '}

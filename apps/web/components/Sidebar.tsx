@@ -23,6 +23,13 @@ export interface Collection {
     outputTokens: number;
     costUsd: number;
   };
+  // Structured metadata
+  title?: string | null;
+  author?: string | null;
+  yearFrom?: number | null;
+  yearTo?: number | null;
+  librarySignature?: string | null;
+  abstract?: string | null;
 }
 
 interface SidebarProps {
