@@ -208,6 +208,8 @@ model ProcessingJob {
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   status         String   @default("running")  // running, completed, cancelled, error
+  type           String   @default("ocr")      // 'ocr' | 'retranslate' | 'generate-context' | 'fix-contexts'
+  jobData        String?  // JSON string with job-specific params (e.g. documentId for retranslate)
   totalPages     Int
   completedPages Int      @default(0)
   currentPageId  String?

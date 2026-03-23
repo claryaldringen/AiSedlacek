@@ -43,6 +43,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     jobId: job.id,
     status: job.status,
+    type: job.type,
     totalPages: job.totalPages,
     completedPages: job.completedPages,
     currentPageId: job.currentPageId,

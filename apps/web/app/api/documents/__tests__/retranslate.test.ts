@@ -3,33 +3,18 @@ import { NextRequest } from 'next/server';
 
 // ── Mocks ────────────────────────────────────────────────
 
-const mockFindUnique = vi.fn();
-const mockUpsert = vi.fn();
+const mockDocFindUnique = vi.fn();
+const mockJobCreate = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
-    document: { findUnique: (...args: unknown[]) => mockFindUnique(...args) },
-    translation: { upsert: (...args: unknown[]) => mockUpsert(...args) },
+    document: { findUnique: (...args: unknown[]) => mockDocFindUnique(...args) },
+    processingJob: { create: (...args: unknown[]) => mockJobCreate(...args) },
   },
 }));
 
-const mockCreateVersion = vi.fn();
-vi.mock('@/lib/infrastructure/versioning', () => ({
-  createVersion: (...args: unknown[]) => mockCreateVersion(...args),
-}));
-
-const mockMessagesCreate = vi.fn();
-vi.mock('@anthropic-ai/sdk', () => {
-  return {
-    default: class MockAnthropic {
-      messages = { create: (...args: unknown[]) => mockMessagesCreate(...args) };
-    },
-  };
-});
-
 vi.mock('@/lib/infrastructure/billing', () => ({
   checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
-  deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -63,12 +48,6 @@ function makeRequest(body: unknown): NextRequest {
 
 const routeContext = { params: Promise.resolve({ id: 'doc-1' }) };
 
-const CLAUDE_RESPONSE = {
-  content: [{ type: 'text' as const, text: 'Přeložený text' }],
-  model: 'claude-sonnet-4-6',
-  usage: { input_tokens: 100, output_tokens: 50 },
-};
-
 const FAKE_DOC = {
   id: 'doc-1',
   transcription: 'Starý text z roku 1420',
@@ -85,13 +64,11 @@ import { POST } from '@/app/api/documents/[id]/retranslate/route';
 describe('POST /api/documents/[id]/retranslate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockMessagesCreate.mockResolvedValue(CLAUDE_RESPONSE);
-    mockUpsert.mockResolvedValue({});
-    mockCreateVersion.mockResolvedValue(undefined);
+    mockJobCreate.mockResolvedValue({ id: 'job-123' });
   });
 
   it('returns 404 when document not found', async () => {
-    mockFindUnique.mockResolvedValue(null);
+    mockDocFindUnique.mockResolvedValue(null);
 
     const res = await POST(makeRequest({ language: 'cs' }), routeContext);
 
@@ -100,8 +77,49 @@ describe('POST /api/documents/[id]/retranslate', () => {
     expect(json.error).toBe('Dokument nenalezen');
   });
 
-  it('creates version from previous translation before overwriting', async () => {
-    mockFindUnique.mockResolvedValue({ ...FAKE_DOC, translations: [] });
+  it('enqueues a retranslate job and returns jobId', async () => {
+    mockDocFindUnique.mockResolvedValue(FAKE_DOC);
+
+    const res = await POST(makeRequest({ language: 'cs' }), routeContext);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.jobId).toBe('job-123');
+
+    // Verify job was created with correct data
+    expect(mockJobCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'test-user-id',
+        status: 'queued',
+        type: 'retranslate',
+        totalPages: 1,
+      }),
+    });
+
+    // Verify jobData contains documentId and language
+    const callArg = mockJobCreate.mock.calls[0]![0] as { data: { jobData: string } };
+    const jobData = JSON.parse(callArg.data.jobData) as Record<string, unknown>;
+    expect(jobData.documentId).toBe('doc-1');
+    expect(jobData.language).toBe('cs');
+  });
+
+  it("defaults to 'cs' language when not provided", async () => {
+    mockDocFindUnique.mockResolvedValue(FAKE_DOC);
+
+    const res = await POST(makeRequest({}), routeContext);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.jobId).toBe('job-123');
+
+    // Verify jobData has language 'cs'
+    const callArg = mockJobCreate.mock.calls[0]![0] as { data: { jobData: string } };
+    const jobData = JSON.parse(callArg.data.jobData) as Record<string, unknown>;
+    expect(jobData.language).toBe('cs');
+  });
+
+  it('includes previousTranslation in jobData when provided', async () => {
+    mockDocFindUnique.mockResolvedValue(FAKE_DOC);
 
     const req = makeRequest({
       language: 'cs',
@@ -111,67 +129,9 @@ describe('POST /api/documents/[id]/retranslate', () => {
 
     expect(res.status).toBe(200);
 
-    // createVersion should be called with the previousTranslation content
-    expect(mockCreateVersion).toHaveBeenCalledWith(
-      'doc-1',
-      'translation:cs',
-      'Starý překlad',
-      'ai_retranslate',
-      'claude-sonnet-4-6',
-    );
-
-    // And it should be called before the upsert
-    const versionCallOrder = mockCreateVersion.mock.invocationCallOrder[0]!;
-    const upsertCallOrder = mockUpsert.mock.invocationCallOrder[0]!;
-    expect(versionCallOrder).toBeLessThan(upsertCallOrder);
-  });
-
-  it('upserts translation with Claude result', async () => {
-    mockFindUnique.mockResolvedValue(FAKE_DOC);
-
-    const res = await POST(makeRequest({ language: 'cs' }), routeContext);
-
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.translation).toBe('Přeložený text');
-    expect(json.language).toBe('cs');
-
-    expect(mockUpsert).toHaveBeenCalledWith({
-      where: { documentId_language: { documentId: 'doc-1', language: 'cs' } },
-      update: {
-        text: 'Přeložený text',
-        model: 'claude-sonnet-4-6',
-        inputTokens: 100,
-        outputTokens: 50,
-      },
-      create: {
-        documentId: 'doc-1',
-        language: 'cs',
-        text: 'Přeložený text',
-        model: 'claude-sonnet-4-6',
-        inputTokens: 100,
-        outputTokens: 50,
-      },
-    });
-  });
-
-  it("defaults to 'cs' language when not provided", async () => {
-    mockFindUnique.mockResolvedValue(FAKE_DOC);
-
-    const res = await POST(makeRequest({}), routeContext);
-
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.language).toBe('cs');
-
-    // Verify findUnique was called looking for 'cs' translations
-    expect(mockFindUnique).toHaveBeenCalledWith({
-      where: { id: 'doc-1' },
-      include: {
-        translations: { where: { language: 'cs' } },
-        page: { select: { userId: true } },
-      },
-    });
+    const callArg = mockJobCreate.mock.calls[0]![0] as { data: { jobData: string } };
+    const jobData = JSON.parse(callArg.data.jobData) as Record<string, unknown>;
+    expect(jobData.previousTranslation).toBe('Starý překlad');
   });
 
   it('returns 400 on invalid JSON body', async () => {

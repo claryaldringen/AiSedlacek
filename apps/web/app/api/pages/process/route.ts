@@ -62,9 +62,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: 'Nedostatečný kredit', balance }, { status: 402 });
   }
 
-  // Check for already running job
+  // Check for already running OCR job (non-OCR jobs don't block page processing)
   const existingRunningJob = await prisma.processingJob.findFirst({
-    where: { userId, status: { in: ['running', 'queued'] } },
+    where: { userId, status: { in: ['running', 'queued'] }, type: 'ocr' },
     select: { id: true },
   });
   if (existingRunningJob) {
@@ -117,8 +117,10 @@ export async function GET(): Promise<Response> {
     return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
   }
 
+  // Only reconnect to OCR jobs — non-OCR jobs (retranslate, generate-context, fix-contexts)
+  // have their own polling loops started by the triggering UI action.
   const runningJob = await prisma.processingJob.findFirst({
-    where: { userId, status: { in: ['running', 'queued'] } },
+    where: { userId, status: { in: ['running', 'queued'] }, type: 'ocr' },
     orderBy: { createdAt: 'desc' },
   });
 

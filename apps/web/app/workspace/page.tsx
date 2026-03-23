@@ -231,34 +231,62 @@ function WorkspaceContent(): React.JSX.Element {
         const res = await fetch(`/api/collections/${collectionId}/fix-document-contexts`, {
           method: 'POST',
         });
-        if (!res.ok || !res.body) {
-          setError('Oprava kontextu selhala');
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as { error?: string };
+          setError(errData.error ?? 'Oprava kontextu selhala');
+          setFixingContexts(false);
+          setFixingContextsProgress(null);
           return;
         }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop() ?? '';
-          for (const eventStr of events) {
-            const match = eventStr.match(/^event: (\w+)\ndata: (.+)$/s);
-            if (!match) continue;
-            const data = JSON.parse(match[2]!) as { message?: string; progress?: number };
-            if (data.message) setFixingContextsProgress(data.message);
+        const { jobId } = (await res.json()) as { jobId: string };
+
+        // Poll for job completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+            if (!statusRes.ok) {
+              clearInterval(pollInterval);
+              setFixingContexts(false);
+              setFixingContextsProgress(null);
+              return;
+            }
+            const statusData = (await statusRes.json()) as {
+              status: string;
+              currentStep?: string;
+              progress?: number;
+              completedPages?: number;
+              totalPages?: number;
+            };
+            if (statusData.currentStep) {
+              setFixingContextsProgress(statusData.currentStep);
+            }
+            if (
+              statusData.status === 'completed' ||
+              statusData.status === 'error' ||
+              statusData.status === 'cancelled'
+            ) {
+              clearInterval(pollInterval);
+              setFixingContexts(false);
+              setFixingContextsProgress(null);
+              if (statusData.status === 'error') {
+                setError('Oprava kontextů selhala');
+              }
+              // Reload pages to get updated contexts
+              void loadPages(selectedCollectionId);
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setFixingContexts(false);
+            setFixingContextsProgress(null);
           }
-        }
+        }, 2000);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Chyba');
-      } finally {
         setFixingContexts(false);
         setFixingContextsProgress(null);
       }
     },
-    [setError],
+    [setError, selectedCollectionId, loadPages],
   );
 
   const handleCollectionSelect = useCallback(
@@ -382,24 +410,55 @@ function WorkspaceContent(): React.JSX.Element {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageIds: donePageIds }),
       });
-      let data: { context?: string; error?: string };
+      let data: { jobId?: string; error?: string };
       try {
-        data = (await res.json()) as { context?: string; error?: string };
+        data = (await res.json()) as { jobId?: string; error?: string };
       } catch {
         throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
       }
       if (!res.ok) throw new Error(data.error ?? 'Generování kontextu selhalo');
-      const newContext = data.context ?? '';
-      // Update collection in local state
-      setCollections((prev) =>
-        prev.map((c) => (c.id === selectedCollectionId ? { ...c, context: newContext } : c)),
-      );
+
+      const { jobId } = data;
+      if (!jobId) throw new Error('Server nevrátil jobId');
+
+      // Poll for job completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+          if (!statusRes.ok) {
+            clearInterval(pollInterval);
+            setGeneratingContext(false);
+            return;
+          }
+          const statusData = (await statusRes.json()) as {
+            status: string;
+            currentStep?: string;
+            progress?: number;
+          };
+          if (
+            statusData.status === 'completed' ||
+            statusData.status === 'error' ||
+            statusData.status === 'cancelled'
+          ) {
+            clearInterval(pollInterval);
+            setGeneratingContext(false);
+            if (statusData.status === 'completed') {
+              // Reload collection to get updated context and metadata
+              void loadCollections();
+            } else if (statusData.status === 'error') {
+              setError('Generování kontextu selhalo');
+            }
+          }
+        } catch {
+          clearInterval(pollInterval);
+          setGeneratingContext(false);
+        }
+      }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Chyba');
-    } finally {
       setGeneratingContext(false);
     }
-  }, [selectedCollectionId, selected, pages, setError]);
+  }, [selectedCollectionId, selected, pages, setError, loadCollections]);
 
   // ---- Rename collection ----
   const handleRenameCollection = useCallback(async (): Promise<void> => {
@@ -916,8 +975,19 @@ function WorkspaceContent(): React.JSX.Element {
         <div className="mx-4 mt-3 overflow-hidden rounded-lg border border-blue-200 bg-blue-50">
           <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-blue-700">
             <svg className="h-4 w-4 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
             </svg>
             <span>Generuji kontext z vybraných stránek...</span>
           </div>

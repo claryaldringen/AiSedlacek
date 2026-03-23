@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 60;
-import Anthropic from '@anthropic-ai/sdk';
+export const maxDuration = 10;
 import { prisma } from '@/lib/infrastructure/db';
-import { createVersion } from '@/lib/infrastructure/versioning';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { checkBalance } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -38,10 +36,10 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     }) ?? {};
   const targetLang = typeof language === 'string' ? language : 'cs';
 
+  // Verify document exists and belongs to user
   const doc = await prisma.document.findUnique({
     where: { id },
     include: {
-      translations: { where: { language: targetLang } },
       page: { select: { userId: true } },
     },
   });
@@ -49,88 +47,24 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
   }
 
-  const langName: Record<string, string> = {
-    cs: 'češtiny',
-    en: 'angličtiny',
-    de: 'němčiny',
-    fr: 'francouzštiny',
-    la: 'latiny',
-  };
-
-  const existingTranslation = previousTranslation ?? doc.translations[0]?.text;
-
-  const client = new Anthropic();
-
-  let prompt: string;
-  if (existingTranslation) {
-    // Incremental update – only fix what changed
-    prompt = `Transkripce historického textu byla upravena. Aktualizuj existující překlad tak, aby odpovídal změnám v transkripci. Měň JEN ta místa, která se změnila – zbytek překladu ponech beze změny.
-
-UPRAVENÁ TRANSKRIPCE:
-${doc.transcription}
-
-STÁVAJÍCÍ PŘEKLAD (uprav jen změněná místa):
-${existingTranslation}
-
-Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
-  } else {
-    // Full translation from scratch
-    prompt = `Přelož tento historický přepis do moderní ${langName[targetLang] ?? targetLang}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`;
-  }
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
-    temperature: 0.3,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const translatedText = response.content[0]?.type === 'text' ? response.content[0].text : '';
-
-  // Atomically check balance and deduct tokens
-  const deductResult = await deductTokensIfSufficient(
-    userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
-    `Retranslace dokumentu ${id}`,
-    `retranslate-${id}-${Date.now()}`,
-  );
-
-  if (!deductResult.success) {
-    // Work already done by Claude, but balance is exhausted.
-    // We still save the result (don't waste the API call) but inform the client.
-    // The translation will be saved below — just log the overspend situation.
-    console.warn(`[Retranslate] Insufficient balance for user ${userId}, saving result anyway`);
-  }
-
-  // Save old translation as version before overwriting
-  if (existingTranslation) {
-    await createVersion(
-      id,
-      `translation:${targetLang}`,
-      existingTranslation,
-      'ai_retranslate',
-      response.model,
-    );
-  }
-
-  await prisma.translation.upsert({
-    where: { documentId_language: { documentId: id, language: targetLang } },
-    update: {
-      text: translatedText,
-      model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-    },
-    create: {
-      documentId: id,
-      language: targetLang,
-      text: translatedText,
-      model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+  // Create ProcessingJob for the worker to pick up
+  const job = await prisma.processingJob.create({
+    data: {
+      userId,
+      status: 'queued',
+      type: 'retranslate',
+      jobData: JSON.stringify({
+        documentId: id,
+        language: targetLang,
+        userId,
+        previousTranslation: previousTranslation ?? undefined,
+      }),
+      totalPages: 1,
+      completedPages: 0,
+      pageIds: [],
+      currentStep: 'Ve frontě — čeká na retranslaci…',
     },
   });
 
-  return NextResponse.json({ translation: translatedText, language: targetLang });
+  return NextResponse.json({ jobId: job.id });
 }

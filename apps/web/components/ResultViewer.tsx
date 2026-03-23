@@ -153,7 +153,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
     async (newText: string): Promise<void> => {
       const updated = await saveField('transcription', newText);
 
-      // Re-translate based on updated transcription
+      // Re-translate based on updated transcription via worker job
       setRetranslating(true);
       try {
         const res = await fetch(`/api/documents/${result.id}/retranslate`, {
@@ -164,11 +164,66 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
             previousTranslation: result.translation,
           }),
         });
-        if (res.ok) {
-          const data = (await res.json()) as { translation: string };
-          onUpdate?.({ ...updated, translation: data.translation });
+        if (!res.ok) {
+          setRetranslating(false);
+          return;
         }
-      } finally {
+        const { jobId } = (await res.json()) as { jobId: string };
+
+        // Poll for job completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+            if (!statusRes.ok) {
+              clearInterval(pollInterval);
+              setRetranslating(false);
+              return;
+            }
+            const statusData = (await statusRes.json()) as {
+              status: string;
+              currentStep?: string;
+            };
+            if (
+              statusData.status === 'completed' ||
+              statusData.status === 'error' ||
+              statusData.status === 'cancelled'
+            ) {
+              clearInterval(pollInterval);
+              setRetranslating(false);
+              if (statusData.status === 'completed') {
+                // Reload the document to get the new translation
+                const docRes = await fetch(`/api/documents/${result.id}`);
+                if (docRes.ok) {
+                  const doc = (await docRes.json()) as {
+                    translations: {
+                      language: string;
+                      text: string;
+                      model?: string;
+                      inputTokens?: number;
+                      outputTokens?: number;
+                    }[];
+                  };
+                  const translation = doc.translations.find(
+                    (t: { language: string }) => t.language === result.translationLanguage,
+                  );
+                  if (translation) {
+                    onUpdate?.({
+                      ...updated,
+                      translation: translation.text,
+                      translationModel: translation.model,
+                      translationInputTokens: translation.inputTokens,
+                      translationOutputTokens: translation.outputTokens,
+                    });
+                  }
+                }
+              }
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setRetranslating(false);
+          }
+        }, 2000);
+      } catch {
         setRetranslating(false);
       }
     },
