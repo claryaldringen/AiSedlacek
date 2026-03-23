@@ -62,18 +62,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: 'Nedostatečný kredit', balance }, { status: 402 });
   }
 
-  // Check for already running OCR job (non-OCR jobs don't block page processing)
-  const existingRunningJob = await prisma.processingJob.findFirst({
-    where: { userId, status: { in: ['running', 'queued'] }, type: 'ocr' },
-    select: { id: true },
-  });
-  if (existingRunningJob) {
-    return Response.json(
-      { error: 'Již probíhá zpracování', jobId: existingRunningJob.id },
-      { status: 409 },
-    );
-  }
-
   const targetLang =
     typeof language === 'string' && language.trim() !== '' ? language.trim() : 'cs';
   const processingMode: ProcessingMode =
@@ -82,6 +70,25 @@ export async function POST(request: NextRequest): Promise<Response> {
     typeof rawCollectionId === 'string'
       ? rawCollectionId
       : (ownedPages[0]?.collectionId ?? undefined);
+
+  // Block duplicate OCR for the same collection (context ordering requires sequential processing)
+  if (collectionId) {
+    const existingOcrJob = await prisma.processingJob.findFirst({
+      where: {
+        userId,
+        status: { in: ['running', 'queued'] },
+        type: 'ocr',
+        collectionId,
+      },
+      select: { id: true },
+    });
+    if (existingOcrJob) {
+      return Response.json(
+        { error: 'Pro tento svazek již probíhá zpracování', jobId: existingOcrJob.id },
+        { status: 409 },
+      );
+    }
+  }
 
   // Create ProcessingJob in DB with status 'queued' — worker picks it up
   const job = await prisma.processingJob.create({
