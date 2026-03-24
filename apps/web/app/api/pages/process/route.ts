@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
-import type { ProcessingMode } from '@/lib/adapters/ocr/claude-vision';
+import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { requireUserId } from '@/lib/auth';
 import { checkBalance } from '@/lib/infrastructure/billing';
 

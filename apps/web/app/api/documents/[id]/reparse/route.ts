@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { parseOcrJson } from '@/lib/adapters/ocr/claude-vision';
+import { parseOcrJson } from '@ai-sedlacek/ocr';
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { requireUserId } from '@/lib/auth';
 

@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
-import { detectMediaType } from '@/lib/adapters/ocr/claude-vision';
+import { detectMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
 

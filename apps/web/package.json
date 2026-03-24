@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ai-sedlacek/db": "*",
+    "@ai-sedlacek/ocr": "*",
     "@ai-sedlacek/shared": "*",
     "@anthropic-ai/sdk": "^0.78.0",
     "@auth/prisma-adapter": "^2.11.1",

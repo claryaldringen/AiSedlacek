@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectMediaType, parseOcrJson, parseOcrJsonBatch } from '../claude-vision.js';
+import { detectMediaType, parseOcrJson, parseOcrJsonBatch } from '../parse.js';
 
 const VALID_JSON = {
   transcription: 'Starý text',

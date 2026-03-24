@@ -8,7 +8,9 @@
       "@ai-sedlacek/db": ["../../packages/db/src"],
       "@ai-sedlacek/db/*": ["../../packages/db/src/*"],
       "@ai-sedlacek/shared": ["../../packages/shared/src"],
-      "@ai-sedlacek/shared/*": ["../../packages/shared/src/*"]
+      "@ai-sedlacek/shared/*": ["../../packages/shared/src/*"],
+      "@ai-sedlacek/ocr": ["../../packages/ocr/src"],
+      "@ai-sedlacek/ocr/*": ["../../packages/ocr/src/*"]
     }
   },
   "include": ["src/**/*.ts"]

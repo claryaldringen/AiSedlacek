@@ -22,8 +22,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }));
 
 // ── Import after mocks ──────────────────────────────
-import { processWithClaudeBatch } from '../claude-vision';
-import { processWithClaude } from '../claude-vision';
+import { processWithClaudeBatch, processWithClaude } from '../process.js';
 
 // ── Helpers ─────────────────────────────────────────
 function setupMockStream(jsonlOutput: string) {

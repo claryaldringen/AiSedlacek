@@ -7,8 +7,8 @@
 
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { processWithClaudeBatch } from '../lib/claude-vision';
-import type { ProcessingMode } from '../lib/claude-vision';
+import { processWithClaudeBatch } from '@ai-sedlacek/ocr';
+import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
   saveDocumentResult,

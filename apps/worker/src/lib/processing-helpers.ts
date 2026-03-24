@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import type { StructuredOcrResult } from './claude-vision';
+import type { StructuredOcrResult } from '@ai-sedlacek/ocr';
 import { getStorage } from './storage';
 import { truncateContext } from './batch-utils';
 

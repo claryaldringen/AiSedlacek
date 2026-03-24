@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"noEmit":true,"module":"ESNext","moduleResolution":"bundler","paths":{"@ai-sedlacek/shared":["../shared/src"],"@ai-sedlacek/shared/*":["../shared/src/*"]}},"include":["src/**/*"]}
