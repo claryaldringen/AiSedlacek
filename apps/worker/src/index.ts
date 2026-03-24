@@ -81,6 +81,19 @@ async function executeJob(job: {
         },
       })
       .catch(() => {});
+
+    // Reset stuck "processing" pages back to "pending" so they can be retried
+    if (jobType === 'ocr' && job.pageIds.length > 0) {
+      const resetResult = await prisma.page
+        .updateMany({
+          where: { id: { in: job.pageIds }, status: 'processing' },
+          data: { status: 'pending', errorMessage: null },
+        })
+        .catch(() => ({ count: 0 }));
+      if (resetResult.count > 0) {
+        console.log(`[Worker] Reset ${resetResult.count} stuck pages to pending for job ${job.id}`);
+      }
+    }
   } finally {
     activeJobCount--;
     if (jobType === 'ocr') {
