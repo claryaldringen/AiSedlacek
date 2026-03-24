@@ -166,20 +166,21 @@ function WorkspaceContent(): React.JSX.Element {
     }
   }, [loadingWorkspaces, workspaces, selectedWorkspaceId, router]);
 
-  // ---- Load collections ----
+  // ---- Load collections (filtered by workspace) ----
   const loadCollections = useCallback(async (): Promise<void> => {
+    if (!selectedWorkspaceId) return;
     setLoadingCollections(true);
     try {
-      const res = await fetch('/api/collections');
+      const res = await fetch(`/api/workspaces/${selectedWorkspaceId}`);
       if (!res.ok) return;
-      const data = (await res.json()) as Collection[];
-      setCollections(data);
+      const data = (await res.json()) as { collections: Collection[] };
+      setCollections(data.collections ?? []);
     } catch {
       // ignore
     } finally {
       setLoadingCollections(false);
     }
-  }, []);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     void loadCollections();
@@ -218,6 +219,7 @@ function WorkspaceContent(): React.JSX.Element {
     (id: string): void => {
       router.push(`/workspace?workspace=${id}`);
       setPanelResult(null);
+      setPages([]);
     },
     [router],
   );

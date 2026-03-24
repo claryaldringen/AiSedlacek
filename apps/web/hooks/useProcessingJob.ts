@@ -94,7 +94,20 @@ export function useProcessingJob({
         const data = (await res.json()) as JobStatusResponse;
 
         setProcessingStep(data.currentStep ?? undefined);
-        setProcessingProgress(data.progress);
+
+        // DB-level progress (completedPages/totalPages) stays 0% during batch processing.
+        // Extract finer progress from currentStep which contains "Dávka M/N ... (X%)"
+        const batchMatch = data.currentStep?.match(/Dávka (\d+)\/(\d+)/);
+        const pctMatch = data.currentStep?.match(/\((\d+)%\)/);
+        if (batchMatch && pctMatch) {
+          const batchNum = parseInt(batchMatch[1]!, 10);
+          const batchTotal = parseInt(batchMatch[2]!, 10);
+          const tokenPct = parseInt(pctMatch[1]!, 10);
+          // Overall = (completed batches + current batch fraction) / total batches
+          setProcessingProgress(Math.round(((batchNum - 1 + tokenPct / 100) / batchTotal) * 100));
+        } else {
+          setProcessingProgress(data.progress);
+        }
 
         // Update page statuses for newly done pages
         for (const donePageId of data.donePages) {

@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { computeCostRaw, formatCost } from '@/lib/pricing';
+import { computeCostRaw, formatCost, TOKEN_MULTIPLIER } from '@/lib/pricing';
 
 export interface DocumentResult {
   id: string;
@@ -336,7 +336,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                   label="Tokeny"
                   value={
                     result.inputTokens != null || result.outputTokens != null
-                      ? `${result.inputTokens ?? '?'} vstup / ${result.outputTokens ?? '?'} výstup`
+                      ? `${(result.inputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.outputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`
                       : null
                   }
                 />
@@ -368,7 +368,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                     value={
                       result.translationInputTokens != null ||
                       result.translationOutputTokens != null
-                        ? `${result.translationInputTokens ?? '?'} vstup / ${result.translationOutputTokens ?? '?'} výstup`
+                        ? `${(result.translationInputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.translationOutputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`
                         : null
                     }
                   />
@@ -388,7 +388,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                   <MetadataRow label="Model" value={result.chatModel} />
                   <MetadataRow
                     label="Tokeny"
-                    value={`${result.chatInputTokens ?? 0} vstup / ${result.chatOutputTokens ?? 0} výstup`}
+                    value={`${(result.chatInputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.chatOutputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`}
                   />
                   <MetadataRow
                     label="Cena"
