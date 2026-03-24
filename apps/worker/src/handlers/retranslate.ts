@@ -1,14 +1,11 @@
 /**
  * Worker handler for retranslation jobs.
- *
- * Ported from /api/documents/[id]/retranslate/route.ts to run
- * in the long-lived VPS worker process (no serverless timeout).
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { prisma } from '../lib/infrastructure/db';
-import { createVersion } from '../lib/infrastructure/versioning';
-import { deductTokensIfSufficient } from '../lib/infrastructure/billing';
+import { prisma } from '@ai-sedlacek/db';
+import { createVersion } from '@ai-sedlacek/db/versioning';
+import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 
 export interface RetranslateJobData {
   documentId: string;

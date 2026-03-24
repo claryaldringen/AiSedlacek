@@ -30,7 +30,6 @@ vi.mock('@/lib/infrastructure/billing', () => ({
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
-
 // ── Helpers ──────────────────────────────────────────────
 
 function makeRequest(body: unknown): NextRequest {
@@ -82,14 +81,16 @@ describe('POST /api/pages/process', () => {
     expect(json.error).toBe('pageIds musí být neprázdné pole');
   });
 
-  it('returns 409 when a job is already running', async () => {
+  it('returns 409 when a job is already running for the same collection', async () => {
+    // Pages must have a collectionId for the 409 check to trigger
+    mockPageFindMany.mockResolvedValue([{ id: 'page-1', collectionId: 'col-1' }]);
     mockProcessingJobFindFirst.mockResolvedValue({ id: 'existing-job' });
 
-    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+    const res = await POST(makeRequest({ pageIds: ['page-1'], collectionId: 'col-1' }));
 
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe('Již probíhá zpracování');
+    expect(json.error).toBe('Pro tento svazek již probíhá zpracování');
     expect(json.jobId).toBe('existing-job');
   });
 

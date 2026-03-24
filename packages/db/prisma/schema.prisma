@@ -1,0 +1,297 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---- Auth (NextAuth.js) ----
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?   // Hashed password for credentials login
+  credits       Int       @default(0)
+  variableSymbol Int?     @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  collections   Collection[]
+  pages         Page[]
+  tokenTransactions TokenTransaction[]
+  processingJobs ProcessingJob[]
+  workspaces           Workspace[]
+  workspaceMemberships WorkspaceMember[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---- Application data ----
+
+model Collection {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String   @default("")
+  context     String   @default("")
+  contextUrls String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  pages       Page[]
+  isPublic    Boolean  @default(false)
+  slug        String?  @unique
+
+  // Structured metadata
+  title             String?   // Název díla
+  author            String?   // Autor
+  yearFrom          Int?      // Minimální rok sepsání
+  yearTo            Int?      // Maximální rok sepsání
+  librarySignature  String?   // Označení v knihovně (např. MS.7756)
+  abstract          String?   // Krátký shrnující popis
+
+  workspaceItems WorkspaceItem[]
+
+  @@index([userId])
+}
+
+model Page {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  filename     String
+  displayName  String?
+  hash         String
+  imageUrl     String
+  thumbnailUrl String?
+  order        Int         @default(0)
+  status       String      @default("pending")
+  errorMessage String?
+  createdAt    DateTime    @default(now())
+  document     Document?
+
+  // Image metadata
+  mimeType  String?
+  fileSize  Int?     // bytes
+  width     Int?     // pixels
+  height    Int?     // pixels
+  isPublic  Boolean  @default(false)
+  slug      String?  @unique
+  workspaceItems WorkspaceItem[]
+
+  @@index([userId])
+  @@index([collectionId])
+  @@index([hash])
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  pageId    String   @unique
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  hash      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rawResponse      String?
+  transcription    String
+  detectedLanguage String
+
+  context  String
+  glossary GlossaryEntry[]
+
+  translations Translation[]
+  versions     DocumentVersion[]
+
+  // Processing metadata
+  model           String?
+  inputTokens     Int?
+  outputTokens    Int?
+  processingTimeMs Int?
+  batchId         String?
+
+  @@index([hash])
+}
+
+model Translation {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  language   String
+  text       String
+  createdAt  DateTime @default(now())
+
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+
+  @@unique([documentId, language])
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version    Int
+  createdAt  DateTime @default(now())
+
+  field   String
+  content String
+
+  source String
+  model  String?
+
+  @@index([documentId])
+  @@unique([documentId, version])
+}
+
+model PublicSlug {
+  slug       String   @id
+  targetType String   // "collection" | "page"
+  targetId   String   @unique
+  createdAt  DateTime @default(now())
+}
+
+model GlossaryEntry {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  term       String
+  definition String
+
+  @@index([documentId])
+}
+
+// ---- Processing Jobs (Inngest) ----
+
+model ProcessingJob {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         String   @default("running")  // running, completed, cancelled, error
+  type           String   @default("ocr")      // 'ocr' | 'retranslate' | 'generate-context' | 'fix-contexts'
+  jobData        String?  // JSON string with job-specific params (e.g. documentId for retranslate)
+  totalPages     Int
+  completedPages Int      @default(0)
+  currentPageId  String?
+  currentStep    String?  // Human-readable current step description
+  errors         String[] // Array of error messages
+  pageIds        String[] // Original page IDs for reference
+  language       String   @default("cs")
+  mode           String   @default("transcribe+translate")
+  collectionId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, status])
+}
+
+// ---- Token Billing ----
+
+enum TokenTransactionType {
+  topup_stripe
+  topup_bank
+  consumption
+  refund
+}
+
+model TokenTransaction {
+  id          String               @id @default(cuid())
+  userId      String
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        TokenTransactionType
+  amount      Int                  // positive = credit, negative = debit
+  amountCzk   Int?                 // amount in halire, only for topup
+  description String
+  referenceId String?              // Stripe payment ID, FIO transaction ID, document ID
+  createdAt   DateTime             @default(now())
+
+  @@unique([userId, referenceId])
+  @@index([userId, createdAt])
+}
+
+// ---- Workspaces ----
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // 'home' | 'public' | 'shared'
+  ownerId     String?
+  owner       User?    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  inviteCode  String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  members     WorkspaceMember[]
+  items       WorkspaceItem[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String    @default("member")
+  joinedAt    DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceItem {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  collectionId String?
+  collection   Collection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  pageId       String?
+  page         Page?       @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  addedAt      DateTime    @default(now())
+
+  @@unique([workspaceId, collectionId])
+  @@unique([workspaceId, pageId])
+  @@index([workspaceId])
+  @@index([collectionId])
+  @@index([pageId])
+}

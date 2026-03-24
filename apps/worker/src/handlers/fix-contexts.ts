@@ -1,14 +1,11 @@
 /**
  * Worker handler for fixing document-level contexts against collection context.
- *
- * Ported from /api/collections/[id]/fix-document-contexts/route.ts to run
- * in the long-lived VPS worker process (no serverless timeout).
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { prisma } from '../lib/infrastructure/db';
-import { createVersion } from '../lib/infrastructure/versioning';
-import { deductTokens } from '../lib/infrastructure/billing';
+import { prisma } from '@ai-sedlacek/db';
+import { createVersion } from '@ai-sedlacek/db/versioning';
+import { deductTokens } from '@ai-sedlacek/db/billing';
 
 export interface FixContextsJobData {
   collectionId: string;

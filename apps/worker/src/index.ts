@@ -7,14 +7,14 @@
  * - Everything else (retranslate, generate-context, fix-contexts, OCR of different
  *   collections) runs concurrently
  *
- * Run: npm run worker (or npm run worker:dev for watch mode)
+ * Run: npm start (or npm run dev for watch mode)
  */
 
-import { prisma } from '../lib/infrastructure/db';
-import { processPages } from './process-pages';
-import { handleRetranslate } from './retranslate';
-import { handleGenerateContext } from './generate-context';
-import { handleFixContexts } from './fix-contexts';
+import { prisma } from '@ai-sedlacek/db';
+import { processPages } from './handlers/process-pages';
+import { handleRetranslate } from './handlers/retranslate';
+import { handleGenerateContext } from './handlers/generate-context';
+import { handleFixContexts } from './handlers/fix-contexts';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_CONCURRENT_JOBS = 5;
@@ -148,5 +148,7 @@ process.on('SIGINT', () => {
   running = false;
 });
 
-console.log(`[Worker] Started — polling every ${POLL_INTERVAL_MS / 1000}s, max ${MAX_CONCURRENT_JOBS} concurrent jobs`);
+console.log(
+  `[Worker] Started — polling every ${POLL_INTERVAL_MS / 1000}s, max ${MAX_CONCURRENT_JOBS} concurrent jobs`,
+);
 void pollForJobs();

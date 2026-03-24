@@ -1,13 +1,10 @@
 /**
  * Worker handler for generating collection context from transcriptions.
- *
- * Ported from /api/collections/[id]/generate-context/route.ts to run
- * in the long-lived VPS worker process (no serverless timeout).
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { prisma } from '../lib/infrastructure/db';
-import { deductTokens } from '../lib/infrastructure/billing';
+import { prisma } from '@ai-sedlacek/db';
+import { deductTokens } from '@ai-sedlacek/db/billing';
 
 export interface GenerateContextJobData {
   collectionId: string;

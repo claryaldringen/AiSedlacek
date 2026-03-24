@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createVersion } from '../versioning';
 
-vi.mock('../db', () => ({
+vi.mock('../client', () => ({
   prisma: {
     documentVersion: {
       findFirst: vi.fn(),
@@ -10,7 +9,8 @@ vi.mock('../db', () => ({
   },
 }));
 
-import { prisma } from '../db';
+import { prisma } from '../client';
+import { createVersion } from '../versioning';
 
 const mockFindFirst = prisma.documentVersion.findFirst as ReturnType<typeof vi.fn>;
 const mockCreate = prisma.documentVersion.create as ReturnType<typeof vi.fn>;

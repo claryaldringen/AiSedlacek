@@ -5,16 +5,16 @@
  * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
-import { prisma } from '../lib/infrastructure/db';
-import { processWithClaudeBatch } from '../lib/adapters/ocr/claude-vision';
-import type { ProcessingMode } from '../lib/adapters/ocr/claude-vision';
-import { checkBalance, deductTokensIfSufficient } from '../lib/infrastructure/billing';
+import { prisma } from '@ai-sedlacek/db';
+import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { processWithClaudeBatch } from '../lib/claude-vision';
+import type { ProcessingMode } from '../lib/claude-vision';
 import {
   getPreviousPageContext,
   saveDocumentResult,
   copyDocumentForPage,
   loadImageAndHash,
-} from '../lib/infrastructure/processing-helpers';
+} from '../lib/processing-helpers';
 import { createBatches } from '../lib/batch-utils';
 
 interface PreparedPage {
@@ -206,8 +206,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     id: p.pageId,
   }));
 
-  // No hard cap on batch size — the worker runs on a VPS without
-  // serverless timeouts, so we use the natural token-budget batching.
   const batches = createBatches(batchPages, {
     inputTokenBudget: 180_000,
     maxOutputTokens: 16_000,
@@ -221,7 +219,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Check balance before each batch
     const { sufficient } = await checkBalance(userId);
     if (!sufficient) {
-      // Reset remaining pages to pending
       const remainingPageIds = batches
         .slice(batchIdx)
         .flat()
@@ -244,10 +241,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       });
       return;
     }
-
-    // Process the batch
-    const batchPageIds = batch.map((p) => p.pageId);
-    void batchPageIds; // used for logging context
 
     await prisma.processingJob.update({
       where: { id: jobId },
@@ -285,7 +278,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         estimatedOutputTokens: estimatedTotal,
         mode,
         onProgress: (currentTokens, estimated) => {
-          // Throttle DB updates to every 2 seconds
           const now = Date.now();
           if (now - lastProgressUpdate < 2000) return;
           lastProgressUpdate = now;
@@ -347,7 +339,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       }
     }
 
-    // Handle pages that didn't get a result (model returned fewer results than images)
+    // Handle pages that didn't get a result
     const processedIndices = new Set(results.map((r) => r.index));
     for (let idx = 0; idx < batch.length; idx++) {
       if (!processedIndices.has(idx)) {

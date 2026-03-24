@@ -1,9 +1,8 @@
-const TOKEN_BYTES_RATIO = 750;
 const IMAGE_OVERHEAD_TOKENS = 258;
 const CHARS_PER_TOKEN = 4;
 
 export function estimateImageTokens(fileSizeBytes: number): number {
-  return fileSizeBytes / TOKEN_BYTES_RATIO + IMAGE_OVERHEAD_TOKENS;
+  return fileSizeBytes / 750 + IMAGE_OVERHEAD_TOKENS;
 }
 
 interface BatchablePage {

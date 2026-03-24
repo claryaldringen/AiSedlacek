@@ -1,14 +1,13 @@
 /**
  * Shared helper functions for OCR page processing.
- * Used by the BullMQ worker (apps/web/worker/process-pages.ts).
  */
 
 import crypto from 'crypto';
-import { prisma } from '@/lib/infrastructure/db';
-import type { StructuredOcrResult } from '@/lib/adapters/ocr/claude-vision';
-import { createVersion } from '@/lib/infrastructure/versioning';
-import { getStorage } from '@/lib/adapters/storage';
-import { truncateContext } from '@/lib/batch-utils';
+import { prisma } from '@ai-sedlacek/db';
+import { createVersion } from '@ai-sedlacek/db/versioning';
+import type { StructuredOcrResult } from './claude-vision';
+import { getStorage } from './storage';
+import { truncateContext } from './batch-utils';
 
 // ── getPreviousPageContext ────────────────────────────────────
 

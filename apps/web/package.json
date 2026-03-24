@@ -8,14 +8,13 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"app/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"worker/**/*.ts\" --no-error-on-unmatched-pattern",
+    "lint": "eslint \"app/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
-    "test": "vitest run",
-    "worker": "tsx worker/index.ts",
-    "worker:dev": "tsx watch worker/index.ts"
+    "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sedlacek/db": "*",
     "@ai-sedlacek/shared": "*",
     "@anthropic-ai/sdk": "^0.78.0",
     "@auth/prisma-adapter": "^2.11.1",
@@ -42,7 +41,6 @@
     "prettier": "^3",
     "prisma": "^6",
     "tailwindcss": "^4",
-    "tsx": "^4.21.0",
     "typescript": "^5",
     "typescript-eslint": "^8",
     "vitest": "^3"
