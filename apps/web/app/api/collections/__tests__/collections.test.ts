@@ -129,7 +129,7 @@ describe('GET /api/collections', () => {
       _sum: { inputTokens: 1000, outputTokens: 500 },
     });
 
-    const res = await listCollections();
+    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
 
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -153,7 +153,7 @@ describe('GET /api/collections', () => {
   it('returns an empty array when no collections exist', async () => {
     mockFindMany.mockResolvedValue([]);
 
-    const res = await listCollections();
+    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
 
     expect(res.status).toBe(200);
     const json = await res.json();

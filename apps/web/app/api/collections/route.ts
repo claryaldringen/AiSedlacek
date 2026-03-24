@@ -4,18 +4,37 @@ import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { computeCostFromTokens } from '@/lib/pricing';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
 
-  const collections = await prisma.collection.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      _count: { select: { pages: true } },
-    },
-  });
+  const workspaceId = request.nextUrl.searchParams.get('workspaceId');
+
+  let collections;
+  if (workspaceId) {
+    // Filter collections by workspace membership
+    const items = await prisma.workspaceItem.findMany({
+      where: { workspaceId, collectionId: { not: null } },
+      select: { collectionId: true },
+    });
+    const collectionIds = items.map((i) => i.collectionId!);
+    collections = await prisma.collection.findMany({
+      where: { id: { in: collectionIds } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { pages: true } },
+      },
+    });
+  } else {
+    collections = await prisma.collection.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { pages: true } },
+      },
+    });
+  }
 
   // Add stats for each collection
   const collectionsWithStats = await Promise.all(

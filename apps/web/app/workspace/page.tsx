@@ -171,10 +171,10 @@ function WorkspaceContent(): React.JSX.Element {
     if (!selectedWorkspaceId) return;
     setLoadingCollections(true);
     try {
-      const res = await fetch(`/api/workspaces/${selectedWorkspaceId}`);
+      const res = await fetch(`/api/collections?workspaceId=${selectedWorkspaceId}`);
       if (!res.ok) return;
-      const data = (await res.json()) as { collections: Collection[] };
-      setCollections(data.collections ?? []);
+      const data = (await res.json()) as Collection[];
+      setCollections(data);
     } catch {
       // ignore
     } finally {
@@ -1151,35 +1151,35 @@ function WorkspaceContent(): React.JSX.Element {
                           {selectedCollection._count.pages}
                         </span>
                       </div>
-                      {selectedCollection.stats.done > 0 && (
+                      {selectedCollection.stats?.done > 0 && (
                         <div className="flex justify-between">
                           <span className="text-green-600">Hotovo</span>
                           <span className="font-medium text-green-700">
-                            {selectedCollection.stats.done}
+                            {selectedCollection.stats?.done}
                           </span>
                         </div>
                       )}
-                      {selectedCollection.stats.pending > 0 && (
+                      {selectedCollection.stats?.pending > 0 && (
                         <div className="flex justify-between">
                           <span className="text-slate-500">Čeká</span>
                           <span className="font-medium text-slate-700">
-                            {selectedCollection.stats.pending}
+                            {selectedCollection.stats?.pending}
                           </span>
                         </div>
                       )}
-                      {selectedCollection.stats.error > 0 && (
+                      {selectedCollection.stats?.error > 0 && (
                         <div className="flex justify-between">
                           <span className="text-red-600">Chyba</span>
                           <span className="font-medium text-red-700">
-                            {selectedCollection.stats.error}
+                            {selectedCollection.stats?.error}
                           </span>
                         </div>
                       )}
-                      {selectedCollection.stats.blank > 0 && (
+                      {selectedCollection.stats?.blank > 0 && (
                         <div className="flex justify-between">
                           <span className="text-slate-400">Prázdné</span>
                           <span className="font-medium text-slate-500">
-                            {selectedCollection.stats.blank}
+                            {selectedCollection.stats?.blank}
                           </span>
                         </div>
                       )}
@@ -1187,27 +1187,27 @@ function WorkspaceContent(): React.JSX.Element {
                     {/* Status bar */}
                     {selectedCollection._count.pages > 0 && (
                       <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        {selectedCollection.stats.done > 0 && (
+                        {selectedCollection.stats?.done > 0 && (
                           <div
                             className="bg-green-500"
                             style={{
-                              width: `${(selectedCollection.stats.done / selectedCollection._count.pages) * 100}%`,
+                              width: `${(selectedCollection.stats?.done / selectedCollection._count.pages) * 100}%`,
                             }}
                           />
                         )}
-                        {selectedCollection.stats.error > 0 && (
+                        {selectedCollection.stats?.error > 0 && (
                           <div
                             className="bg-red-400"
                             style={{
-                              width: `${(selectedCollection.stats.error / selectedCollection._count.pages) * 100}%`,
+                              width: `${(selectedCollection.stats?.error / selectedCollection._count.pages) * 100}%`,
                             }}
                           />
                         )}
-                        {selectedCollection.stats.blank > 0 && (
+                        {selectedCollection.stats?.blank > 0 && (
                           <div
                             className="bg-slate-300"
                             style={{
-                              width: `${(selectedCollection.stats.blank / selectedCollection._count.pages) * 100}%`,
+                              width: `${(selectedCollection.stats?.blank / selectedCollection._count.pages) * 100}%`,
                             }}
                           />
                         )}
@@ -1216,8 +1216,8 @@ function WorkspaceContent(): React.JSX.Element {
                   </div>
 
                   {/* Tokens & cost */}
-                  {(selectedCollection.stats.inputTokens > 0 ||
-                    selectedCollection.stats.outputTokens > 0) && (
+                  {(selectedCollection.stats?.inputTokens > 0 ||
+                    selectedCollection.stats?.outputTokens > 0) && (
                     <div>
                       <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         Spotřeba
@@ -1226,20 +1226,20 @@ function WorkspaceContent(): React.JSX.Element {
                         <div className="flex justify-between">
                           <span className="text-slate-500">Input tokeny</span>
                           <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats.inputTokens / 1000).toFixed(1)}k
+                            {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Output tokeny</span>
                           <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats.outputTokens / 1000).toFixed(1)}k
+                            {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
                           </span>
                         </div>
                         <div className="flex justify-between border-t border-slate-100 pt-1">
                           <span className="font-medium text-slate-600">Cena</span>
                           <span className="font-semibold text-slate-800">
                             {'$'}
-                            {selectedCollection.stats.costUsd.toFixed(2)}
+                            {selectedCollection.stats?.costUsd.toFixed(2)}
                           </span>
                         </div>
                       </div>
