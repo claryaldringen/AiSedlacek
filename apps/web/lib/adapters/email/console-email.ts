@@ -7,4 +7,11 @@ export class ConsoleEmailProvider implements IEmailProvider {
     console.log(`URL: ${resetUrl}`);
     console.log('======================');
   }
+
+  async sendVerification(email: string, verifyUrl: string): Promise<void> {
+    console.log('=== EMAIL VERIFICATION ===');
+    console.log(`To: ${email}`);
+    console.log(`URL: ${verifyUrl}`);
+    console.log('==========================');
+  }
 }
