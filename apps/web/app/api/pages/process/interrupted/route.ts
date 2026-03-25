@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { requireUserId } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 // On Vercel serverless, there is no persistent in-memory state.
 // We cannot tell if a 'processing' page is actively being handled
@@ -10,12 +11,14 @@ import { prisma } from '@/lib/infrastructure/db';
 //
 // Users can still manually reset stuck pages via POST to this endpoint.
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   // Never auto-detect interrupted pages on serverless
@@ -23,12 +26,14 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json({ count: 0, pageIds: [] });
 }
 
-export async function POST(): Promise<NextResponse> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const result = await prisma.page.updateMany({

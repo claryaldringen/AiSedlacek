@@ -1,7 +1,12 @@
 import { auth } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { createTransaction, czkToTokens, getTokenBalance, generateVariableSymbol } from '@/lib/infrastructure/billing';
+import {
+  createTransaction,
+  czkToTokens,
+  getTokenBalance,
+  generateVariableSymbol,
+} from '@/lib/infrastructure/billing';
 
 const lastFioCallByUser = new Map<string, number>();
 
@@ -22,7 +27,10 @@ export async function POST(): Promise<NextResponse> {
   }
 
   // Ensure user has a numeric variable symbol
-  let user = await prisma.user.findUnique({ where: { id: userId }, select: { variableSymbol: true } });
+  let user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { variableSymbol: true },
+  });
   if (!user?.variableSymbol) {
     const vs = await generateVariableSymbol();
     await prisma.user.update({ where: { id: userId }, data: { variableSymbol: vs } });

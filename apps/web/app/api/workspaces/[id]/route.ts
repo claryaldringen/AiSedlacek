@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const t = await getApiTranslations(request, 'api');
   const { id } = await params;
 
   const workspace = await prisma.workspace.findUnique({
@@ -44,7 +46,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
   });
 
   if (!workspace) {
-    return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
   }
 
   // Access check: public workspace is accessible to all authenticated users;
@@ -52,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
   if (workspace.id !== PUBLIC_WORKSPACE_ID) {
     const isMember = workspace.members.some((m) => m.userId === userId);
     if (!isMember) {
-      return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+      return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
     }
   }
 
@@ -74,6 +76,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const t = await getApiTranslations(request, 'api');
   const { id } = await params;
 
   const workspace = await prisma.workspace.findUnique({
@@ -82,33 +85,33 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   });
 
   if (!workspace) {
-    return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
   }
 
   // Only shared workspaces can be renamed, and only by owner
   if (workspace.type !== 'shared') {
-    return NextResponse.json({ error: 'Tento workspace nelze upravit' }, { status: 403 });
+    return NextResponse.json({ error: t('cannotEditWorkspace') }, { status: 403 });
   }
 
   if (workspace.ownerId !== userId) {
-    return NextResponse.json({ error: 'Nedostatečná oprávnění' }, { status: 403 });
+    return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
   }
 
   const { name } = body as { name?: unknown };
 
   if (typeof name !== 'string' || name.trim() === '') {
-    return NextResponse.json({ error: 'Název workspace je povinný' }, { status: 400 });
+    return NextResponse.json({ error: t('workspaceNameRequired') }, { status: 400 });
   }
 
   const updated = await prisma.workspace.update({
@@ -124,28 +127,29 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const t = await getApiTranslations(request, 'api');
   const { id } = await params;
 
   const workspace = await prisma.workspace.findUnique({ where: { id } });
 
   if (!workspace) {
-    return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
   }
 
   // Cannot delete home or public workspaces
   if (workspace.type !== 'shared') {
-    return NextResponse.json({ error: 'Tento workspace nelze smazat' }, { status: 403 });
+    return NextResponse.json({ error: t('cannotDeleteWorkspace') }, { status: 403 });
   }
 
   if (workspace.ownerId !== userId) {
-    return NextResponse.json({ error: 'Nedostatečná oprávnění' }, { status: 403 });
+    return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
   }
 
   await prisma.workspace.delete({ where: { id } });

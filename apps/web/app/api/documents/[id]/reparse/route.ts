@@ -3,6 +3,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { parseOcrJson } from '@ai-sedlacek/ocr';
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -10,12 +11,14 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Re-parse a document from its stored rawResponse without calling the LLM again.
  * Returns the updated document if successful, or 422 if parsing still fails.
  */
-export async function POST(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -26,18 +29,18 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
   });
 
   if (!doc || doc.page.userId !== userId) {
-    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
   if (!doc.rawResponse) {
-    return NextResponse.json({ error: 'Dokument nemá uložený rawResponse' }, { status: 422 });
+    return NextResponse.json({ error: t('noRawResponse') }, { status: 422 });
   }
 
   let parsed;
   try {
     parsed = parseOcrJson(doc.rawResponse);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Neznámá chyba';
+    const message = err instanceof Error ? err.message : t('serverError');
     return NextResponse.json({ error: `Re-parse selhal: ${message}` }, { status: 422 });
   }
 

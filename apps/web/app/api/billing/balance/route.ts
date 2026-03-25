@@ -1,13 +1,15 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
 import { getTokenBalance, generateVariableSymbol, czkToTokens } from '@/lib/infrastructure/billing';
+import { getTranslations } from 'next-intl/server';
 
 export async function GET(): Promise<Response> {
   const session = await auth();
   const userId = session?.user?.id as string | undefined;
 
   if (!userId) {
-    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+    const t = await getTranslations({ locale: 'en', namespace: 'api' });
+    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const balance = await getTokenBalance(userId);

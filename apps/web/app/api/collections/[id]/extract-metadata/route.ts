@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -9,12 +10,14 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Extract structured metadata from the collection's existing context using Claude.
  * Updates title, author, yearFrom, yearTo, librarySignature, abstract.
  */
-export async function POST(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -25,11 +28,11 @@ export async function POST(_request: NextRequest, { params }: RouteContext): Pro
   });
 
   if (!collection || collection.userId !== userId) {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   if (!collection.context || collection.context.trim().length === 0) {
-    return NextResponse.json({ error: 'Svazek nemá kontext' }, { status: 400 });
+    return NextResponse.json({ error: t('collectionHasNoContext') }, { status: 400 });
   }
 
   const client = new Anthropic();
@@ -59,14 +62,14 @@ ${collection.context}`,
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   if (!text) {
-    return NextResponse.json({ error: 'AI nevrátila výsledek' }, { status: 500 });
+    return NextResponse.json({ error: t('aiNoResult') }, { status: 500 });
   }
 
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(text) as Record<string, unknown>;
   } catch {
-    return NextResponse.json({ error: 'Nepodařilo se parsovat odpověď AI' }, { status: 500 });
+    return NextResponse.json({ error: t('aiParseError') }, { status: 500 });
   }
 
   const metadata = {

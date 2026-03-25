@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ slug: string }> };
 
-export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
   const { slug } = await params;
 
   const publicSlug = await prisma.publicSlug.findUnique({ where: { slug } });
   if (!publicSlug) {
-    return NextResponse.json({ error: 'Nenalezeno' }, { status: 404 });
+    return NextResponse.json({ error: t('notFound') }, { status: 404 });
   }
 
   if (publicSlug.targetType === 'collection') {
@@ -30,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     });
 
     if (!collection || !collection.isPublic) {
-      return NextResponse.json({ error: 'Nenalezeno' }, { status: 404 });
+      return NextResponse.json({ error: t('notFound') }, { status: 404 });
     }
 
     return NextResponse.json({
@@ -72,7 +74,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     });
 
     if (!page || !page.isPublic) {
-      return NextResponse.json({ error: 'Nenalezeno' }, { status: 404 });
+      return NextResponse.json({ error: t('notFound') }, { status: 404 });
     }
 
     return NextResponse.json({
@@ -92,5 +94,5 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     });
   }
 
-  return NextResponse.json({ error: 'Nenalezeno' }, { status: 404 });
+  return NextResponse.json({ error: t('notFound') }, { status: 404 });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -10,11 +11,13 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Saves the extracted context to the collection.
  */
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -23,19 +26,19 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { url, text } = (body as { url?: string; text?: string }) ?? {};
   const hasUrl = typeof url === 'string' && url.trim() !== '';
   const hasText = typeof text === 'string' && text.trim() !== '';
   if (!hasUrl && !hasText) {
-    return NextResponse.json({ error: 'Chybí url nebo text' }, { status: 400 });
+    return NextResponse.json({ error: t('missingUrl') }, { status: 400 });
   }
 
   const collection = await prisma.collection.findUnique({ where: { id } });
   if (!collection || collection.userId !== userId) {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   // Get new content — either from URL or from provided text
@@ -80,7 +83,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const client = new Anthropic();
   let response;
   try {
-
     const hasExisting = existingContext.trim().length > 0;
     let prompt: string;
 

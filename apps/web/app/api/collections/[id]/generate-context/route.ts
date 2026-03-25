@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
 import { checkBalance } from '@/lib/infrastructure/billing';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 export const maxDuration = 10;
 
@@ -13,11 +14,13 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST body: { pageIds: string[] }
  */
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -26,24 +29,24 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { pageIds } = (body as { pageIds?: string[] }) ?? {};
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
-    return NextResponse.json({ error: 'Chybí pageIds' }, { status: 400 });
+    return NextResponse.json({ error: t('missingPageIds') }, { status: 400 });
   }
 
   // Verify collection belongs to user
   const collection = await prisma.collection.findUnique({ where: { id } });
   if (!collection || collection.userId !== userId) {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   // Check token balance before enqueuing
   const { balance, sufficient } = await checkBalance(userId);
   if (!sufficient) {
-    return NextResponse.json({ error: 'Nedostatečný kredit', balance }, { status: 402 });
+    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
   }
 
   // Create ProcessingJob for the worker to pick up

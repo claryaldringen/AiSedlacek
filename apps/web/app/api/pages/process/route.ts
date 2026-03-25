@@ -4,26 +4,29 @@ import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { requireUserId } from '@/lib/auth';
 import { checkBalance } from '@/lib/infrastructure/billing';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 // ── POST: Start processing via BullMQ ───────────────────────
 
 export async function POST(request: NextRequest): Promise<Response> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return Response.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null || !('pageIds' in body)) {
-    return Response.json({ error: 'Chybí pageIds' }, { status: 400 });
+    return Response.json({ error: t('missingPageIds') }, { status: 400 });
   }
 
   const {
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   };
 
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
-    return Response.json({ error: 'pageIds musí být neprázdné pole' }, { status: 400 });
+    return Response.json({ error: t('pageIdsNotArray') }, { status: 400 });
   }
 
   // Verify all pages belong to the current user
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
   if (unauthorizedIds.length > 0) {
     return Response.json(
-      { error: 'Některé stránky nepatří přihlášenému uživateli' },
+      { error: t('somePagesUnauthorized') },
       { status: 403 },
     );
   }
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Check token balance before starting
   const { balance, sufficient } = await checkBalance(userId);
   if (!sufficient) {
-    return Response.json({ error: 'Nedostatečný kredit', balance }, { status: 402 });
+    return Response.json({ error: t('insufficientCredit'), balance }, { status: 402 });
   }
 
   const targetLang =
@@ -84,7 +87,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
     if (existingOcrJob) {
       return Response.json(
-        { error: 'Pro tento svazek již probíhá zpracování', jobId: existingOcrJob.id },
+        { error: t('processingAlreadyRunning'), jobId: existingOcrJob.id },
         { status: 409 },
       );
     }
@@ -116,12 +119,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
 // ── GET: Check for running job (for reconnect support) ───────
 
-export async function GET(): Promise<Response> {
+export async function GET(request: NextRequest): Promise<Response> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   // Only reconnect to OCR jobs — non-OCR jobs (retranslate, generate-context, fix-contexts)

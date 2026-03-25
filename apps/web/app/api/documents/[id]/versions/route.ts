@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -20,7 +23,7 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
     include: { page: { select: { userId: true } } },
   });
   if (!doc || doc.page.userId !== userId) {
-    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
   const versions = await prisma.documentVersion.findMany({

@@ -6,6 +6,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp', 'image/gif'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
@@ -29,25 +30,27 @@ async function withSharpLimit<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { url, collectionId, displayName } =
     (body as { url?: string; collectionId?: string; displayName?: string }) ?? {};
 
   if (typeof url !== 'string' || url.trim() === '') {
-    return NextResponse.json({ error: 'Chybí url' }, { status: 400 });
+    return NextResponse.json({ error: t('missingUrl') }, { status: 400 });
   }
 
   // Validate URL
@@ -56,20 +59,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     parsedUrl = new URL(url.trim());
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
       return NextResponse.json(
-        { error: 'URL musí začínat http:// nebo https://' },
+        { error: t('urlMustBeHttp') },
         { status: 400 },
       );
     }
   } catch {
-    return NextResponse.json({ error: 'Neplatná URL' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidUrl') }, { status: 400 });
   }
 
   try {
-    return await handleImport(parsedUrl, userId, collectionId, displayName);
+    return await handleImport(parsedUrl, userId, collectionId, displayName, t);
   } catch (err) {
     console.error('[import-url] Unhandled error for URL:', parsedUrl.toString());
     console.error('[import-url] Error:', err instanceof Error ? err.stack : err);
-    const message = err instanceof Error ? err.message : 'Interní chyba serveru';
+    const message = err instanceof Error ? err.message : t('serverError');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -79,6 +82,7 @@ async function handleImport(
   userId: string,
   collectionId: unknown,
   displayName: unknown,
+  t: Awaited<ReturnType<typeof getApiTranslations>>,
 ): Promise<NextResponse> {
   // Try prefetch cache first, fall back to fresh download
   const cached = await getOrWait(parsedUrl.toString());
@@ -98,7 +102,7 @@ async function handleImport(
         signal: AbortSignal.timeout(60000),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nepodařilo se stáhnout';
+      const message = err instanceof Error ? err.message : String(err);
       return NextResponse.json({ error: `Stahování selhalo: ${message}` }, { status: 422 });
     }
 
@@ -119,7 +123,7 @@ async function handleImport(
   if (!ALLOWED_TYPES.includes(contentType)) {
     return NextResponse.json(
       {
-        error: `Nepodporovaný formát: ${contentType || 'neznámý'}. Povolené: JPEG, PNG, TIFF, WebP`,
+        error: t('unsupportedFormatWithType', { type: contentType || 'unknown' }),
       },
       { status: 422 },
     );
@@ -128,7 +132,10 @@ async function handleImport(
   if (buffer.length > MAX_SIZE_MB * 1024 * 1024) {
     return NextResponse.json(
       {
-        error: `Obrázek je příliš velký (${(buffer.length / 1024 / 1024).toFixed(1)} MB, max ${MAX_SIZE_MB} MB)`,
+        error: t('imageTooLarge', {
+          size: (buffer.length / 1024 / 1024).toFixed(1),
+          max: MAX_SIZE_MB,
+        }),
       },
       { status: 422 },
     );
@@ -139,7 +146,7 @@ async function handleImport(
   const existing = await prisma.page.findFirst({ where: { hash, userId } });
   if (existing) {
     return NextResponse.json(
-      { error: 'Duplicitní obrázek – již existuje v knihovně', existingPageId: existing.id },
+      { error: t('duplicateImage'), existingPageId: existing.id },
       { status: 409 },
     );
   }
@@ -226,7 +233,7 @@ async function handleImport(
   if (resolvedCollectionId) {
     const collection = await prisma.collection.findUnique({ where: { id: resolvedCollectionId } });
     if (!collection) {
-      return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+      return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
     }
   }
 
@@ -244,11 +251,12 @@ async function handleImport(
     data: {
       userId,
       filename: urlFilename,
-      displayName: typeof displayName === 'string' && displayName.trim() !== ''
-        ? displayName.trim()
-        : cdFilename
-          ? cdFilename.replace(/\.[^.]+$/, '')
-          : urlFilename.replace(/\.[^.]+$/, ''),
+      displayName:
+        typeof displayName === 'string' && displayName.trim() !== ''
+          ? displayName.trim()
+          : cdFilename
+            ? cdFilename.replace(/\.[^.]+$/, '')
+            : urlFilename.replace(/\.[^.]+$/, ''),
       hash,
       imageUrl: storageResult.url,
       thumbnailUrl,

@@ -3,15 +3,18 @@ import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { requireUserId } from '@/lib/auth';
 import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -35,37 +38,38 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
   });
 
   if (!collection || collection.userId !== userId) {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   return NextResponse.json(collection);
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
   try {
     let userId: string;
     try {
       userId = await requireUserId();
     } catch {
-      return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+      return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
     }
 
     const { id } = await params;
 
     const collection = await prisma.collection.findUnique({ where: { id } });
     if (!collection || collection.userId !== userId) {
-      return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+      return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
     }
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+      return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
     }
 
     if (typeof body !== 'object' || body === null) {
-      return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+      return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
     }
 
     const {
@@ -195,7 +199,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     }
 
     if (Object.keys(data).length === 0) {
-      return NextResponse.json({ error: 'Nic k aktualizaci' }, { status: 400 });
+      return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
     }
 
     if (sharingFieldsPresent) {
@@ -252,29 +256,31 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       'code' in err &&
       (err as { code: string }).code === 'P2002'
     ) {
-      return NextResponse.json({ error: 'Tento slug je již obsazený' }, { status: 409 });
+      return NextResponse.json({ error: t('slugTaken') }, { status: 409 });
     }
-    const message = err instanceof Error ? err.message : 'Interní chyba serveru';
+    const message = err instanceof Error ? err.message : t('serverError');
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
 
   const collection = await prisma.collection.findUnique({ where: { id } });
   if (!collection || collection.userId !== userId) {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   try {
@@ -285,6 +291,6 @@ export async function DELETE(
     });
     return NextResponse.json({ ok: true });
   } catch {
-    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 }

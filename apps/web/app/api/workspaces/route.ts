@@ -33,21 +33,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const { getApiTranslations } = await import('@/lib/infrastructure/api-locale');
+  const t = await getApiTranslations(request, 'api');
+
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
   }
 
   const { name } = body as { name?: unknown };
 
   if (typeof name !== 'string' || name.trim() === '') {
-    return NextResponse.json({ error: 'Název workspace je povinný' }, { status: 400 });
+    return NextResponse.json({ error: t('workspaceNameRequired') }, { status: 400 });
   }
 
   const workspace = await prisma.workspace.create({

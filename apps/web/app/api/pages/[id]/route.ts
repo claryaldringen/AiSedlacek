@@ -3,15 +3,18 @@ import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { getStorage } from '@/lib/adapters/storage';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -29,36 +32,38 @@ export async function GET(_request: NextRequest, { params }: RouteContext): Prom
   });
 
   if (!page || page.userId !== userId) {
-    return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
   return NextResponse.json(page);
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
 
   const page = await prisma.page.findUnique({ where: { id } });
   if (!page || page.userId !== userId) {
-    return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
   }
 
   const { collectionId, order, status, displayName, isPublic, slug } = body as {
@@ -143,7 +148,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   if (Object.keys(data).length === 0) {
-    return NextResponse.json({ error: 'Nic k aktualizaci' }, { status: 400 });
+    return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
   }
 
   try {
@@ -185,21 +190,23 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       'code' in err &&
       (err as { code: string }).code === 'P2002'
     ) {
-      return NextResponse.json({ error: 'Tento slug je již obsazený' }, { status: 409 });
+      return NextResponse.json({ error: t('slugTaken') }, { status: 409 });
     }
-    return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: RouteContext,
 ): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { id } = await params;
@@ -207,7 +214,7 @@ export async function DELETE(
   try {
     const page = await prisma.page.findUnique({ where: { id } });
     if (!page || page.userId !== userId) {
-      return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+      return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
     }
 
     // Delete file from storage
@@ -226,6 +233,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch {
-    return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 }

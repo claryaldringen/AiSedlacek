@@ -3,25 +3,28 @@ import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
 import { isBlankPage } from '@/lib/infrastructure/blank-detection';
 import { getStorage } from '@/lib/adapters/storage';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { pageIds } = (body ?? {}) as { pageIds?: string[] };
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
-    return NextResponse.json({ error: 'Chybí pageIds' }, { status: 400 });
+    return NextResponse.json({ error: t('missingPageIds') }, { status: 400 });
   }
 
   const pages = await prisma.page.findMany({

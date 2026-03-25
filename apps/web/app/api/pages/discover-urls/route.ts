@@ -9,17 +9,20 @@ import { NextRequest } from 'next/server';
  * 3. Simple numeric: ...page_003.jpg → 004, 005, ...
  */
 export async function POST(request: NextRequest): Promise<Response> {
+  const { getApiTranslations } = await import('@/lib/infrastructure/api-locale');
+  const t = await getApiTranslations(request, 'api');
+
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return Response.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { url, direction, limit, offset } =
     (body as { url?: string; direction?: string; limit?: number; offset?: number }) ?? {};
   if (typeof url !== 'string' || url.trim() === '') {
-    return Response.json({ error: 'Chybí url' }, { status: 400 });
+    return Response.json({ error: t('missingUrl') }, { status: 400 });
   }
   const scanDirection = direction === 'forward' || direction === 'backward' ? direction : 'both';
   const pageLimit = typeof limit === 'number' && limit > 0 ? limit : 20;

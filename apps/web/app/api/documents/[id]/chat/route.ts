@@ -8,6 +8,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { detectMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -47,11 +48,13 @@ Pokud uživatel žádá jen informaci (ne opravu), odpověz normálně bez updat
 Odpovídej v jazyce, kterým píše uživatel.`;
 
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<Response> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return Response.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { balance, sufficient } = await checkBalance(userId);
@@ -60,18 +63,21 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     const body = encoder.encode(
       `data: ${JSON.stringify({ type: 'insufficient_tokens', balance })}\n\n`,
     );
-    return new Response(new ReadableStream({
-      start(controller) {
-        controller.enqueue(body);
-        controller.close();
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(body);
+          controller.close();
+        },
+      }),
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
       },
-    }), {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
-    });
+    );
   }
 
   const { id } = await params;
@@ -80,12 +86,12 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return Response.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { messages } = (body as { messages?: ChatMessage[] }) ?? {};
   if (!Array.isArray(messages) || messages.length === 0) {
-    return Response.json({ error: 'Chybí messages' }, { status: 400 });
+    return Response.json({ error: t('missingMessages') }, { status: 400 });
   }
 
   // Load document with all context
@@ -99,7 +105,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   });
 
   if (!doc || doc.page.userId !== userId) {
-    return Response.json({ error: 'Dokument nenalezen' }, { status: 404 });
+    return Response.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
   // Load the image for multimodal context (resize if > 5 MB)
@@ -219,7 +225,7 @@ ${glossaryText}`;
 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Neznámá chyba';
+        const message = err instanceof Error ? err.message : t('serverError');
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`),
         );

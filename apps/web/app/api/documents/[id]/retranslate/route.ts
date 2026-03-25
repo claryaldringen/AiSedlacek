@@ -4,15 +4,18 @@ export const maxDuration = 10;
 import { prisma } from '@/lib/infrastructure/db';
 import { checkBalance } from '@/lib/infrastructure/billing';
 import { requireUserId } from '@/lib/auth';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const { balance, sufficient } = await checkBalance(userId);
@@ -26,7 +29,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   const { language, previousTranslation } =
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     },
   });
   if (!doc || doc.page.userId !== userId) {
-    return NextResponse.json({ error: 'Dokument nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
   // Create ProcessingJob for the worker to pick up

@@ -6,23 +6,26 @@ import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { requireUserId } from '@/lib/auth';
 import { naturalCompare } from '@/lib/infrastructure/natural-sort';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch {
-    return NextResponse.json({ error: 'Neplatný formData' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidFormData') }, { status: 400 });
   }
 
   const collectionId = formData.get('collectionId');
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const files = formData.getAll('files');
   if (files.length === 0) {
-    return NextResponse.json({ error: 'Nebyl nahrán žádný soubor' }, { status: 400 });
+    return NextResponse.json({ error: t('noFile') }, { status: 400 });
   }
 
   const storage = getStorage();
@@ -40,7 +43,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   for (const entry of files) {
     if (!(entry instanceof Blob)) {
-      errors.push({ filename: 'unknown', error: 'Neplatný soubor' });
+      errors.push({ filename: 'unknown', error: t('invalidFile') });
       continue;
     }
 
@@ -50,13 +53,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!ALLOWED_TYPES.includes(file.type)) {
       errors.push({
         filename,
-        error: 'Nepodporovaný formát. Povolené: JPEG, PNG, TIFF, WebP',
+        error: t('unsupportedFormat'),
       });
       continue;
     }
 
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      errors.push({ filename, error: `Soubor je příliš velký (max ${MAX_SIZE_MB} MB)` });
+      errors.push({ filename, error: t('fileTooLarge', { max: MAX_SIZE_MB }) });
       continue;
     }
 
@@ -74,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             data: { collectionId: resolvedCollectionId },
           });
         }
-        errors.push({ filename, error: 'Duplicitní obrázek – již existuje v knihovně' });
+        errors.push({ filename, error: t('duplicateImage') });
         continue;
       }
 
@@ -99,7 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           where: { id: resolvedCollectionId },
         });
         if (!collection) {
-          errors.push({ filename, error: `Svazek ${resolvedCollectionId} nenalezen` });
+          errors.push({ filename, error: t('collectionNotFound') });
           continue;
         }
       }
@@ -133,7 +136,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       created.push(page);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Neznámá chyba';
+      const message = err instanceof Error ? err.message : t('serverError');
       errors.push({ filename, error: message });
     }
   }

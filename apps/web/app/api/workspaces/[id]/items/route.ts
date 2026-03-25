@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -10,6 +11,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const t = await getApiTranslations(request, 'api');
   const { id: workspaceId } = await params;
 
   // Verify workspace exists and user is a member (or it's the public workspace being managed by the system)
@@ -19,14 +21,14 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   });
 
   if (!workspace) {
-    return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
   }
 
   // For non-public workspaces, user must be a member
   if (workspace.id !== PUBLIC_WORKSPACE_ID) {
     const isMember = workspace.members.some((m) => m.userId === userId);
     if (!isMember) {
-      return NextResponse.json({ error: 'Nedostatečná oprávnění' }, { status: 403 });
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
     }
   }
 
@@ -34,31 +36,31 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
   }
 
   const { collectionId, pageId } = body as { collectionId?: unknown; pageId?: unknown };
 
   if (!collectionId && !pageId) {
     return NextResponse.json(
-      { error: 'Musí být uvedeno collectionId nebo pageId' },
+      { error: t('mustProvideCollectionOrPage') },
       { status: 400 },
     );
   }
 
   if (collectionId && pageId) {
-    return NextResponse.json({ error: 'Nelze přidat kolekci i stránku najednou' }, { status: 400 });
+    return NextResponse.json({ error: t('cannotAddBoth') }, { status: 400 });
   }
 
   // Validate the referenced entity exists and belongs to user
   if (typeof collectionId === 'string') {
     const collection = await prisma.collection.findUnique({ where: { id: collectionId } });
     if (!collection || collection.userId !== userId) {
-      return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
+      return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
     }
 
     const item = await prisma.workspaceItem.create({
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (typeof pageId === 'string') {
     const page = await prisma.page.findUnique({ where: { id: pageId } });
     if (!page || page.userId !== userId) {
-      return NextResponse.json({ error: 'Stránka nenalezena' }, { status: 404 });
+      return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
     }
 
     const item = await prisma.workspaceItem.create({
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json(item, { status: 201 });
   }
 
-  return NextResponse.json({ error: 'Neplatný typ položky' }, { status: 400 });
+  return NextResponse.json({ error: t('invalidItemType') }, { status: 400 });
 }
 
 export async function DELETE(
@@ -90,6 +92,7 @@ export async function DELETE(
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  const t = await getApiTranslations(request, 'api');
   const { id: workspaceId } = await params;
 
   // Verify workspace exists and user is a member
@@ -99,13 +102,13 @@ export async function DELETE(
   });
 
   if (!workspace) {
-    return NextResponse.json({ error: 'Workspace nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('workspaceNotFound') }, { status: 404 });
   }
 
   if (workspace.id !== PUBLIC_WORKSPACE_ID) {
     const isMember = workspace.members.some((m) => m.userId === userId);
     if (!isMember) {
-      return NextResponse.json({ error: 'Nedostatečná oprávnění' }, { status: 403 });
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
     }
   }
 
@@ -113,11 +116,11 @@ export async function DELETE(
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
   if (typeof body !== 'object' || body === null) {
-    return NextResponse.json({ error: 'Neplatné tělo požadavku' }, { status: 400 });
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
   }
 
   const { collectionId, pageId } = body as { collectionId?: unknown; pageId?: unknown };
@@ -136,5 +139,5 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   }
 
-  return NextResponse.json({ error: 'Musí být uvedeno collectionId nebo pageId' }, { status: 400 });
+  return NextResponse.json({ error: t('mustProvideCollectionOrPage') }, { status: 400 });
 }

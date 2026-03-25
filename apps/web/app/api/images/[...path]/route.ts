@@ -8,10 +8,7 @@ export async function GET(
 ): Promise<NextResponse> {
   // In Vercel Blob mode, images are served directly from CDN – this route is not used.
   if (isRemoteStorage()) {
-    return NextResponse.json(
-      { error: 'Obrázky jsou servírovány přímo z R2 CDN' },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'Obrázky jsou servírovány přímo z R2 CDN' }, { status: 404 });
   }
 
   const segments = (await params).path;

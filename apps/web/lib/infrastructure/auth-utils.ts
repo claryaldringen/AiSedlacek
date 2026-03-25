@@ -1,5 +1,6 @@
 import { requireUserId } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+import { getTranslations } from 'next-intl/server';
 
 /**
  * Authenticate the current request and return the userId.
@@ -11,13 +12,14 @@ import { NextResponse } from 'next/server';
  * const { userId } = auth;
  * ```
  */
-export async function getAuthenticatedUserId(): Promise<
-  { userId: string; error?: never } | { userId?: never; error: NextResponse }
-> {
+export async function getAuthenticatedUserId(
+  locale = 'en',
+): Promise<{ userId: string; error?: never } | { userId?: never; error: NextResponse }> {
   try {
     const userId = await requireUserId();
     return { userId };
   } catch {
-    return { error: NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 }) };
+    const t = await getTranslations({ locale, namespace: 'api' });
+    return { error: NextResponse.json({ error: t('notLoggedIn') }, { status: 401 }) };
   }
 }

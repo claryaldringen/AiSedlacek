@@ -147,7 +147,11 @@ describe('GET /api/public/[slug]', () => {
       targetId: 'col-2',
       createdAt: new Date(),
     });
-    mockCollectionFindUnique.mockResolvedValue({ ...FAKE_COLLECTION, id: 'col-2', isPublic: false });
+    mockCollectionFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      id: 'col-2',
+      isPublic: false,
+    });
 
     const res = await GET(makeRequest('privatni-svazek'), routeContext('privatni-svazek'));
 

@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUserId } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 // GET /api/pages/process/status?jobId=xxx
 // Returns current job status from DB
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   const jobId = request.nextUrl.searchParams.get('jobId');
   if (!jobId) {
-    return NextResponse.json({ error: 'Chybí jobId' }, { status: 400 });
+    return NextResponse.json({ error: t('missingJobId') }, { status: 400 });
   }
 
   const job = await prisma.processingJob.findUnique({
@@ -23,12 +26,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 
   if (!job) {
-    return NextResponse.json({ error: 'Job nenalezen' }, { status: 404 });
+    return NextResponse.json({ error: t('jobNotFound') }, { status: 404 });
   }
 
   // Verify job belongs to user
   if (job.userId !== userId) {
-    return NextResponse.json({ error: 'Přístup zamítnut' }, { status: 403 });
+    return NextResponse.json({ error: t('accessDenied') }, { status: 403 });
   }
 
   // Fetch current state of pages for progress detail
@@ -62,11 +65,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // Body: { jobId, action: "cancel" }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   let userId: string;
   try {
     userId = await requireUserId();
   } catch {
-    return NextResponse.json({ error: 'Nepřihlášen' }, { status: 401 });
+    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
   }
 
   let body: { jobId?: string; action?: string } = {};
@@ -79,7 +84,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { jobId, action } = body;
 
   if (action !== 'cancel') {
-    return NextResponse.json({ error: 'Neznámá akce' }, { status: 400 });
+    return NextResponse.json({ error: t('unknownAction') }, { status: 400 });
   }
 
   let job;
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       where: { id: jobId },
     });
     if (!job || job.userId !== userId) {
-      return NextResponse.json({ error: 'Job nenalezen' }, { status: 404 });
+      return NextResponse.json({ error: t('jobNotFound') }, { status: 404 });
     }
   } else {
     // Find the most recent running job for this user
@@ -99,7 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   if (!job || (job.status !== 'running' && job.status !== 'queued')) {
-    return NextResponse.json({ error: 'Žádné aktivní zpracování' }, { status: 404 });
+    return NextResponse.json({ error: t('noActiveProcessing') }, { status: 404 });
   }
 
   // Set job status to cancelled
