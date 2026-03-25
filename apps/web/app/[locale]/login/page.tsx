@@ -2,8 +2,9 @@
 
 import { useState, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { useRouter, Link } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
 
 export default function LoginPage(): React.JSX.Element {
@@ -15,6 +16,8 @@ export default function LoginPage(): React.JSX.Element {
 }
 
 function LoginForm(): React.JSX.Element {
+  const t = useTranslations('auth');
+  const tc = useTranslations('common');
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') ?? '/workspace';
@@ -38,7 +41,7 @@ function LoginForm(): React.JSX.Element {
       });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        setError(data.error ?? 'Registrace selhala');
+        setError(data.error ?? t('registrationFailed'));
         setLoading(false);
         return;
       }
@@ -65,7 +68,7 @@ function LoginForm(): React.JSX.Element {
       if (!checkData.verified) {
         setError('EMAIL_NOT_VERIFIED');
       } else {
-        setError('Nesprávný email nebo heslo');
+        setError(t('wrongCredentials'));
       }
       setLoading(false);
       return;
@@ -92,28 +95,26 @@ function LoginForm(): React.JSX.Element {
         <div className="mx-auto w-full max-w-[340px] space-y-6">
           <div>
             <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">
-              {mode === 'login' ? 'Přihlášení' : 'Registrace'}
+              {mode === 'login' ? t('loginTitle') : t('registerTitle')}
             </h1>
             <p className="mt-1 text-sm text-[#7a6652]">
-              {mode === 'login'
-                ? 'Přihlaste se ke svému účtu'
-                : 'Vytvořte si účet a začněte číst rukopisy'}
+              {mode === 'login' ? t('loginSubtitle') : t('registerSubtitle')}
             </p>
           </div>
 
           {searchParams.get('verified') === 'true' && (
             <div className="rounded-lg bg-green-100 px-3 py-2 text-sm text-green-800">
-              Email úspěšně ověřen. Nyní se můžete přihlásit.
+              {t('emailVerifiedSuccess')}
             </div>
           )}
           {searchParams.get('error') === 'invalid-token' && (
             <div className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">
-              Ověřovací odkaz je neplatný nebo vypršel. Zaregistrujte se znovu nebo si nechte poslat nový.
+              {t('invalidToken')}
             </div>
           )}
           {searchParams.get('error') === 'missing-token' && (
             <div className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">
-              Chybí ověřovací token. Použijte odkaz z emailu.
+              {t('missingToken')}
             </div>
           )}
 
@@ -140,13 +141,13 @@ function LoginForm(): React.JSX.Element {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            Pokračovat přes Google
+            {t('continueWithGoogle')}
           </button>
 
           {/* Divider */}
           <div className="flex items-center gap-3">
             <div className="h-px flex-1 bg-[#d4c5a9]" />
-            <span className="font-serif text-xs text-[#a08060]">nebo</span>
+            <span className="font-serif text-xs text-[#a08060]">{t('or')}</span>
             <div className="h-px flex-1 bg-[#d4c5a9]" />
           </div>
 
@@ -155,20 +156,20 @@ function LoginForm(): React.JSX.Element {
             {mode === 'register' && (
               <div>
                 <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                  Jméno
+                  {t('nameLabel')}
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Volitelné"
+                  placeholder={t('nameLabel')}
                   className={inputClasses}
                 />
               </div>
             )}
             <div>
               <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                Email
+                {t('emailLabel')}
               </label>
               <input
                 type="email"
@@ -180,7 +181,7 @@ function LoginForm(): React.JSX.Element {
             </div>
             <div>
               <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                Heslo
+                {t('passwordLabel')}
               </label>
               <div className="relative">
                 <input
@@ -243,14 +244,14 @@ function LoginForm(): React.JSX.Element {
                   href="/forgot-password"
                   className="text-xs font-medium text-[#8b1a1a] hover:underline"
                 >
-                  Zapomenuté heslo?
+                  {t('forgotPassword')}
                 </Link>
               </div>
             )}
 
             {error === 'EMAIL_NOT_VERIFIED' ? (
               <div className="space-y-2 rounded-lg bg-[#8b1a1a]/10 px-3 py-2">
-                <p className="text-sm text-[#8b1a1a]">Email není ověřen.</p>
+                <p className="text-sm text-[#8b1a1a]">{t('emailNotVerified')}</p>
                 <button
                   onClick={() => {
                     sessionStorage.setItem('verify-email', email);
@@ -258,7 +259,7 @@ function LoginForm(): React.JSX.Element {
                   }}
                   className="text-sm font-semibold text-[#8b1a1a] hover:underline"
                 >
-                  Odeslat ověřovací email znovu
+                  {t('resendVerificationEmail')}
                 </button>
               </div>
             ) : error ? (
@@ -270,7 +271,11 @@ function LoginForm(): React.JSX.Element {
               disabled={loading || !email || !password}
               className="w-full rounded-lg bg-[#8b1a1a] px-4 py-2.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-md shadow-[#8b1a1a]/20 transition-all hover:bg-[#a52020] disabled:opacity-50"
             >
-              {loading ? 'Počkejte…' : mode === 'login' ? 'Přihlásit se' : 'Zaregistrovat se'}
+              {loading
+                ? tc('wait')
+                : mode === 'login'
+                  ? t('loginButton')
+                  : t('registerButton')}
             </button>
           </div>
 
@@ -278,7 +283,7 @@ function LoginForm(): React.JSX.Element {
           <p className="text-center text-sm text-[#7a6652]">
             {mode === 'login' ? (
               <>
-                Nemáte účet?{' '}
+                {t('noAccount')}{' '}
                 <button
                   onClick={() => {
                     setMode('register');
@@ -286,12 +291,12 @@ function LoginForm(): React.JSX.Element {
                   }}
                   className="font-semibold text-[#8b1a1a] hover:underline"
                 >
-                  Zaregistrujte se
+                  {t('registerLink')}
                 </button>
               </>
             ) : (
               <>
-                Máte účet?{' '}
+                {t('hasAccount')}{' '}
                 <button
                   onClick={() => {
                     setMode('login');
@@ -299,7 +304,7 @@ function LoginForm(): React.JSX.Element {
                   }}
                   className="font-semibold text-[#8b1a1a] hover:underline"
                 >
-                  Přihlaste se
+                  {t('loginLink')}
                 </button>
               </>
             )}
@@ -320,7 +325,7 @@ function LoginForm(): React.JSX.Element {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
-          Zpět na hlavní stránku
+          {tc('backToHome')}
         </Link>
       </div>
 

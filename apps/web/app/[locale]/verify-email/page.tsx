@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 
 export default function VerifyEmailPage(): React.JSX.Element {
   return (
@@ -12,6 +13,8 @@ export default function VerifyEmailPage(): React.JSX.Element {
 }
 
 function VerifyEmailContent(): React.JSX.Element {
+  const t = useTranslations('auth');
+  const tc = useTranslations('common');
   const [email, setEmail] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [sending, setSending] = useState(false);
@@ -39,13 +42,13 @@ function VerifyEmailContent(): React.JSX.Element {
         body: JSON.stringify({ email }),
       });
       if (res.status === 429) {
-        setMessage('Email byl odeslán nedávno. Zkuste to za chvíli.');
+        setMessage(t('emailRecentlySent'));
       } else {
-        setMessage('Ověřovací email odeslán.');
+        setMessage(t('verificationEmailSent'));
         setCountdown(60);
       }
     } catch {
-      setMessage('Nepodařilo se odeslat email.');
+      setMessage(t('emailSendFailed'));
     } finally {
       setSending(false);
     }
@@ -62,13 +65,16 @@ function VerifyEmailContent(): React.JSX.Element {
         </div>
 
         <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">
-          Zkontrolujte svůj email
+          {t('verifyEmailTitle')}
         </h1>
 
         <p className="text-sm text-[#7a6652]">
           {email
-            ? <>Na adresu <strong className="text-[#3d2b1f]">{email}</strong> jsme odeslali ověřovací odkaz. Klikněte na něj pro dokončení registrace.</>
-            : 'Odeslali jsme vám ověřovací odkaz. Klikněte na něj pro dokončení registrace.'}
+            ? t.rich('verifyEmailWithAddress', {
+                email,
+                strong: (chunks) => <strong className="text-[#3d2b1f]">{chunks}</strong>,
+              })
+            : t('verifyEmailWithoutAddress')}
         </p>
 
         {message && (
@@ -82,14 +88,18 @@ function VerifyEmailContent(): React.JSX.Element {
           disabled={!email || sending || countdown > 0}
           className="rounded-lg border border-[#d4c5a9] bg-[#f5edd6] px-4 py-2.5 font-serif text-sm font-medium text-[#3d2b1f] transition-colors hover:bg-[#ebe0c8] disabled:opacity-50"
         >
-          {sending ? 'Odesílám…' : countdown > 0 ? `Odeslat znovu (${countdown}s)` : 'Odeslat znovu'}
+          {sending
+            ? t('sendingEmail')
+            : countdown > 0
+              ? t('resendWithCountdown', { countdown })
+              : t('resend')}
         </button>
 
         <Link
           href="/login"
           className="block text-sm font-medium text-[#8b1a1a] hover:underline"
         >
-          Zpět na přihlášení
+          {tc('backToLogin')}
         </Link>
       </div>
     </div>

@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
 
 export default function ForgotPasswordPage(): React.JSX.Element {
+  const t = useTranslations('auth');
+  const tc = useTranslations('common');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -23,14 +26,14 @@ export default function ForgotPasswordPage(): React.JSX.Element {
 
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        setError(data.error ?? 'Něco se pokazilo');
+        setError(data.error ?? tc('somethingWentWrong'));
         setLoading(false);
         return;
       }
 
       setSuccess(true);
     } catch {
-      setError('Něco se pokazilo');
+      setError(tc('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -53,30 +56,27 @@ export default function ForgotPasswordPage(): React.JSX.Element {
         {/* Center — form */}
         <div className="mx-auto w-full max-w-[340px] space-y-6">
           <div>
-            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">Obnovení hesla</h1>
-            <p className="mt-1 text-sm text-[#7a6652]">
-              Zadejte svůj email a pošleme vám odkaz pro obnovení hesla
-            </p>
+            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">{t('forgotPasswordTitle')}</h1>
+            <p className="mt-1 text-sm text-[#7a6652]">{t('forgotPasswordSubtitle')}</p>
           </div>
 
           {success ? (
             <div className="space-y-4">
               <p className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
-                Pokud existuje účet s tímto emailem, obdržíte odkaz pro obnovení hesla. Zkontrolujte
-                svůj email.
+                {t('forgotPasswordEmailSent')}
               </p>
               <Link
                 href="/login"
                 className="inline-flex items-center gap-1.5 font-serif text-sm font-semibold text-[#8b1a1a] hover:underline"
               >
-                Zpět na přihlášení
+                {tc('backToLogin')}
               </Link>
             </div>
           ) : (
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                  Email
+                  {t('emailLabel')}
                 </label>
                 <input
                   type="email"
@@ -101,12 +101,12 @@ export default function ForgotPasswordPage(): React.JSX.Element {
                 disabled={loading || !email}
                 className="w-full rounded-lg bg-[#8b1a1a] px-4 py-2.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-md shadow-[#8b1a1a]/20 transition-all hover:bg-[#a52020] disabled:opacity-50"
               >
-                {loading ? 'Počkejte…' : 'Odeslat odkaz'}
+                {loading ? tc('wait') : t('sendResetLink')}
               </button>
 
               <p className="text-center text-sm text-[#7a6652]">
                 <Link href="/login" className="font-semibold text-[#8b1a1a] hover:underline">
-                  Zpět na přihlášení
+                  {tc('backToLogin')}
                 </Link>
               </p>
             </div>
@@ -127,7 +127,7 @@ export default function ForgotPasswordPage(): React.JSX.Element {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
-          Zpět na hlavní stránku
+          {tc('backToHome')}
         </Link>
       </div>
 

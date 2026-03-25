@@ -2,7 +2,8 @@
 
 import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
 
 export default function ResetPasswordPage(): React.JSX.Element {
@@ -14,6 +15,8 @@ export default function ResetPasswordPage(): React.JSX.Element {
 }
 
 function ResetPasswordForm(): React.JSX.Element {
+  const t = useTranslations('auth');
+  const tc = useTranslations('common');
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
 
@@ -28,12 +31,12 @@ function ResetPasswordForm(): React.JSX.Element {
     setError(null);
 
     if (password.length < 6) {
-      setError('Heslo musí mít alespoň 6 znaků');
+      setError(t('passwordTooShort'));
       return;
     }
 
     if (password !== confirmPassword) {
-      setError('Hesla se neshodují');
+      setError(t('passwordMismatch'));
       return;
     }
 
@@ -49,14 +52,14 @@ function ResetPasswordForm(): React.JSX.Element {
       const data = (await res.json()) as { error?: string; message?: string };
 
       if (!res.ok) {
-        setError(data.error ?? 'Něco se pokazilo');
+        setError(data.error ?? tc('somethingWentWrong'));
         setLoading(false);
         return;
       }
 
       setSuccess(true);
     } catch {
-      setError('Něco se pokazilo');
+      setError(tc('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -79,39 +82,39 @@ function ResetPasswordForm(): React.JSX.Element {
         {/* Center — form */}
         <div className="mx-auto w-full max-w-[340px] space-y-6">
           <div>
-            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">Nové heslo</h1>
-            <p className="mt-1 text-sm text-[#7a6652]">Zadejte své nové heslo</p>
+            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">{t('resetPasswordTitle')}</h1>
+            <p className="mt-1 text-sm text-[#7a6652]">{t('resetPasswordSubtitle')}</p>
           </div>
 
           {!token ? (
             <div className="space-y-4">
               <p className="rounded-lg bg-[#8b1a1a]/10 px-4 py-3 text-sm text-[#8b1a1a]">
-                Chybějící token. Požádejte o nový odkaz pro obnovení hesla.
+                {t('missingResetToken')}
               </p>
               <Link
                 href="/forgot-password"
                 className="inline-flex items-center gap-1.5 font-serif text-sm font-semibold text-[#8b1a1a] hover:underline"
               >
-                Požádat o nový odkaz
+                {t('requestNewLink')}
               </Link>
             </div>
           ) : success ? (
             <div className="space-y-4">
               <p className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
-                Heslo bylo úspěšně změněno.
+                {t('passwordChangedSuccess')}
               </p>
               <Link
                 href="/login"
                 className="inline-block w-full rounded-lg bg-[#8b1a1a] px-4 py-2.5 text-center font-serif text-sm font-semibold text-[#f5edd6] shadow-md shadow-[#8b1a1a]/20 transition-all hover:bg-[#a52020]"
               >
-                Přihlásit se
+                {t('loginButton')}
               </Link>
             </div>
           ) : (
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                  Nové heslo
+                  {t('newPasswordLabel')}
                 </label>
                 <div className="relative">
                   <input
@@ -167,7 +170,7 @@ function ResetPasswordForm(): React.JSX.Element {
 
               <div>
                 <label className="mb-1 block font-serif text-xs font-medium text-[#5a4a3a]">
-                  Potvrzení hesla
+                  {t('confirmPasswordLabel')}
                 </label>
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -192,7 +195,7 @@ function ResetPasswordForm(): React.JSX.Element {
                 disabled={loading || !password || !confirmPassword}
                 className="w-full rounded-lg bg-[#8b1a1a] px-4 py-2.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-md shadow-[#8b1a1a]/20 transition-all hover:bg-[#a52020] disabled:opacity-50"
               >
-                {loading ? 'Počkejte…' : 'Změnit heslo'}
+                {loading ? tc('wait') : t('changePassword')}
               </button>
             </div>
           )}
@@ -212,7 +215,7 @@ function ResetPasswordForm(): React.JSX.Element {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
           </svg>
-          Zpět na hlavní stránku
+          {tc('backToHome')}
         </Link>
       </div>
 
