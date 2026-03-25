@@ -7,6 +7,7 @@ import { useRouter, Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export default function LoginPage(): React.JSX.Element {
   return (
@@ -35,7 +36,7 @@ function LoginForm(): React.JSX.Element {
     setError(null);
 
     if (mode === 'register') {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), email, password }),
@@ -60,7 +61,7 @@ function LoginForm(): React.JSX.Element {
 
     if (result?.error) {
       // Check if email is unverified
-      const checkRes = await fetch('/api/auth/check-verification', {
+      const checkRes = await apiFetch('/api/auth/check-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -77,7 +78,7 @@ function LoginForm(): React.JSX.Element {
 
     // Set NEXT_LOCALE cookie from user preference
     try {
-      const localeRes = await fetch('/api/user/locale');
+      const localeRes = await apiFetch('/api/user/locale');
       const { locale: userLocale } = (await localeRes.json()) as { locale: string | null };
       if (userLocale) {
         document.cookie = `NEXT_LOCALE=${userLocale};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;

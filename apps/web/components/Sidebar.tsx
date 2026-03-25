@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export interface Collection {
   id: string;
@@ -161,7 +162,7 @@ export function Sidebar({
     if (!session?.user) return;
     void (async () => {
       try {
-        const res = await fetch('/api/billing/balance');
+        const res = await apiFetch('/api/billing/balance');
         if (res.ok) {
           const data = (await res.json()) as BalanceData;
           setBalance(data.balance);

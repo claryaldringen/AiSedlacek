@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface Props {
   open: boolean;
@@ -39,7 +40,7 @@ export function CreateCollectionDialog({
       const body: Record<string, string> = { name: trimmed };
       if (workspaceId) body.workspaceId = workspaceId;
 
-      const res = await fetch('/api/collections', {
+      const res = await apiFetch('/api/collections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

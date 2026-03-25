@@ -5,6 +5,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import LocaleSwitcher from './LocaleSwitcher';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface BalanceData {
   balance: number;
@@ -31,7 +32,7 @@ export function UserMenu(): React.JSX.Element | null {
     if (!session?.user) return;
     const fetchBalance = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/billing/balance');
+        const res = await apiFetch('/api/billing/balance');
         if (res.ok) {
           const data = (await res.json()) as BalanceData;
           setBalance(data.balance);

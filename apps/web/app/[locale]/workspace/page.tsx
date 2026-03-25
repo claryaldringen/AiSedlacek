@@ -22,6 +22,7 @@ import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export default function HomePage(): React.JSX.Element {
   return (
@@ -144,7 +145,7 @@ function WorkspaceContent(): React.JSX.Element {
   const loadWorkspaces = useCallback(async (): Promise<void> => {
     setLoadingWorkspaces(true);
     try {
-      const res = await fetch('/api/workspaces');
+      const res = await apiFetch('/api/workspaces');
       if (!res.ok) return;
       const data = (await res.json()) as Workspace[];
       setWorkspaces(data);
@@ -174,7 +175,7 @@ function WorkspaceContent(): React.JSX.Element {
     if (!selectedWorkspaceId) return;
     setLoadingCollections(true);
     try {
-      const res = await fetch(`/api/collections?workspaceId=${selectedWorkspaceId}`);
+      const res = await apiFetch(`/api/collections?workspaceId=${selectedWorkspaceId}`);
       if (!res.ok) return;
       const data = (await res.json()) as Collection[];
       setCollections(data);
@@ -233,7 +234,7 @@ function WorkspaceContent(): React.JSX.Element {
       setFixingContexts(true);
       setFixingContextsProgress(null);
       try {
-        const res = await fetch(`/api/collections/${collectionId}/fix-document-contexts`, {
+        const res = await apiFetch(`/api/collections/${collectionId}/fix-document-contexts`, {
           method: 'POST',
         });
         if (!res.ok) {
@@ -248,7 +249,7 @@ function WorkspaceContent(): React.JSX.Element {
         // Poll for job completion
         const pollInterval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
             if (!statusRes.ok) {
               clearInterval(pollInterval);
               setFixingContexts(false);
@@ -357,7 +358,7 @@ function WorkspaceContent(): React.JSX.Element {
       );
       await Promise.all(
         pageIds.map((id) =>
-          fetch(`/api/pages/${id}`, {
+          apiFetch(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus }),
@@ -377,7 +378,7 @@ function WorkspaceContent(): React.JSX.Element {
 
     setDetectingBlank(true);
     try {
-      const res = await fetch('/api/pages/detect-blank', {
+      const res = await apiFetch('/api/pages/detect-blank', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageIds: pendingPages.map((p) => p.id) }),
@@ -410,7 +411,7 @@ function WorkspaceContent(): React.JSX.Element {
     setGeneratingContext(true);
     setError(null);
     try {
-      const res = await fetch(`/api/collections/${selectedCollectionId}/generate-context`, {
+      const res = await apiFetch(`/api/collections/${selectedCollectionId}/generate-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageIds: donePageIds }),
@@ -429,7 +430,7 @@ function WorkspaceContent(): React.JSX.Element {
       // Poll for job completion
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+          const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
           if (!statusRes.ok) {
             clearInterval(pollInterval);
             setGeneratingContext(false);
@@ -479,7 +480,7 @@ function WorkspaceContent(): React.JSX.Element {
     if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
 
     try {
-      const res = await fetch(`/api/collections/${colId}`, {
+      const res = await apiFetch(`/api/collections/${colId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName.trim() }),
@@ -503,7 +504,7 @@ function WorkspaceContent(): React.JSX.Element {
       // Fire API calls
       await Promise.all(
         pageIds.map((id) =>
-          fetch(`/api/pages/${id}`, {
+          apiFetch(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ collectionId: targetCollectionId }),
@@ -528,7 +529,7 @@ function WorkspaceContent(): React.JSX.Element {
 
       if (page.status === 'done' || page.document) {
         try {
-          await fetch(`/api/pages/${pageId}`, {
+          await apiFetch(`/api/pages/${pageId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'archived' }),
@@ -539,7 +540,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
       } else {
         try {
-          await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
+          await apiFetch(`/api/pages/${pageId}`, { method: 'DELETE' });
           setPages((prev) => prev.filter((p) => p.id !== pageId));
         } catch {
           // ignore
@@ -570,7 +571,7 @@ function WorkspaceContent(): React.JSX.Element {
       if (page.document) {
         setPanelLoading(true);
         try {
-          const res = await fetch(`/api/documents/${page.document.id}`);
+          const res = await apiFetch(`/api/documents/${page.document.id}`);
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as {
             id: string;
@@ -631,7 +632,7 @@ function WorkspaceContent(): React.JSX.Element {
       } else {
         // Fetch full page data for metadata (width, height, etc.)
         try {
-          const res = await fetch(`/api/pages/${page.id}`);
+          const res = await apiFetch(`/api/pages/${page.id}`);
           if (res.ok) {
             const fullPage = (await res.json()) as PageItem & {
               width?: number;
@@ -682,18 +683,18 @@ function WorkspaceContent(): React.JSX.Element {
         const page = pages.find((p) => p.id === pageId);
         if (page?.document) {
           setRegenerateStep(t('tryingToFixParsing'));
-          const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, {
+          const reparseRes = await apiFetch(`/api/documents/${page.document.id}/reparse`, {
             method: 'POST',
           });
           if (reparseRes.ok) {
             // Re-parse succeeded — reload document
-            const pageRes = await fetch(`/api/pages/${pageId}`);
+            const pageRes = await apiFetch(`/api/pages/${pageId}`);
             if (pageRes.ok) {
               const updatedPage = (await pageRes.json()) as PageItem;
               setPanelPage(updatedPage);
               setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
               if (updatedPage.document) {
-                const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+                const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
                 if (docRes.ok) {
                   const doc = (await docRes.json()) as {
                     id: string;
@@ -749,17 +750,17 @@ function WorkspaceContent(): React.JSX.Element {
           }
           // Re-parse failed — fall through to full regeneration
           console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
-          await fetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
+          await apiFetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
         }
         // Reset page status
-        await fetch(`/api/pages/${pageId}`, {
+        await apiFetch(`/api/pages/${pageId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'pending' }),
         });
         // Process again via Inngest background job
         setRegenerateStep(t('callingModel'));
-        const response = await fetch('/api/pages/process', {
+        const response = await apiFetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pageIds: [pageId], language: 'cs' }),
@@ -774,7 +775,7 @@ function WorkspaceContent(): React.JSX.Element {
         let jobDone = false;
         while (!jobDone) {
           await new Promise((r) => setTimeout(r, 2000));
-          const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+          const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
           if (!statusRes.ok) break;
           const statusData = (await statusRes.json()) as {
             status: string;
@@ -794,13 +795,13 @@ function WorkspaceContent(): React.JSX.Element {
         }
 
         // Reload the document after job completes
-        const pageRes = await fetch(`/api/pages/${pageId}`);
+        const pageRes = await apiFetch(`/api/pages/${pageId}`);
         if (pageRes.ok) {
           const updatedPage = (await pageRes.json()) as PageItem;
           setPanelPage(updatedPage);
           setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
           if (updatedPage.document) {
-            const docRes = await fetch(`/api/documents/${updatedPage.document.id}`);
+            const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
             if (docRes.ok) {
               const doc = (await docRes.json()) as {
                 id: string;
@@ -943,23 +944,27 @@ function WorkspaceContent(): React.JSX.Element {
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
         onCreateCollection={() => setCreateCollectionDialogOpen(true)}
-        onSortByName={selectedCollectionId ? async () => {
-          const sorted = [...pages].sort((a, b) => {
-            const nameA = (a.displayName || a.filename).toLowerCase();
-            const nameB = (b.displayName || b.filename).toLowerCase();
-            return nameA.localeCompare(nameB, 'cs', { numeric: true });
-          });
-          setPages(sorted);
-          await Promise.all(
-            sorted.map((p, i) =>
-              fetch(`/api/pages/${p.id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ order: i }),
-              }),
-            ),
-          );
-        } : undefined}
+        onSortByName={
+          selectedCollectionId
+            ? async () => {
+                const sorted = [...pages].sort((a, b) => {
+                  const nameA = (a.displayName || a.filename).toLowerCase();
+                  const nameB = (b.displayName || b.filename).toLowerCase();
+                  return nameA.localeCompare(nameB, 'cs', { numeric: true });
+                });
+                setPages(sorted);
+                await Promise.all(
+                  sorted.map((p, i) =>
+                    apiFetch(`/api/pages/${p.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ order: i }),
+                    }),
+                  ),
+                );
+              }
+            : undefined
+        }
         onEditContext={() => setContextDialogOpen(true)}
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}

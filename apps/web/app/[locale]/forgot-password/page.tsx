@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export default function ForgotPasswordPage(): React.JSX.Element {
   const t = useTranslations('auth');
@@ -18,7 +19,7 @@ export default function ForgotPasswordPage(): React.JSX.Element {
     setError(null);
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
+      const res = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -56,7 +57,9 @@ export default function ForgotPasswordPage(): React.JSX.Element {
         {/* Center — form */}
         <div className="mx-auto w-full max-w-[340px] space-y-6">
           <div>
-            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">{t('forgotPasswordTitle')}</h1>
+            <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">
+              {t('forgotPasswordTitle')}
+            </h1>
             <p className="mt-1 text-sm text-[#7a6652]">{t('forgotPasswordSubtitle')}</p>
           </div>
 

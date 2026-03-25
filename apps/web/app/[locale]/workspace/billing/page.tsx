@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { Link } from '@/i18n/navigation';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,7 +92,7 @@ function BillingContent(): React.JSX.Element {
 
   const loadBalance = useCallback(async (): Promise<void> => {
     try {
-      const res = await fetch('/api/billing/balance');
+      const res = await apiFetch('/api/billing/balance');
       if (!res.ok) return;
       const data = (await res.json()) as BalanceResponse;
       setBalance(data.balance);
@@ -148,7 +149,7 @@ function BillingContent(): React.JSX.Element {
     ].join('*');
 
     const controller = new AbortController();
-    void fetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }), {
+    void apiFetch('/api/billing/qr?' + new URLSearchParams({ data: spayd }), {
       signal: controller.signal,
     })
       .then((r) => {
@@ -188,7 +189,7 @@ function BillingContent(): React.JSX.Element {
     if (effectiveAmount < 100) return;
     setCheckoutLoading(true);
     try {
-      const res = await fetch('/api/billing/checkout', {
+      const res = await apiFetch('/api/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amountCzk: effectiveAmount }),
@@ -212,7 +213,7 @@ function BillingContent(): React.JSX.Element {
     setFioChecking(true);
     setFioResult(null);
     try {
-      const res = await fetch('/api/billing/fio-check', { method: 'POST' });
+      const res = await apiFetch('/api/billing/fio-check', { method: 'POST' });
       const data = (await res.json()) as FioCheckResponse;
 
       if (res.status === 429 && data.retryAfterSeconds) {
@@ -481,7 +482,9 @@ function BillingContent(): React.JSX.Element {
                   {effectiveAmount >= 100
                     ? t('payByCard', {
                         amount: effectiveAmount,
-                        tokens: formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk)),
+                        tokens: formatTokensCompact(
+                          Math.floor((effectiveAmount / 100) * tokensPer100Czk),
+                        ),
                       })
                     : t('cardPayment')}
                 </>
@@ -560,9 +563,7 @@ function BillingContent(): React.JSX.Element {
                       </p>
                     </div>
                   )}
-                  <p className="text-xs text-slate-400">
-                    {t('bankInstructions')}
-                  </p>
+                  <p className="text-xs text-slate-400">{t('bankInstructions')}</p>
 
                   {/* Verify button */}
                   <div className="flex items-center gap-3">

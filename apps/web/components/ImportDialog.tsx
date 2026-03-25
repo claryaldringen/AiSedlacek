@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export interface UploadedPage {
   id: string;
@@ -143,7 +144,7 @@ export function ImportDialog({
         for (const s of validFiles) formData.append('files', s.file);
         if (collectionId) formData.append('collectionId', collectionId);
 
-        const response = await fetch('/api/pages/upload', { method: 'POST', body: formData });
+        const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
         const data = (await response.json()) as {
           pages?: UploadedPage[];
           errors?: { filename: string; error: string }[];
@@ -184,7 +185,7 @@ export function ImportDialog({
     async (url: string, displayName?: string): Promise<UploadedPage | null> => {
       const MAX_RETRIES = 3;
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        const res = await fetch('/api/pages/import-url', {
+        const res = await apiFetch('/api/pages/import-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url, collectionId, displayName }),
@@ -232,7 +233,7 @@ export function ImportDialog({
         setBackwardOffset(0);
       }
       try {
-        const res = await fetch('/api/pages/discover-urls', {
+        const res = await apiFetch('/api/pages/discover-urls', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -281,7 +282,7 @@ export function ImportDialog({
               prefetchBatch.push(data.url);
               // Trigger prefetch every 10 URLs
               if (prefetchBatch.length >= 10) {
-                void fetch('/api/pages/prefetch', {
+                void apiFetch('/api/pages/prefetch', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ urls: prefetchBatch.splice(0) }),
@@ -314,7 +315,7 @@ export function ImportDialog({
         }
         // Flush remaining prefetch batch
         if (prefetchBatch.length > 0) {
-          void fetch('/api/pages/prefetch', {
+          void apiFetch('/api/pages/prefetch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ urls: prefetchBatch.splice(0) }),

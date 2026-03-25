@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export default function VerifyEmailPage(): React.JSX.Element {
   return (
@@ -36,7 +37,7 @@ function VerifyEmailContent(): React.JSX.Element {
     setSending(true);
     setMessage(null);
     try {
-      const res = await fetch('/api/auth/send-verification', {
+      const res = await apiFetch('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -59,14 +60,22 @@ function VerifyEmailContent(): React.JSX.Element {
       <div className="w-full max-w-md space-y-6 text-center">
         {/* Mail icon */}
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#8b1a1a]/10">
-          <svg className="h-8 w-8 text-[#8b1a1a]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+          <svg
+            className="h-8 w-8 text-[#8b1a1a]"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"
+            />
           </svg>
         </div>
 
-        <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">
-          {t('verifyEmailTitle')}
-        </h1>
+        <h1 className="font-serif text-2xl font-bold text-[#3d2b1f]">{t('verifyEmailTitle')}</h1>
 
         <p className="text-sm text-[#7a6652]">
           {email
@@ -78,9 +87,7 @@ function VerifyEmailContent(): React.JSX.Element {
         </p>
 
         {message && (
-          <p className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">
-            {message}
-          </p>
+          <p className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">{message}</p>
         )}
 
         <button
@@ -95,10 +102,7 @@ function VerifyEmailContent(): React.JSX.Element {
               : t('resend')}
         </button>
 
-        <Link
-          href="/login"
-          className="block text-sm font-medium text-[#8b1a1a] hover:underline"
-        >
+        <Link href="/login" className="block text-sm font-medium text-[#8b1a1a] hover:underline">
           {tc('backToLogin')}
         </Link>
       </div>

@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { PageItem } from '@/components/FileGrid';
 import type { Collection } from '@/components/Sidebar';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface UseProcessingJobOptions {
   pages: PageItem[];
@@ -69,7 +70,7 @@ export function useProcessingJob({
   const refreshPage = useCallback(
     async (pageId: string): Promise<void> => {
       try {
-        const res = await fetch(`/api/pages/${pageId}`);
+        const res = await apiFetch(`/api/pages/${pageId}`);
         if (res.ok) {
           const updated = (await res.json()) as PageItem;
           setPages((prev) => prev.map((p) => (p.id === pageId ? updated : p)));
@@ -85,7 +86,7 @@ export function useProcessingJob({
   const pollJobStatus = useCallback(
     async (jobId: string): Promise<boolean> => {
       try {
-        const res = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+        const res = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
         if (!res.ok) {
           // Job not found or error — stop polling
           return true;
@@ -220,7 +221,7 @@ export function useProcessingJob({
     for (const id of selectedIds) {
       if (collectionIds.has(id)) {
         try {
-          const res = await fetch(`/api/collections/${id}`);
+          const res = await apiFetch(`/api/collections/${id}`);
           if (res.ok) {
             const col = (await res.json()) as { pages: PageItem[] };
             for (const p of col.pages) {
@@ -252,7 +253,7 @@ export function useProcessingJob({
     );
 
     try {
-      const response = await fetch('/api/pages/process', {
+      const response = await apiFetch('/api/pages/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pageIds, language: 'cs', mode: 'transcribe+translate' }),
@@ -293,7 +294,7 @@ export function useProcessingJob({
     if (!activeJobId) {
       // Try the legacy cancel endpoint as fallback
       try {
-        await fetch('/api/pages/process/cancel', { method: 'POST' });
+        await apiFetch('/api/pages/process/cancel', { method: 'POST' });
       } catch {
         // ignore
       }
@@ -301,7 +302,7 @@ export function useProcessingJob({
     }
 
     try {
-      await fetch('/api/pages/process/status', {
+      await apiFetch('/api/pages/process/status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId: activeJobId, action: 'cancel' }),
@@ -320,7 +321,7 @@ export function useProcessingJob({
 
     const checkForRunningJob = async (): Promise<void> => {
       try {
-        const res = await fetch('/api/pages/process');
+        const res = await apiFetch('/api/pages/process');
         if (!res.ok) return;
 
         const data = (await res.json()) as {

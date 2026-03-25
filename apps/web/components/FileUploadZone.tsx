@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export interface UploadedPage {
   id: string;
@@ -118,7 +119,7 @@ export function FileUploadZone({
           formData.append('collectionId', collectionId);
         }
 
-        const response = await fetch('/api/pages/upload', { method: 'POST', body: formData });
+        const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
         const data = (await response.json()) as {
           pages?: UploadedPage[];
           errors?: { filename: string; error: string }[];
