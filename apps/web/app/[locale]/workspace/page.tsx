@@ -940,6 +940,23 @@ function WorkspaceContent(): React.JSX.Element {
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
         onCreateCollection={() => setCreateCollectionDialogOpen(true)}
+        onSortByName={selectedCollectionId ? async () => {
+          const sorted = [...pages].sort((a, b) => {
+            const nameA = (a.displayName || a.filename).toLowerCase();
+            const nameB = (b.displayName || b.filename).toLowerCase();
+            return nameA.localeCompare(nameB, 'cs', { numeric: true });
+          });
+          setPages(sorted);
+          await Promise.all(
+            sorted.map((p, i) =>
+              fetch(`/api/pages/${p.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order: i }),
+              }),
+            ),
+          );
+        } : undefined}
         onEditContext={() => setContextDialogOpen(true)}
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}

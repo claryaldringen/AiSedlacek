@@ -244,10 +244,10 @@ async function handleImport(
     data: {
       userId,
       filename: urlFilename,
-      displayName: cdFilename
-        ? cdFilename.replace(/\.[^.]+$/, '')
-        : typeof displayName === 'string' && displayName.trim() !== ''
-          ? displayName.trim()
+      displayName: typeof displayName === 'string' && displayName.trim() !== ''
+        ? displayName.trim()
+        : cdFilename
+          ? cdFilename.replace(/\.[^.]+$/, '')
           : urlFilename.replace(/\.[^.]+$/, ''),
       hash,
       imageUrl: storageResult.url,
