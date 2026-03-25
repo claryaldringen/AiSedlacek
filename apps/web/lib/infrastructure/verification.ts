@@ -40,6 +40,6 @@ export async function sendVerificationEmail(email: string): Promise<boolean> {
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3003';
   const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${rawToken}`;
 
-  await getEmailProvider().sendVerification(email, verifyUrl);
+  await (await getEmailProvider()).sendVerification(email, verifyUrl);
   return true;
 }
