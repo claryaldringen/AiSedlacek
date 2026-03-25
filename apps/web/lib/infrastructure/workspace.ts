@@ -10,12 +10,24 @@ const PUBLIC_WORKSPACE_ID = 'public-workspace';
 export async function ensureWorkspaces(
   userId: string,
 ): Promise<{ homeId: string; publicId: string }> {
-  // Ensure public workspace exists
+  // Ensure public workspace exists and contains all public collections
   await prisma.workspace.upsert({
     where: { id: PUBLIC_WORKSPACE_ID },
     create: { id: PUBLIC_WORKSPACE_ID, name: 'Veřejné dokumenty', type: 'public' },
     update: {},
   });
+
+  // Sync: add any public collections missing from the workspace
+  const publicCollections = await prisma.collection.findMany({
+    where: { isPublic: true },
+    select: { id: true },
+  });
+  if (publicCollections.length > 0) {
+    await prisma.workspaceItem.createMany({
+      data: publicCollections.map((c) => ({ workspaceId: PUBLIC_WORKSPACE_ID, collectionId: c.id })),
+      skipDuplicates: true,
+    });
+  }
 
   // Ensure user has home workspace
   let home = await prisma.workspace.findFirst({
