@@ -11,11 +11,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { email } = (body as { email?: string }) ?? {};
+  const { email: rawEmail } = (body as { email?: string }) ?? {};
 
-  if (!email || typeof email !== 'string') {
+  if (!rawEmail || typeof rawEmail !== 'string') {
     return NextResponse.json({ error: 'Email je povinný' }, { status: 400 });
   }
+
+  const email = rawEmail.toLowerCase().trim();
 
   // Always return success to prevent email enumeration
   const successMessage = 'Pokud existuje účet s tímto emailem, obdržíte odkaz pro obnovení hesla.';
