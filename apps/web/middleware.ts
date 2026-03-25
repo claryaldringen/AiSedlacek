@@ -6,6 +6,7 @@ export function middleware(req: NextRequest): NextResponse {
     req.nextUrl.pathname.startsWith('/login') ||
     req.nextUrl.pathname.startsWith('/forgot-password') ||
     req.nextUrl.pathname.startsWith('/reset-password') ||
+    req.nextUrl.pathname.startsWith('/verify-email') ||
     req.nextUrl.pathname.startsWith('/view') ||
     req.nextUrl.pathname.startsWith('/api/auth') ||
     req.nextUrl.pathname.startsWith('/api/public') ||
