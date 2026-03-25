@@ -51,12 +51,16 @@ Využívá existující `VerificationToken` model (NextAuth standard):
 ```prisma
 model VerificationToken {
   identifier String    // = email
-  token      String   @unique  // = SHA256 hash
+  token      String   @unique  // = SHA256 hash (NEplatný raw token)
   expires    DateTime
 
   @@unique([identifier, token])
 }
 ```
+
+Pole `token` ukládá SHA256 hash raw tokenu (stejný vzor jako `PasswordResetToken.tokenHash`). Raw token se posílá pouze v emailu, nikdy se neperzistuje.
+
+Token se generuje jako `crypto.randomBytes(32).toString('hex')` (64-char hex string), konzistentně s password reset flow.
 
 Žádná nová migrace pro model. Jediná migrace: backfill `emailVerified`.
 
@@ -65,6 +69,8 @@ model VerificationToken {
 ### POST `/api/auth/register` (úprava existujícího)
 
 Změny:
+- Email se normalizuje: `.toLowerCase().trim()` (konzistentně ve všech auth endpointech)
+- Pokud uživatel s emailem existuje a `emailVerified` je null → smaže starého uživatele a vytvoří nového (re-registrace před ověřením). Pokud je ověřený → 409 jako dosud.
 - Po vytvoření uživatele generuje verification token a posílá email
 - Nevolá `signIn()` — vrací `{ message: "Ověřovací email odeslán", email }` s 201
 - Frontend přestane volat `signIn()` po registraci, místo toho redirect na `/verify-email`
@@ -79,7 +85,7 @@ Response: `{ message: "..." }` (vždy 200, prevence email enumeration)
 Logika:
 1. Najdi uživatele podle emailu
 2. Pokud neexistuje nebo nemá heslo (OAuth) nebo už je ověřený → return success (silent)
-3. Zkontroluj existující token — pokud `expires - 23h > now()` (odeslán před < 60s) → 429
+3. Zkontroluj existující token — pokud `expires.getTime() - Date.now() > (24*3600 - 60) * 1000` (odeslán před < 60s) → 429
 4. Smaž staré tokeny pro tento email
 5. Generuj nový token, ulož hash, pošli email
 
@@ -92,7 +98,7 @@ Logika:
 2. Lookup v `VerificationToken`
 3. Validace: existuje, není expirovaný
 4. Najdi uživatele podle `identifier` (email)
-5. `user.emailVerified = now()`, smaž token
+5. V `prisma.$transaction`: `user.emailVerified = now()` + smaž token (atomicky)
 6. Redirect na `/login?verified=true`
 
 Chybové stavy:
@@ -102,15 +108,17 @@ Chybové stavy:
 
 ## Změny v auth.ts
 
-Credentials provider — přidat kontrolu po ověření hesla:
+Credentials provider — přidat kontrolu po ověření hesla. Authorize vrací `null` (nevolá `throw`), konzistentně se stávajícím kódem. Protože NextAuth v5 nepropaguje chybové zprávy z `authorize` na klienta, frontend detekuje neověřený email takto:
 
-```typescript
-if (!user.emailVerified) {
-  throw new Error('EMAIL_NOT_VERIFIED');
-}
-```
+1. `signIn('credentials', { redirect: false })` vrátí `error: "CredentialsSignin"`
+2. Frontend zavolá `POST /api/auth/check-verification` s emailem
+3. Endpoint vrátí `{ verified: boolean }`
+4. Pokud `verified: false` → zobrazí hlášku "Email není ověřen" + tlačítko resend
 
-NextAuth `pages.error` zůstává na `/login`, chyba se propaguje přes query parametry.
+Nový endpoint `POST /api/auth/check-verification`:
+- Request: `{ email: string }`
+- Response: `{ verified: boolean }` (vždy 200)
+- Pokud uživatel neexistuje → `{ verified: true }` (prevence enumeration)
 
 ## IEmailProvider rozšíření
 
@@ -129,11 +137,11 @@ Implementace v obou adapterech (Resend + Console).
 
 ### `/verify-email` (nová)
 
-Query params: `?email=user@example.com`
+Email se předává přes `sessionStorage` (nastavený po registraci), ne v URL (prevence leaku přes referrer/historii). Pokud `sessionStorage` nemá email, stránka zobrazí generickou zprávu.
 
 Obsah:
 - Nadpis "Zkontrolujte svůj email"
-- Text "Na adresu {email} jsme odeslali ověřovací odkaz."
+- Text "Na adresu {email} jsme odeslali ověřovací odkaz." (nebo generický text bez emailu)
 - Tlačítko "Odeslat znovu" (volá POST `/api/auth/send-verification`)
 - Po kliknutí: disabled na 60s s odpočtem
 - Link "Zpět na přihlášení"
@@ -156,7 +164,7 @@ Po úspěšné registraci (201):
 
 ## Middleware
 
-Přidat `/verify-email` do public routes.
+Přidat `/verify-email` do public routes (stránka). API endpointy pod `/api/auth/*` jsou již pokryté existujícím pravidlem.
 
 ## Migrace: backfill emailVerified
 
