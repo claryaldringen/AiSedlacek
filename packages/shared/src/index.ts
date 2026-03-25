@@ -18,6 +18,7 @@ export type { ITranslator } from './domain/translator';
 export type { IPreprocessor } from './domain/preprocessor';
 export type { ILayoutClassifier } from './domain/classifier';
 export type { IStorageProvider, StorageResult } from './domain/storage';
+export type { IEmailProvider } from './domain/email';
 
 export {
   CLASSIFY_LAYOUT_PROMPT,
