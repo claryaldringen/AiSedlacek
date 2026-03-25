@@ -53,10 +53,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const ownedIds = new Set(ownedPages.map((p) => p.id));
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
   if (unauthorizedIds.length > 0) {
-    return Response.json(
-      { error: t('somePagesUnauthorized') },
-      { status: 403 },
-    );
+    return Response.json({ error: t('somePagesUnauthorized') }, { status: 403 });
   }
 
   // Check token balance before starting

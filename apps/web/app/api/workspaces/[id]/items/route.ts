@@ -46,10 +46,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const { collectionId, pageId } = body as { collectionId?: unknown; pageId?: unknown };
 
   if (!collectionId && !pageId) {
-    return NextResponse.json(
-      { error: t('mustProvideCollectionOrPage') },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: t('mustProvideCollectionOrPage') }, { status: 400 });
   }
 
   if (collectionId && pageId) {

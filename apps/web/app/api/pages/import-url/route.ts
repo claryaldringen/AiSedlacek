@@ -58,10 +58,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     parsedUrl = new URL(url.trim());
     if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-      return NextResponse.json(
-        { error: t('urlMustBeHttp') },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: t('urlMustBeHttp') }, { status: 400 });
     }
   } catch {
     return NextResponse.json({ error: t('invalidUrl') }, { status: 400 });
