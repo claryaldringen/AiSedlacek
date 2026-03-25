@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
+import { getTranslations } from 'next-intl/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { PublicPageLayout } from '@/components/PublicPageLayout';
 import { NavArrow } from '@/components/NavArrow';
@@ -8,15 +9,16 @@ type Props = { params: Promise<{ slug: string; pageId: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug, pageId } = await params;
+  const t = await getTranslations('view');
 
   const ps = await prisma.publicSlug.findUnique({ where: { slug } });
-  if (!ps || ps.targetType !== 'collection') return { title: 'Nenalezeno' };
+  if (!ps || ps.targetType !== 'collection') return { title: t('notFound') };
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
     select: { displayName: true, filename: true, collectionId: true },
   });
-  if (!page || page.collectionId !== ps.targetId) return { title: 'Nenalezeno' };
+  if (!page || page.collectionId !== ps.targetId) return { title: t('notFound') };
 
   return { title: `${page.displayName ?? 'Dokument'} — AiSedlacek` };
 }
@@ -25,6 +27,7 @@ export default async function PublicCollectionPageView({
   params,
 }: Props): Promise<React.JSX.Element> {
   const { slug, pageId } = await params;
+  const t = await getTranslations('common');
 
   const ps = await prisma.publicSlug.findUnique({ where: { slug } });
   if (!ps || ps.targetType !== 'collection') notFound();
@@ -77,8 +80,8 @@ export default async function PublicCollectionPageView({
             href={prevPage ? `/view/${slug}/${prevPage.id}` : null}
             title={
               prevPage
-                ? (prevPage.displayName ?? prevPage.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Předchozí')
-                : 'Předchozí'
+                ? (prevPage.displayName ?? prevPage.filename.replace(/^[a-f0-9-]+-/, '') ?? t('previous'))
+                : t('previous')
             }
             direction="prev"
           />
@@ -89,8 +92,8 @@ export default async function PublicCollectionPageView({
             href={nextPage ? `/view/${slug}/${nextPage.id}` : null}
             title={
               nextPage
-                ? (nextPage.displayName ?? nextPage.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Další')
-                : 'Další'
+                ? (nextPage.displayName ?? nextPage.filename.replace(/^[a-f0-9-]+-/, '') ?? t('next'))
+                : t('next')
             }
             direction="next"
           />

@@ -116,7 +116,10 @@
     "contextFixFailed": "Oprava kontextu selhala",
     "contextFixesFailed": "Oprava kontextů selhala",
     "fixing": "Opravuji…",
-    "fixContextFromCollection": "Opravit kontext dokumentu podle kontextu díla"
+    "fixContextFromCollection": "Opravit kontext dokumentu podle kontextu díla",
+    "callingModel": "Volám model…",
+    "generationFailed": "Generování kontextu selhalo",
+    "renameCollectionPrompt": "Nový název svazku:"
   },
   "document": {
     "document": "Dokument",

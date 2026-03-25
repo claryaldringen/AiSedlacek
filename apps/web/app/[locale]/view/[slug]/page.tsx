@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
 import type { Metadata } from 'next';
+import { getTranslations } from 'next-intl/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { CollectionContextCard } from '@/components/CollectionContextCard';
 import { PublicPageLayout } from '@/components/PublicPageLayout';
@@ -9,20 +10,21 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
+  const t = await getTranslations('view');
 
   const ps = await prisma.publicSlug.findUnique({ where: { slug } });
-  if (!ps) return { title: 'Nenalezeno' };
+  if (!ps) return { title: t('notFound') };
 
   if (ps.targetType === 'collection') {
     const collection = await prisma.collection.findUnique({
       where: { id: ps.targetId },
       select: { name: true, title: true, description: true, abstract: true },
     });
-    if (!collection) return { title: 'Nenalezeno' };
+    if (!collection) return { title: t('notFound') };
     const displayTitle = collection.title || collection.name;
     return {
       title: `${displayTitle} — AiSedlacek`,
-      description: collection.abstract || collection.description || `Veřejná kolekce: ${displayTitle}`,
+      description: collection.abstract || collection.description || t('publicCollectionTitle', { name: displayTitle }),
     };
   }
 
@@ -31,7 +33,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       where: { id: ps.targetId },
       select: { displayName: true, filename: true },
     });
-    if (!page) return { title: 'Nenalezeno' };
+    if (!page) return { title: t('notFound') };
     return { title: `${page.displayName ?? 'Dokument'} — AiSedlacek` };
   }
 
@@ -40,6 +42,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function PublicSlugPage({ params }: Props): Promise<React.JSX.Element> {
   const { slug } = await params;
+  const t = await getTranslations('view');
 
   const ps = await prisma.publicSlug.findUnique({ where: { slug } });
   if (!ps) notFound();
@@ -119,12 +122,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
               </div>
             )}
             <p className="mt-3 text-xs text-[#7a6652]">
-              {doneCount}{' '}
-              {doneCount === 1
-                ? 'zpracovaná stránka'
-                : doneCount < 5
-                  ? 'zpracované stránky'
-                  : 'zpracovaných stránek'}
+              {t('processedPages', { count: doneCount })}
             </p>
           </div>
         </header>
@@ -136,7 +134,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
 
           {collection.pages.length === 0 ? (
             <p className="text-center font-serif text-[#a08060]">
-              Kolekce neobsahuje žádné stránky.
+              {t('emptyCollection')}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -144,7 +142,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                 const displayName =
                   page.displayName ??
                   page.filename.replace(/^[a-f0-9-]+-/, '') ??
-                  `Stránka ${index + 1}`;
+                  t('pageTitle', { n: index + 1 });
                 return (
                   <Link
                     key={page.id}
@@ -173,9 +171,9 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                       </p>
                       {page.status !== 'done' && (
                         <p className="text-[10px] text-[#a08060]">
-                          {page.status === 'pending' && 'Čeká na zpracování'}
-                          {page.status === 'processing' && 'Zpracovává se…'}
-                          {page.status === 'error' && 'Chyba zpracování'}
+                          {page.status === 'pending' && t('pendingStatus')}
+                          {page.status === 'processing' && t('processingStatus')}
+                          {page.status === 'error' && t('errorStatus')}
                         </p>
                       )}
                     </div>

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,6 +57,7 @@ export default function BillingPage(): React.JSX.Element {
 }
 
 function BillingContent(): React.JSX.Element {
+  const t = useTranslations('billing');
   const searchParams = useSearchParams();
 
   // Data state
@@ -113,16 +115,16 @@ function BillingContent(): React.JSX.Element {
     if (searchParams.get('success') === 'true') {
       setBanner({
         type: 'success',
-        message: 'Platba byla úspěšně provedena! Tokeny budou přičteny během chvíle.',
+        message: t('paymentSuccess'),
       });
       // Refresh balance after a short delay (webhook needs time)
       const timer = setTimeout(() => void loadBalance(), 3000);
       return () => clearTimeout(timer);
     }
     if (searchParams.get('cancelled') === 'true') {
-      setBanner({ type: 'cancelled', message: 'Platba byla zrušena.' });
+      setBanner({ type: 'cancelled', message: t('paymentCancelled') });
     }
-  }, [searchParams, loadBalance]);
+  }, [searchParams, loadBalance, t]);
 
   // ---------------------------------------------------------------------------
   // QR code generation
@@ -193,14 +195,14 @@ function BillingContent(): React.JSX.Element {
       });
       const data = (await res.json()) as CheckoutResponse & { error?: string };
       if (!res.ok) {
-        setBanner({ type: 'cancelled', message: data.error ?? 'Chyba při vytváření platby' });
+        setBanner({ type: 'cancelled', message: data.error ?? t('checkoutError') });
         return;
       }
       if (data.url) {
         window.location.href = data.url;
       }
     } catch {
-      setBanner({ type: 'cancelled', message: 'Chyba při komunikaci se serverem' });
+      setBanner({ type: 'cancelled', message: t('serverError') });
     } finally {
       setCheckoutLoading(false);
     }
@@ -218,7 +220,7 @@ function BillingContent(): React.JSX.Element {
         return;
       }
       if (!res.ok) {
-        setBanner({ type: 'cancelled', message: data.error ?? 'Chyba při ověřování platby' });
+        setBanner({ type: 'cancelled', message: data.error ?? t('verificationError') });
         return;
       }
 
@@ -227,7 +229,7 @@ function BillingContent(): React.JSX.Element {
       // Reload transactions
       void loadBalance();
     } catch {
-      setBanner({ type: 'cancelled', message: 'Chyba při komunikaci se serverem' });
+      setBanner({ type: 'cancelled', message: t('serverError') });
     } finally {
       setFioChecking(false);
     }
@@ -258,13 +260,13 @@ function BillingContent(): React.JSX.Element {
   const typeLabel = (type: TokenTransaction['type']): string => {
     switch (type) {
       case 'topup_stripe':
-        return 'Karta';
+        return t('typeCard');
       case 'topup_bank':
-        return 'Převod';
+        return t('typeTransfer');
       case 'consumption':
-        return 'Spotřeba';
+        return t('typeConsumption');
       case 'refund':
-        return 'Refundace';
+        return t('typeRefund');
     }
   };
 
@@ -294,9 +296,9 @@ function BillingContent(): React.JSX.Element {
                 d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
               />
             </svg>
-            Zpět
+            {t('back')}
           </Link>
-          <h1 className="text-lg font-semibold text-slate-800">Dobíjení tokenů</h1>
+          <h1 className="text-lg font-semibold text-slate-800">{t('title')}</h1>
         </div>
       </div>
 
@@ -353,18 +355,18 @@ function BillingContent(): React.JSX.Element {
         {/* Balance card */}
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="px-5 py-5">
-            <p className="mb-1 text-sm font-medium text-slate-500">Aktuální zůstatek</p>
+            <p className="mb-1 text-sm font-medium text-slate-500">{t('currentBalance')}</p>
             {loading ? (
               <div className="h-9 w-48 animate-pulse rounded bg-slate-100" />
             ) : (
               <>
                 <p className="text-3xl font-bold tabular-nums text-slate-800">
                   {formatTokens(balance ?? 0)}{' '}
-                  <span className="text-lg font-normal text-slate-400">tokenů</span>
+                  <span className="text-lg font-normal text-slate-400">{t('tokens')}</span>
                 </p>
                 {tokensPer100Czk > 0 && (
                   <p className="mt-1 text-xs text-slate-400">
-                    Cena: {formatTokensCompact(tokensPer100Czk)} tokenů za 100 Kč
+                    {t('tokensPerPrice', { tokens: formatTokensCompact(tokensPer100Czk) })}
                   </p>
                 )}
               </>
@@ -389,7 +391,7 @@ function BillingContent(): React.JSX.Element {
                   d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
                 />
               </svg>
-              Platba kartou
+              {t('cardPayment')}
             </h2>
           </div>
           <div className="px-5 py-4">
@@ -409,7 +411,7 @@ function BillingContent(): React.JSX.Element {
                       : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
                   ].join(' ')}
                 >
-                  {amount} Kč
+                  {amount} {t('currency')}
                   {tokensPer100Czk > 0 && (
                     <span className="ml-1 text-xs opacity-60">
                       ({formatTokensCompact(Math.floor((amount / 100) * tokensPer100Czk))} t.)
@@ -425,7 +427,7 @@ function BillingContent(): React.JSX.Element {
                 type="number"
                 min={100}
                 max={10000}
-                placeholder="Vlastní částka"
+                placeholder={t('customAmount')}
                 value={customAmount}
                 onChange={(e) => {
                   setCustomAmount(e.target.value);
@@ -433,7 +435,7 @@ function BillingContent(): React.JSX.Element {
                 }}
                 className="w-40 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
               />
-              <span className="text-sm text-slate-400">Kč</span>
+              <span className="text-sm text-slate-400">{t('currency')}</span>
             </div>
 
             {/* Pay button */}
@@ -459,7 +461,7 @@ function BillingContent(): React.JSX.Element {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                  Přesměrování…
+                  {t('redirecting')}
                 </>
               ) : (
                 <>
@@ -476,10 +478,12 @@ function BillingContent(): React.JSX.Element {
                       d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
                     />
                   </svg>
-                  Zaplatit kartou
                   {effectiveAmount >= 100
-                    ? ` — ${effectiveAmount} Kč (${formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk))} tokenů)`
-                    : ''}
+                    ? t('payByCard', {
+                        amount: effectiveAmount,
+                        tokens: formatTokensCompact(Math.floor((effectiveAmount / 100) * tokensPer100Czk)),
+                      })
+                    : t('cardPayment')}
                 </>
               )}
             </button>
@@ -504,7 +508,7 @@ function BillingContent(): React.JSX.Element {
                     d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z"
                   />
                 </svg>
-                Bankovní převod
+                {t('bankTransfer')}
               </h2>
             </div>
             <div className="px-5 py-4">
@@ -513,7 +517,7 @@ function BillingContent(): React.JSX.Element {
                 <div className="flex flex-col items-center gap-3">
                   <div className="flex items-center gap-2">
                     <label htmlFor="fio-amount" className="text-sm text-slate-500">
-                      Částka:
+                      {t('amount')}
                     </label>
                     <input
                       id="fio-amount"
@@ -523,17 +527,17 @@ function BillingContent(): React.JSX.Element {
                       onChange={(e) => setFioAmount(e.target.value)}
                       className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
                     />
-                    <span className="text-sm text-slate-400">Kč</span>
+                    <span className="text-sm text-slate-400">{t('currency')}</span>
                   </div>
                   {qrDataUrl ? (
                     <img
                       src={qrDataUrl}
-                      alt="QR platba"
+                      alt={t('qrPayment')}
                       className="h-[200px] w-[200px] rounded-lg border border-slate-100"
                     />
                   ) : (
                     <div className="flex h-[200px] w-[200px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
-                      Zadejte částku
+                      {t('enterAmount')}
                     </div>
                   )}
                 </div>
@@ -542,14 +546,14 @@ function BillingContent(): React.JSX.Element {
                 <div className="flex-1 space-y-3">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                      Číslo účtu
+                      {t('accountNumber')}
                     </p>
                     <p className="mt-0.5 font-mono text-sm text-slate-700">2803462929/2010</p>
                   </div>
                   {variableSymbol && (
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                        Variabilní symbol
+                        {t('variableSymbol')}
                       </p>
                       <p className="mt-0.5 font-mono text-lg font-semibold text-slate-800">
                         {variableSymbol}
@@ -557,8 +561,7 @@ function BillingContent(): React.JSX.Element {
                     </div>
                   )}
                   <p className="text-xs text-slate-400">
-                    Naskenujte QR kód v bankovní aplikaci nebo zadejte údaje manuálně. Po odeslání
-                    platby klikněte na &quot;Ověřit platbu&quot;.
+                    {t('bankInstructions')}
                   </p>
 
                   {/* Verify button */}
@@ -585,10 +588,10 @@ function BillingContent(): React.JSX.Element {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                             />
                           </svg>
-                          Ověřuji…
+                          {t('verifying')}
                         </>
                       ) : fioCountdown > 0 ? (
-                        <>Ověřit ({fioCountdown}s)</>
+                        <>{t('verifyWithCountdown', { countdown: fioCountdown })}</>
                       ) : (
                         <>
                           <svg
@@ -604,7 +607,7 @@ function BillingContent(): React.JSX.Element {
                               d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
                             />
                           </svg>
-                          Ověřit platbu
+                          {t('verifyPayment')}
                         </>
                       )}
                     </button>
@@ -614,13 +617,14 @@ function BillingContent(): React.JSX.Element {
                       <span className="text-sm">
                         {fioResult.credited > 0 ? (
                           <span className="text-green-600">
-                            Připsáno {fioResult.credited}{' '}
-                            {fioResult.credited === 1 ? 'platba' : 'platby'}. Zůstatek:{' '}
-                            {formatTokens(fioResult.balance)} tokenů.
+                            {t('paymentsCredited', {
+                              credited: fioResult.credited,
+                              balance: formatTokens(fioResult.balance),
+                            })}
                           </span>
                         ) : (
                           <span className="text-slate-500">
-                            Žádné nové platby. Zůstatek: {formatTokens(fioResult.balance)} tokenů.
+                            {t('noNewPayments', { balance: formatTokens(fioResult.balance) })}
                           </span>
                         )}
                       </span>
@@ -649,7 +653,7 @@ function BillingContent(): React.JSX.Element {
                   d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
                 />
               </svg>
-              Historie transakcí
+              {t('transactionHistory')}
             </h2>
           </div>
           <div className="overflow-x-auto">
@@ -677,16 +681,16 @@ function BillingContent(): React.JSX.Element {
               </div>
             ) : transactions.length === 0 ? (
               <div className="px-5 py-8 text-center text-sm text-slate-400">
-                Zatím žádné transakce
+                {t('noTransactions')}
               </div>
             ) : (
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-400">
-                    <th className="px-5 py-2">Datum</th>
-                    <th className="px-5 py-2">Typ</th>
-                    <th className="px-5 py-2 text-right">Tokeny</th>
-                    <th className="px-5 py-2">Popis</th>
+                    <th className="px-5 py-2">{t('columnDate')}</th>
+                    <th className="px-5 py-2">{t('columnType')}</th>
+                    <th className="px-5 py-2 text-right">{t('columnTokens')}</th>
+                    <th className="px-5 py-2">{t('columnDescription')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">

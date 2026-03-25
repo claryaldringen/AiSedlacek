@@ -116,7 +116,10 @@
     "contextFixFailed": "Context fix failed",
     "contextFixesFailed": "Context fixes failed",
     "fixing": "Fixing…",
-    "fixContextFromCollection": "Fix document context using work context"
+    "fixContextFromCollection": "Fix document context using work context",
+    "callingModel": "Calling model…",
+    "generationFailed": "Context generation failed",
+    "renameCollectionPrompt": "New volume name:"
   },
   "document": {
     "document": "Document",

@@ -1,6 +1,7 @@
-import Link from 'next/link';
-import { auth } from '@/lib/auth';
+import { getTranslations } from 'next-intl/server';
+import { Link } from '@/i18n/navigation';
 import { redirect } from 'next/navigation';
+import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
 import HeroCarousel from '@/components/HeroCarousel';
 import AnimatedCounter from '@/components/AnimatedCounter';
@@ -65,6 +66,8 @@ export default async function LandingPage(): Promise<React.ReactElement> {
   const session = await auth();
   if (session?.user) redirect('/workspace');
 
+  const t = await getTranslations('landing');
+
   const [stats, collections] = await Promise.all([getStats(), getPublicCollections()]);
 
   const jsonLd = {
@@ -98,19 +101,19 @@ export default async function LandingPage(): Promise<React.ReactElement> {
               href="#how-it-works"
               className="text-sm text-white/70 transition-colors hover:text-white"
             >
-              Jak to funguje
+              {t('navHowItWorks')}
             </a>
             <a
               href="#texts"
               className="text-sm text-white/70 transition-colors hover:text-white"
             >
-              Jaké texty
+              {t('navTexts')}
             </a>
             <Link
               href="/login"
               className="rounded-lg border border-white/30 px-4 py-2 text-sm font-medium text-white transition-colors hover:border-white/60 hover:bg-white/10"
             >
-              Přihlásit se
+              {t('navLogin')}
             </Link>
           </nav>
         </div>
@@ -122,29 +125,26 @@ export default async function LandingPage(): Promise<React.ReactElement> {
 
         <div className="relative z-[1] mx-auto max-w-6xl px-6">
           <p className="font-serif text-sm font-medium uppercase tracking-[0.2em] text-white/80">
-            Brána k písemnému dědictví
+            {t('heroTagline')}
           </p>
           <h1 className="mt-3 max-w-3xl font-serif text-4xl font-bold leading-tight text-white drop-shadow-lg sm:text-5xl lg:text-6xl">
-            Čtěte středověké rukopisy
-            <br />
-            <span className="text-white">jako dnešní noviny</span>
+            {t('heroHeading')}
           </h1>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-white/90 drop-shadow">
-            Nahrajte sken a během chvíle máte přepis, překlad do moderního jazyka, historický
-            kontext i slovníček — ať už je originál v latině, staré češtině nebo němčině.
+            {t('heroBody')}
           </p>
           <div className="mt-8 flex items-center gap-4">
             <Link
               href="/login"
               className="rounded-lg bg-[#8b1a1a] px-7 py-3 text-sm font-semibold text-[#f5edd6] shadow-lg shadow-black/30 transition-all hover:bg-[#a52020]"
             >
-              Začít zdarma
+              {t('heroCta')}
             </Link>
             <a
               href="#how-it-works"
               className="group flex items-center gap-2 px-4 py-3 text-sm font-medium text-[#d4c5a9]/70 transition-colors hover:text-[#f5edd6]"
             >
-              Jak to funguje
+              {t('heroHowItWorks')}
               <svg
                 className="h-4 w-4 transition-transform group-hover:translate-y-0.5"
                 fill="none"
@@ -165,22 +165,22 @@ export default async function LandingPage(): Promise<React.ReactElement> {
           {[
             {
               value: stats.pages,
-              label: 'Nahraných stránek',
+              label: t('statPages'),
               icon: 'M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z',
             },
             {
               value: stats.documents,
-              label: 'Zpracovaných dokumentů',
+              label: t('statDocuments'),
               icon: 'M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.745 3.745 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z',
             },
             {
               value: stats.collections,
-              label: 'Svazků',
+              label: t('statCollections'),
               icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25',
             },
             {
               value: stats.languages,
-              label: 'Jazyků',
+              label: t('statLanguages'),
               icon: 'm10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802',
             },
           ].map((stat) => (
@@ -207,7 +207,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       {collections.length > 0 && (
         <section className="bg-[#f0e6d0] py-24">
           <div className="mx-auto max-w-6xl px-6">
-            <h2 className="text-center font-serif text-3xl font-bold text-[#3d2b1f]">Ukázky</h2>
+            <h2 className="text-center font-serif text-3xl font-bold text-[#3d2b1f]">{t('samplesHeading')}</h2>
             <div
               className={`mt-14 grid gap-8 ${collections.length === 1 ? 'mx-auto max-w-sm' : collections.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}
             >
@@ -249,7 +249,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                         {col.name}
                       </h3>
                       <p className="mt-1 text-xs text-[#a08060]">
-                        {col._count.pages} {col._count.pages === 1 ? 'stránka' : col._count.pages < 5 ? 'stránky' : 'stránek'}
+                        {t('samplePages', { count: col._count.pages })}
                       </p>
                       {perex && (
                         <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-[#7a6652]">
@@ -269,29 +269,29 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       <section id="how-it-works" className="bg-[#f0e6d0] py-24">
         <div className="mx-auto max-w-6xl px-6">
           <p className="text-center font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#8b1a1a]">
-            Tři kroky
+            {t('howItWorksLabel')}
           </p>
           <h2 className="mt-2 text-center font-serif text-3xl font-bold text-[#3d2b1f]">
-            Jak to funguje
+            {t('howItWorksHeading')}
           </h2>
           <div className="mt-16 grid gap-12 sm:grid-cols-3">
             {[
               {
                 step: '01',
-                title: 'Nahrajte dokument',
-                desc: 'Nahrajte sken nebo fotografii historického textu. Podporujeme JPEG, PNG, TIFF, WebP i PDF. Můžete i vložit URL z digitálních knihoven.',
+                title: t('step01Title'),
+                desc: t('step01Desc'),
                 icon: 'M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5',
               },
               {
                 step: '02',
-                title: 'AI zpracování',
-                desc: 'Multimodální jazykový model s transformer architekturou provede paleografickou analýzu rastru, tokenizaci historického textu a cross-lingvální překlad s kontextovou anotací.',
+                title: t('step02Title'),
+                desc: t('step02Desc'),
                 icon: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z',
               },
               {
                 step: '03',
-                title: 'Diskutujte a opravujte',
-                desc: 'V integrovaném chatu se můžete modelu zeptat na cokoliv o dokumentu a nechat ho opravit transkripci nebo překlad.',
+                title: t('step03Title'),
+                desc: t('step03Desc'),
                 icon: 'M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z',
               },
             ].map((item) => (
@@ -324,32 +324,32 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       <section id="texts" className="border-t border-[#d4c5a9] bg-[#f5edd6] py-24">
         <div className="mx-auto max-w-6xl px-6">
           <p className="text-center font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#8b1a1a]">
-            Specializace
+            {t('textsLabel')}
           </p>
           <h2 className="mt-2 text-center font-serif text-3xl font-bold text-[#3d2b1f]">
-            Jaké texty zvládáme
+            {t('textsHeading')}
           </h2>
           <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {[
               {
-                label: 'Stará čeština',
-                desc: 'Bastarda, kurzíva, 14.–16. stol.',
-                period: '14.–16. stol.',
+                label: t('oldCzechLabel'),
+                desc: t('oldCzechDesc'),
+                period: t('oldCzechPeriod'),
               },
               {
-                label: 'Historická němčina',
-                desc: 'Fraktura, švabach, kancelářské písmo',
-                period: '15.–19. stol.',
+                label: t('historicalGermanLabel'),
+                desc: t('historicalGermanDesc'),
+                period: t('historicalGermanPeriod'),
               },
               {
-                label: 'Latina',
-                desc: 'Středověké rukopisy i tisky',
-                period: '9.–18. stol.',
+                label: t('latinLabel'),
+                desc: t('latinDesc'),
+                period: t('latinPeriod'),
               },
               {
-                label: 'Smíšené texty',
-                desc: 'Vícejazyčné dokumenty, glosy',
-                period: 'všechna období',
+                label: t('mixedTextsLabel'),
+                desc: t('mixedTextsDesc'),
+                period: t('mixedTextsPeriod'),
               },
             ].map((item) => (
               <div
@@ -376,21 +376,19 @@ export default async function LandingPage(): Promise<React.ReactElement> {
         <div className="mx-auto max-w-6xl px-6">
           <div className="mx-auto max-w-2xl text-center">
             <p className="font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#d4a855]/70">
-              O projektu
+              {t('aboutLabel')}
             </p>
             <h2 className="mt-2 font-serif text-3xl font-bold text-[#f5edd6]">
-              Na počest Augusta Sedláčka
+              {t('aboutHeading')}
             </h2>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[#a08060]">
-              Projekt je pojmenován po Augustu Sedláčkovi (1843–1926), českém historikovi a
-              archiváři, který zasvětil život studiu historických pramenů. Naším cílem je zpřístupnit
-              středověké texty moderním čtenářům.
+              {t('aboutBody')}
             </p>
             <Link
               href="/login"
               className="mt-10 inline-block rounded-lg bg-[#8b1a1a] px-8 py-3.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-lg shadow-black/30 transition-all hover:bg-[#a52020]"
             >
-              Vyzkoušet zdarma
+              {t('aboutCta')}
             </Link>
           </div>
         </div>
@@ -404,7 +402,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
               A<span className="text-[#6b5440]">i</span>Sedlacek
             </span>
             <p className="text-sm text-[#7a6652]">
-              Provozuje{' '}
+              {t('footerOperatedBy')}{' '}
               <a
                 href="https://tyrovsti.cz"
                 target="_blank"
@@ -415,7 +413,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
               </a>
             </p>
             <div className="text-xs leading-relaxed text-[#6b5440]">
-              <p>IČO: 24090956 &middot; Karla Čapka 1393, Beroun-Město, 266 01 Beroun</p>
+              <p>{t('footerIco')}</p>
             </div>
           </div>
         </div>

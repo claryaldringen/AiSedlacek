@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useMemo, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import { useRouter } from '@/i18n/navigation';
+import { useTranslations } from 'next-intl';
 import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
 import { FileGrid, type PageItem } from '@/components/FileGrid';
@@ -30,6 +32,7 @@ export default function HomePage(): React.JSX.Element {
 }
 
 function WorkspaceContent(): React.JSX.Element {
+  const t = useTranslations('workspace');
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -235,7 +238,7 @@ function WorkspaceContent(): React.JSX.Element {
         });
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errData.error ?? 'Oprava kontextu selhala');
+          setError(errData.error ?? t('contextFixFailed'));
           setFixingContexts(false);
           setFixingContextsProgress(null);
           return;
@@ -271,7 +274,7 @@ function WorkspaceContent(): React.JSX.Element {
               setFixingContexts(false);
               setFixingContextsProgress(null);
               if (statusData.status === 'error') {
-                setError('Oprava kontextů selhala');
+                setError(t('contextFixesFailed'));
               }
               // Reload pages to get updated contexts
               void loadPages(selectedCollectionId);
@@ -283,7 +286,7 @@ function WorkspaceContent(): React.JSX.Element {
           }
         }, 2000);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Chyba');
+        setError(err instanceof Error ? err.message : t('error'));
         setFixingContexts(false);
         setFixingContextsProgress(null);
       }
@@ -416,9 +419,9 @@ function WorkspaceContent(): React.JSX.Element {
       try {
         data = (await res.json()) as { jobId?: string; error?: string };
       } catch {
-        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+        throw new Error(`Server returned ${res.status}`);
       }
-      if (!res.ok) throw new Error(data.error ?? 'Generování kontextu selhalo');
+      if (!res.ok) throw new Error(data.error ?? t('generationFailed'));
 
       const { jobId } = data;
       if (!jobId) throw new Error('Server nevrátil jobId');
@@ -448,7 +451,7 @@ function WorkspaceContent(): React.JSX.Element {
               // Reload collection to get updated context and metadata
               void loadCollections();
             } else if (statusData.status === 'error') {
-              setError('Generování kontextu selhalo');
+              setError(t('generationFailed'));
             }
           }
         } catch {
@@ -457,7 +460,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
       }, 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : t('error'));
       setGeneratingContext(false);
     }
   }, [selectedCollectionId, selected, pages, setError, loadCollections]);
@@ -472,7 +475,7 @@ function WorkspaceContent(): React.JSX.Element {
 
     // Use the title from metadata if available, otherwise the current name
     const currentName = col.title ?? col.name;
-    const newName = window.prompt('Nový název svazku:', currentName);
+    const newName = window.prompt(t('renameCollectionPrompt'), currentName);
     if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
 
     try {
@@ -568,7 +571,7 @@ function WorkspaceContent(): React.JSX.Element {
         setPanelLoading(true);
         try {
           const res = await fetch(`/api/documents/${page.document.id}`);
-          if (!res.ok) throw new Error('Nepodařilo se načíst dokument');
+          if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as {
             id: string;
             transcription: string;
@@ -621,7 +624,7 @@ function WorkspaceContent(): React.JSX.Element {
             translationOutputTokens: translation?.outputTokens,
           });
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Neznámá chyba');
+          setError(err instanceof Error ? err.message : t('error'));
         } finally {
           setPanelLoading(false);
         }
@@ -671,14 +674,14 @@ function WorkspaceContent(): React.JSX.Element {
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
       setRegenerating(true);
-      setRegenerateStep('Připravuji...');
+      setRegenerateStep(t('preparingRetranslation'));
       setRegenerateProgress(0);
       setPanelResult(null);
       try {
         // Try re-parsing from stored rawResponse first (free, no API call)
         const page = pages.find((p) => p.id === pageId);
         if (page?.document) {
-          setRegenerateStep('Zkouším opravit parsování...');
+          setRegenerateStep(t('tryingToFixParsing'));
           const reparseRes = await fetch(`/api/documents/${page.document.id}/reparse`, {
             method: 'POST',
           });
@@ -755,7 +758,7 @@ function WorkspaceContent(): React.JSX.Element {
           body: JSON.stringify({ status: 'pending' }),
         });
         // Process again via Inngest background job
-        setRegenerateStep('Volám model...');
+        setRegenerateStep(t('callingModel'));
         const response = await fetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -822,7 +825,7 @@ function WorkspaceContent(): React.JSX.Element {
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Přegenerování selhalo');
+        setError(err instanceof Error ? err.message : t('regenerationFailed'));
       } finally {
         setRegenerating(false);
         setRegenerateStep(undefined);
@@ -1008,7 +1011,7 @@ function WorkspaceContent(): React.JSX.Element {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            <span>Generuji kontext z vybraných stránek...</span>
+            <span>{t('generatingContextFromSelected')}</span>
           </div>
           <div className="h-1 bg-blue-200">
             <div
@@ -1025,7 +1028,7 @@ function WorkspaceContent(): React.JSX.Element {
           role="alert"
           className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700"
         >
-          <strong className="font-semibold">Chyba: </strong>
+          <strong className="font-semibold">{t('errorPrefix')} </strong>
           {error}
           <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-600">
             x
@@ -1058,7 +1061,7 @@ function WorkspaceContent(): React.JSX.Element {
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
                 <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                  Strukturovaná data
+                  {t('structuredData')}
                 </summary>
                 <div className="border-t border-slate-100 px-4 py-3">
                   <CollectionMetadataEditor
@@ -1083,7 +1086,7 @@ function WorkspaceContent(): React.JSX.Element {
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext díla: {selectedCollection.name}
+                    {t('collectionContextTitle', { name: selectedCollection.name })}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 prose prose-sm prose-stone max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1113,7 +1116,7 @@ function WorkspaceContent(): React.JSX.Element {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                             />
                           </svg>
-                          {fixingContextsProgress ?? 'Opravuji...'}
+                          {fixingContextsProgress ?? t('fixing')}
                         </>
                       ) : (
                         <>
@@ -1130,7 +1133,7 @@ function WorkspaceContent(): React.JSX.Element {
                               d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
                             />
                           </svg>
-                          Opravit kontext dokumentu podle kontextu díla
+                          {t('fixContextFromCollection')}
                         </>
                       )}
                     </button>
@@ -1141,10 +1144,10 @@ function WorkspaceContent(): React.JSX.Element {
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                    Kontext díla: {selectedCollection.name}
+                    {t('collectionContextTitle', { name: selectedCollection.name })}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3 text-sm text-slate-400">
-                    Kontext nebyl nastaven.
+                    {t('contextNotSet')}
                   </div>
                 </details>
               </div>
@@ -1154,24 +1157,24 @@ function WorkspaceContent(): React.JSX.Element {
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
                 <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-                  Metadata svazku
+                  {t('collectionMetadata')}
                 </summary>
                 <div className="border-t border-slate-100 px-4 py-3 space-y-3">
                   {/* Status counts */}
                   <div>
                     <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Stav stránek
+                      {t('pageStatus')}
                     </h4>
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-slate-500">Celkem</span>
+                        <span className="text-slate-500">{t('total')}</span>
                         <span className="font-medium text-slate-700">
                           {selectedCollection._count.pages}
                         </span>
                       </div>
                       {selectedCollection.stats?.done > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-green-600">Hotovo</span>
+                          <span className="text-green-600">{t('done')}</span>
                           <span className="font-medium text-green-700">
                             {selectedCollection.stats?.done}
                           </span>
@@ -1179,7 +1182,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats?.pending > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Čeká</span>
+                          <span className="text-slate-500">{t('pending')}</span>
                           <span className="font-medium text-slate-700">
                             {selectedCollection.stats?.pending}
                           </span>
@@ -1187,7 +1190,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats?.error > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-red-600">Chyba</span>
+                          <span className="text-red-600">{t('error')}</span>
                           <span className="font-medium text-red-700">
                             {selectedCollection.stats?.error}
                           </span>
@@ -1195,7 +1198,7 @@ function WorkspaceContent(): React.JSX.Element {
                       )}
                       {selectedCollection.stats?.blank > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Prázdné</span>
+                          <span className="text-slate-400">{t('blank')}</span>
                           <span className="font-medium text-slate-500">
                             {selectedCollection.stats?.blank}
                           </span>
@@ -1238,23 +1241,23 @@ function WorkspaceContent(): React.JSX.Element {
                     selectedCollection.stats?.outputTokens > 0) && (
                     <div>
                       <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        Spotřeba
+                        {t('consumption')}
                       </h4>
                       <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Input tokeny</span>
+                          <span className="text-slate-500">{t('inputTokens')}</span>
                           <span className="font-medium text-slate-700">
                             {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-500">Output tokeny</span>
+                          <span className="text-slate-500">{t('outputTokens')}</span>
                           <span className="font-medium text-slate-700">
                             {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
                           </span>
                         </div>
                         <div className="flex justify-between border-t border-slate-100 pt-1">
-                          <span className="font-medium text-slate-600">Cena</span>
+                          <span className="font-medium text-slate-600">{t('price')}</span>
                           <span className="font-semibold text-slate-800">
                             {'$'}
                             {selectedCollection.stats?.costUsd.toFixed(2)}
@@ -1336,7 +1339,7 @@ function WorkspaceContent(): React.JSX.Element {
         {contentDragOver && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="rounded-xl bg-blue-600/90 px-8 py-4 text-white shadow-xl">
-              <p className="text-lg font-semibold">Pusťte soubory pro nahrání</p>
+              <p className="text-lg font-semibold">{t('dropFilesHere')}</p>
             </div>
           </div>
         )}
