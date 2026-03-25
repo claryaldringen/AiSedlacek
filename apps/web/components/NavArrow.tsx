@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Link } from '@/i18n/navigation';
 
 export function NavArrow({
   href,
@@ -9,10 +9,7 @@ export function NavArrow({
   title: string;
   direction: 'prev' | 'next';
 }): React.JSX.Element {
-  const path =
-    direction === 'prev'
-      ? 'M15.75 19.5 8.25 12l7.5-7.5'
-      : 'm8.25 4.5 7.5 7.5-7.5 7.5';
+  const path = direction === 'prev' ? 'M15.75 19.5 8.25 12l7.5-7.5' : 'm8.25 4.5 7.5 7.5-7.5 7.5';
   if (href) {
     return (
       <Link
@@ -21,7 +18,13 @@ export function NavArrow({
         aria-label={title}
         title={title}
       >
-        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg
+          className="h-5 w-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d={path} />
         </svg>
       </Link>
@@ -29,7 +32,13 @@ export function NavArrow({
   }
   return (
     <span className="cursor-default rounded-lg p-2 text-[#d4c5a9]" aria-disabled="true">
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <svg
+        className="h-5 w-5"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
         <path strokeLinecap="round" strokeLinejoin="round" d={path} />
       </svg>
     </span>

@@ -1,18 +1,14 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 6;
 const ZOOM_STEP = 0.15;
 
-export default function ImageZoom({
-  src,
-  alt,
-}: {
-  src: string;
-  alt: string;
-}): React.ReactElement {
+export default function ImageZoom({ src, alt }: { src: string; alt: string }): React.ReactElement {
+  const t = useTranslations('imageZoom');
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -22,20 +18,17 @@ export default function ImageZoom({
 
   const isZoomed = scale > 1;
 
-  const clampTranslate = useCallback(
-    (tx: number, ty: number, s: number) => {
-      if (s <= 1) return { x: 0, y: 0 };
-      const el = containerRef.current;
-      if (!el) return { x: tx, y: ty };
-      const maxX = ((s - 1) * el.clientWidth) / 2;
-      const maxY = ((s - 1) * el.clientHeight) / 2;
-      return {
-        x: Math.max(-maxX, Math.min(maxX, tx)),
-        y: Math.max(-maxY, Math.min(maxY, ty)),
-      };
-    },
-    [],
-  );
+  const clampTranslate = useCallback((tx: number, ty: number, s: number) => {
+    if (s <= 1) return { x: 0, y: 0 };
+    const el = containerRef.current;
+    if (!el) return { x: tx, y: ty };
+    const maxX = ((s - 1) * el.clientWidth) / 2;
+    const maxY = ((s - 1) * el.clientHeight) / 2;
+    return {
+      x: Math.max(-maxX, Math.min(maxX, tx)),
+      y: Math.max(-maxY, Math.min(maxY, ty)),
+    };
+  }, []);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -120,7 +113,7 @@ export default function ImageZoom({
       {/* Zoom controls */}
       <div className="flex items-center justify-between border-t border-[#d4c5a9] bg-[#ebe0c8] px-3 py-1.5">
         <span className="font-serif text-[10px] text-[#7a6652]">
-          {isZoomed ? 'Táhněte pro posun · Dvojklik = reset' : 'Kolečkem zvětšíte · Dvojklik = 3×'}
+          {isZoomed ? t('dragHint') : t('scrollHint')}
         </span>
         <div className="flex items-center gap-1.5">
           <button
@@ -131,10 +124,20 @@ export default function ImageZoom({
               else setTranslate((t) => clampTranslate(t.x, t.y, next));
             }}
             className="rounded p-1 text-[#7a6652] transition-colors hover:bg-[#d4c5a9] hover:text-[#3d2b1f]"
-            aria-label="Oddálit"
+            aria-label={t('zoomOut')}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM13.5 10.5h-6" />
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM13.5 10.5h-6"
+              />
             </svg>
           </button>
           <span className="min-w-[3rem] text-center font-serif text-xs text-[#3d2b1f]">
@@ -147,10 +150,20 @@ export default function ImageZoom({
               setTranslate((t) => clampTranslate(t.x, t.y, next));
             }}
             className="rounded p-1 text-[#7a6652] transition-colors hover:bg-[#d4c5a9] hover:text-[#3d2b1f]"
-            aria-label="Přiblížit"
+            aria-label={t('zoomIn')}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6"
+              />
             </svg>
           </button>
         </div>

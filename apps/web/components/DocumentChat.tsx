@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -44,11 +45,7 @@ function parseUpdates(text: string): { cleanText: string; updates: ProposedUpdat
   return { cleanText, updates };
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  transcription: 'Transkripce',
-  translation: 'Překlad',
-  context: 'Kontext',
-};
+// FIELD_LABELS are now handled via i18n in the component
 
 // Simple word-level diff
 interface DiffSegment {
@@ -160,6 +157,7 @@ export function DocumentChat({
   onApplyUpdate,
   onTokenUsage,
 }: DocumentChatProps): React.JSX.Element {
+  const t = useTranslations('documentChat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -205,11 +203,11 @@ export function DocumentChat({
 
       if (!res.ok) {
         const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? 'Chyba serveru');
+        throw new Error(err.error ?? t('serverError'));
       }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error('Chybí response stream');
+      if (!reader) throw new Error(t('missingStream'));
 
       const decoder = new TextDecoder();
       let assistantText = '';
@@ -244,16 +242,16 @@ export function DocumentChat({
           } else if (data.type === 'done' && data.usage) {
             onTokenUsage?.(data.usage);
           } else if (data.type === 'error') {
-            throw new Error(data.error ?? 'Neznámá chyba');
+            throw new Error(data.error ?? t('unknownError'));
           }
         }
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
-      const errorMessage = err instanceof Error ? err.message : 'Neznámá chyba';
+      const errorMessage = err instanceof Error ? err.message : t('unknownError');
       setMessages((prev) => [
         ...prev.filter((m) => m.content !== ''),
-        { role: 'assistant', content: `Chyba: ${errorMessage}` },
+        { role: 'assistant', content: t('errorMessage', { message: errorMessage }) },
       ]);
     } finally {
       setStreaming(false);
@@ -289,10 +287,8 @@ export function DocumentChat({
         {messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-stone-400">Zeptejte se na cokoliv o tomto dokumentu</p>
-              <p className="mt-1 text-xs text-stone-300">
-                Model vidí obrázek, transkripci, překlad i glosář
-              </p>
+              <p className="text-sm text-stone-400">{t('inputPlaceholder')}</p>
+              <p className="mt-1 text-xs text-stone-300">{t('modelInfo')}</p>
             </div>
           </div>
         )}
@@ -320,7 +316,7 @@ export function DocumentChat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Napište zprávu… (Enter = odeslat, Shift+Enter = nový řádek)"
+            placeholder={t('textareaPlaceholder')}
             rows={2}
             className="flex-1 resize-none rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
             disabled={streaming}
@@ -383,6 +379,12 @@ function MessageBubble({
   currentFields: { transcription: string; translation: string; context: string };
   streaming: boolean;
 }): React.JSX.Element {
+  const t = useTranslations('documentChat');
+  const fieldLabels: Record<string, string> = {
+    transcription: t('contextTranscription'),
+    translation: t('contextTranslation'),
+    context: t('contextContext'),
+  };
   const isUser = message.role === 'user';
 
   if (isUser) {
@@ -420,7 +422,7 @@ function MessageBubble({
               >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-semibold text-stone-500">
-                    Navrhovaná úprava: {FIELD_LABELS[update.field] ?? update.field}
+                    {t('suggestedEdit', { field: fieldLabels[update.field] ?? update.field })}
                   </span>
                   <button
                     onClick={() => onApplyUpdate(msgIndex, updateIdx, update.field, update.content)}
@@ -431,7 +433,7 @@ function MessageBubble({
                         : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
-                    {isApplied ? 'Použito' : 'Použít'}
+                    {isApplied ? t('applied') : t('apply')}
                   </button>
                 </div>
                 {diff && hasChanges ? (

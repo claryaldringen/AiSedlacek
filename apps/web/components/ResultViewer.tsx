@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
@@ -58,6 +59,7 @@ function EditableSection({
   onSave: (newContent: string) => void;
   saving?: boolean;
 }): React.JSX.Element {
+  const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const [draft, setDraft] = useState('');
@@ -89,7 +91,7 @@ function EditableSection({
             onClick={handleEdit}
             className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
           >
-            Upravit
+            {tc('edit')}
           </button>
         ) : (
           <div className="flex gap-1">
@@ -97,14 +99,14 @@ function EditableSection({
               onClick={handleCancel}
               className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100"
             >
-              Zrušit
+              {tc('cancel')}
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
               className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:opacity-50"
             >
-              {saving ? 'Ukládám…' : 'Uložit'}
+              {saving ? tc('saving') : tc('save')}
             </button>
           </div>
         )}
@@ -123,6 +125,7 @@ function EditableSection({
 }
 
 export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX.Element {
+  const t = useTranslations('document');
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
 
@@ -250,7 +253,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            Překlad se aktualizuje na základě upravené transkripce…
+            {t('translationUpdatingFromTranscription')}
           </div>
           <div className="h-1 bg-blue-200">
             <div
@@ -265,8 +268,8 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
       <div className="grid flex-1 grid-cols-2 divide-x divide-slate-200">
         <div className="flex flex-col">
           <EditableSection
-            title="Transkripce"
-            subtitle={`Jazyk originálu: ${result.detectedLanguage}`}
+            title={t('transcription')}
+            subtitle={t('originalLanguage', { lang: result.detectedLanguage })}
             content={result.transcription}
             onSave={(text) => void handleTranscriptionSave(text)}
             saving={saving}
@@ -274,8 +277,8 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         </div>
         <div className="flex flex-col">
           <EditableSection
-            title="Překlad"
-            subtitle={`Jazyk: ${result.translationLanguage}${retranslating ? ' (aktualizuje se…)' : ''}`}
+            title={t('translation')}
+            subtitle={`${t('translationLanguage', { lang: result.translationLanguage })}${retranslating ? ' ' + t('translationUpdating') : ''}`}
             content={result.translation}
             onSave={(text) => void saveField('translation', text)}
             saving={saving}
@@ -289,7 +292,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
           {result.glossary.length > 0 ? (
             <div>
               <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-                <h2 className="text-sm font-semibold text-stone-700">Slovníček</h2>
+                <h2 className="text-sm font-semibold text-stone-700">{t('glossary')}</h2>
               </div>
               <div className="p-4">
                 <dl className="space-y-2">
@@ -305,15 +308,15 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
           ) : (
             <div>
               <div className="border-b border-stone-200 bg-stone-50 px-4 py-2">
-                <h2 className="text-sm font-semibold text-stone-700">Slovníček</h2>
+                <h2 className="text-sm font-semibold text-stone-700">{t('glossary')}</h2>
               </div>
-              <div className="p-4 text-sm text-slate-400">Žádné termíny</div>
+              <div className="p-4 text-sm text-slate-400">{t('noTerms')}</div>
             </div>
           )}
         </div>
         <div className="flex flex-col">
           <EditableSection
-            title="Kontext"
+            title={t('context')}
             content={result.context || ''}
             onSave={(text) => void saveField('context', text)}
             saving={saving}
@@ -327,53 +330,59 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         <div>
           <details>
             <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
-              Metadata
+              {t('metadata')}
             </summary>
             <div className="divide-y divide-stone-100 text-sm">
-              <MetadataGroup title="Zpracování">
+              <MetadataGroup title={t('processingSection')}>
                 <MetadataRow label="Model" value={result.model} />
                 <MetadataRow
-                  label="Tokeny"
+                  label={t('tokens')}
                   value={
                     result.inputTokens != null || result.outputTokens != null
-                      ? `${(result.inputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.outputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`
+                      ? t('tokensInOut', {
+                          in: (result.inputTokens ?? 0) * TOKEN_MULTIPLIER,
+                          out: (result.outputTokens ?? 0) * TOKEN_MULTIPLIER,
+                        })
                       : null
                   }
                 />
                 <MetadataRow
-                  label="Čas zpracování"
+                  label={t('processingTime')}
                   value={
                     result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
                   }
                 />
                 <MetadataRow
-                  label="Cena"
+                  label={t('totalPrice')}
                   value={formatCost(result.model, result.inputTokens, result.outputTokens)}
                 />
                 <MetadataRow
-                  label="Vytvořeno"
+                  label={t('createdAt')}
                   value={result.createdAt ? formatDate(result.createdAt) : null}
                 />
                 <MetadataRow
-                  label="Upraveno"
+                  label={t('updatedAt')}
                   value={result.updatedAt ? formatDate(result.updatedAt) : null}
                 />
               </MetadataGroup>
 
               {(result.translationModel || result.translationInputTokens != null) && (
-                <MetadataGroup title="Překlad">
+                <MetadataGroup title={t('translationSection')}>
                   <MetadataRow label="Model" value={result.translationModel} />
                   <MetadataRow
-                    label="Tokeny"
+                    label={t('tokens')}
                     value={
                       result.translationInputTokens != null ||
                       result.translationOutputTokens != null
-                        ? `${(result.translationInputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.translationOutputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`
+                        ? t('tokensInOut', {
+                            in: (result.translationInputTokens ?? 0) * TOKEN_MULTIPLIER,
+                            out: (result.translationOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                          })
                         : null
                     }
                   />
                   <MetadataRow
-                    label="Cena"
+                    label={t('totalPrice')}
                     value={formatCost(
                       result.translationModel,
                       result.translationInputTokens,
@@ -384,14 +393,17 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
               )}
 
               {(result.chatInputTokens ?? 0) > 0 && (
-                <MetadataGroup title="Chat">
+                <MetadataGroup title={t('chat')}>
                   <MetadataRow label="Model" value={result.chatModel} />
                   <MetadataRow
-                    label="Tokeny"
-                    value={`${(result.chatInputTokens ?? 0) * TOKEN_MULTIPLIER} vstup / ${(result.chatOutputTokens ?? 0) * TOKEN_MULTIPLIER} výstup`}
+                    label={t('tokens')}
+                    value={t('tokensInOut', {
+                      in: (result.chatInputTokens ?? 0) * TOKEN_MULTIPLIER,
+                      out: (result.chatOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                    })}
                   />
                   <MetadataRow
-                    label="Cena"
+                    label={t('totalPrice')}
                     value={formatCost(
                       result.chatModel,
                       result.chatInputTokens,
@@ -419,9 +431,9 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
                 );
                 const total = processCost + translationCost + chatCost;
                 return total > 0 ? (
-                  <MetadataGroup title="Celkem">
+                  <MetadataGroup title={t('grandTotal')}>
                     <MetadataRow
-                      label="Celková cena"
+                      label={t('totalGrandPrice')}
                       value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
                     />
                   </MetadataGroup>
@@ -429,23 +441,23 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
               })()}
 
               {(result.mimeType || result.width || result.hash) && (
-                <MetadataGroup title="Obrázek">
-                  <MetadataRow label="Formát" value={result.mimeType} />
+                <MetadataGroup title={t('imageSection')}>
+                  <MetadataRow label={t('format')} value={result.mimeType} />
                   <MetadataRow
-                    label="Rozměry"
+                    label={t('dimensions')}
                     value={
                       result.width && result.height ? `${result.width} × ${result.height} px` : null
                     }
                   />
                   <MetadataRow
-                    label="Velikost"
+                    label={t('fileSize')}
                     value={result.fileSize != null ? formatFileSize(result.fileSize) : null}
                   />
                   <MetadataRow
-                    label="Nahráno"
+                    label={t('uploadedAt')}
                     value={result.pageCreatedAt ? formatDate(result.pageCreatedAt) : null}
                   />
-                  <MetadataRow label="SHA-256" value={result.hash} mono />
+                  <MetadataRow label={t('sha256')} value={result.hash} mono />
                 </MetadataGroup>
               )}
             </div>
@@ -456,7 +468,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         <div>
           <details>
             <summary className="cursor-pointer border-b border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-100">
-              Historie verzí
+              {t('versionHistory')}
             </summary>
             <div className="p-4">
               <VersionHistory

@@ -1,3 +1,4 @@
+import { getTranslations } from 'next-intl/server';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -34,18 +35,23 @@ function MarkdownContent({ content }: { content: string }): React.JSX.Element {
   );
 }
 
-export function PublicResultViewer({ document }: { document: PublicDocument }): React.JSX.Element {
+export async function PublicResultViewer({
+  document,
+}: {
+  document: PublicDocument;
+}): Promise<React.JSX.Element> {
+  const t = await getTranslations('view');
   const translation = document.translations[0];
 
   return (
     <div className="flex flex-col gap-4">
       {/* Row 1: Transcription | Translation */}
       <div className="flex flex-1 gap-4">
-        <Card title={`Transkripce (${document.detectedLanguage})`}>
+        <Card title={t('transcription', { lang: document.detectedLanguage })}>
           <MarkdownContent content={document.transcription} />
         </Card>
         {translation && (
-          <Card title={`Překlad (${translation.language})`}>
+          <Card title={t('translation', { lang: translation.language })}>
             <MarkdownContent content={translation.text} />
           </Card>
         )}
@@ -55,7 +61,7 @@ export function PublicResultViewer({ document }: { document: PublicDocument }): 
       {(document.glossary.length > 0 || document.context) && (
         <div className="flex gap-4">
           {document.glossary.length > 0 && (
-            <Card title="Glosář">
+            <Card title={t('glossary')}>
               <dl className="space-y-3">
                 {document.glossary.map((g) => (
                   <div key={g.term}>
@@ -69,13 +75,12 @@ export function PublicResultViewer({ document }: { document: PublicDocument }): 
             </Card>
           )}
           {document.context && (
-            <Card title="Kontext stránky">
+            <Card title={t('pageContext')}>
               <MarkdownContent content={document.context} />
             </Card>
           )}
         </div>
       )}
-
     </div>
   );
 }

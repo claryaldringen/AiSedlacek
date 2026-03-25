@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 
 export interface UploadedPage {
   id: string;
@@ -30,22 +31,13 @@ interface FileStatus {
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = 20;
 
-function validateFile(file: File): string | null {
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return 'Nepodporovaný formát. Povolené: JPEG, PNG, TIFF, WebP';
-  }
-  if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-    return `Příliš velký (max ${MAX_SIZE_MB} MB)`;
-  }
-  return null;
-}
-
 export function FileUploadZone({
   onFilesUploaded,
   collectionId,
   isOpen,
   onClose,
 }: FileUploadZoneProps): React.JSX.Element | null {
+  const t = useTranslations('fileUpload');
   const [isDragOver, setIsDragOver] = useState(false);
   const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -60,28 +52,44 @@ export function FileUploadZone({
     }
   }, [isOpen]);
 
-  const buildPreviews = (files: File[]): Promise<FileStatus[]> =>
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise<FileStatus>((resolve) => {
-            const error = validateFile(file);
-            if (error) {
-              resolve({ file, state: 'error', error });
-              return;
-            }
-            if (file.type.startsWith('image/')) {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                resolve({ file, state: 'pending', preview: e.target?.result as string });
-              };
-              reader.readAsDataURL(file);
-            } else {
-              resolve({ file, state: 'pending' });
-            }
-          }),
+  const validateFile = useCallback(
+    (file: File): string | null => {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        return t('unsupportedFormat');
+      }
+      if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+        return t('tooLarge', { max: MAX_SIZE_MB });
+      }
+      return null;
+    },
+    [t],
+  );
+
+  const buildPreviews = useCallback(
+    (files: File[]): Promise<FileStatus[]> =>
+      Promise.all(
+        files.map(
+          (file) =>
+            new Promise<FileStatus>((resolve) => {
+              const error = validateFile(file);
+              if (error) {
+                resolve({ file, state: 'error', error });
+                return;
+              }
+              if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                  resolve({ file, state: 'pending', preview: e.target?.result as string });
+                };
+                reader.readAsDataURL(file);
+              } else {
+                resolve({ file, state: 'pending' });
+              }
+            }),
+        ),
       ),
-    );
+    [validateFile],
+  );
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -117,7 +125,7 @@ export function FileUploadZone({
           error?: string;
         };
 
-        if (!response.ok) throw new Error(data.error ?? 'Nahrávání selhalo');
+        if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
 
         const uploadedPages = data.pages ?? [];
         const uploadErrors = data.errors ?? [];
@@ -136,7 +144,7 @@ export function FileUploadZone({
           onFilesUploaded(uploadedPages);
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Neznámá chyba';
+        const message = err instanceof Error ? err.message : t('unknownError');
         setFileStatuses((prev) =>
           prev.map((s) =>
             s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s,
@@ -146,7 +154,7 @@ export function FileUploadZone({
         setIsUploading(false);
       }
     },
-    [collectionId, onFilesUploaded],
+    [t, buildPreviews, collectionId, onFilesUploaded],
   );
 
   const handleFilesSelected = (selected: FileList | null): void => {
@@ -171,7 +179,7 @@ export function FileUploadZone({
       <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-base font-semibold text-slate-800">Nahrát soubory</h2>
+          <h2 className="text-base font-semibold text-slate-800">{t('uploadFiles')}</h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
@@ -221,22 +229,19 @@ export function FileUploadZone({
               />
             </svg>
             {isUploading ? (
-              <p className="text-slate-600">Nahrávám soubory…</p>
+              <p className="text-slate-600">{t('uploading')}</p>
             ) : allDone ? (
               <div>
                 <p className="font-medium text-green-700">
-                  Hotovo – {doneCount} {doneCount === 1 ? 'soubor' : 'souborů'} nahráno
+                  {t('uploadDone', { count: doneCount })}
                 </p>
-                <p className="mt-1 text-sm text-slate-400">Klikněte pro nahrání dalších</p>
+                <p className="mt-1 text-sm text-slate-400">{t('uploadMore')}</p>
               </div>
             ) : (
               <>
-                <p className="text-slate-600">
-                  Přetáhněte soubory sem nebo{' '}
-                  <span className="font-medium text-blue-600">vyberte ze zařízení</span>
-                </p>
+                <p className="text-slate-600">{t('dropZoneText')}</p>
                 <p className="mt-2 text-xs text-slate-400">
-                  JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB · více souborů najednou
+                  {t('dropZoneFormats', { max: MAX_SIZE_MB })}
                 </p>
               </>
             )}
@@ -260,7 +265,11 @@ export function FileUploadZone({
                   className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
                 >
                   {s.preview && (
-                    <img src={s.preview} alt={s.file.name} className="h-8 w-8 rounded object-cover" />
+                    <img
+                      src={s.preview}
+                      alt={s.file.name}
+                      className="h-8 w-8 rounded object-cover"
+                    />
                   )}
                   <span className="flex-1 truncate text-slate-700">{s.file.name}</span>
                   {s.state === 'uploading' && (
@@ -300,7 +309,7 @@ export function FileUploadZone({
                     </svg>
                   )}
                   {s.state === 'error' && (
-                    <span className="text-xs text-red-500">{s.error ?? 'Chyba'}</span>
+                    <span className="text-xs text-red-500">{s.error ?? t('errorTitle')}</span>
                   )}
                 </div>
               ))}
@@ -314,7 +323,7 @@ export function FileUploadZone({
             onClick={onClose}
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-50"
           >
-            {allDone ? 'Zavřít' : 'Zrušit'}
+            {allDone ? t('close') : t('cancel')}
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 
 interface CollectionMetadata {
   title?: string | null;
@@ -24,6 +25,7 @@ export function CollectionMetadataEditor({
   hasContext,
   onSaved,
 }: Props): React.JSX.Element {
+  const t = useTranslations('collection');
   const [title, setTitle] = useState(metadata.title ?? '');
   const [author, setAuthor] = useState(metadata.author ?? '');
   const [yearFrom, setYearFrom] = useState(metadata.yearFrom?.toString() ?? '');
@@ -56,11 +58,11 @@ export function CollectionMetadataEditor({
       }
       onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Uložení selhalo');
+      setError(err instanceof Error ? err.message : t('savingMetadataFailed'));
     } finally {
       setSaving(false);
     }
-  }, [collectionId, title, author, yearFrom, yearTo, librarySignature, abstract, onSaved]);
+  }, [t, collectionId, title, author, yearFrom, yearTo, librarySignature, abstract, onSaved]);
 
   const handleExtract = useCallback(async () => {
     setExtracting(true);
@@ -82,11 +84,11 @@ export function CollectionMetadataEditor({
       setAbstract(data.abstract ?? '');
       onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Extrakce selhala');
+      setError(err instanceof Error ? err.message : t('extractionFailed'));
     } finally {
       setExtracting(false);
     }
-  }, [collectionId, onSaved]);
+  }, [t, collectionId, onSaved]);
 
   const inputClass =
     'w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400';
@@ -95,7 +97,7 @@ export function CollectionMetadataEditor({
   return (
     <div className="space-y-3">
       <div>
-        <label className={labelClass}>Název díla</label>
+        <label className={labelClass}>{t('metadataTitle')}</label>
         <input
           type="text"
           value={title}
@@ -105,7 +107,7 @@ export function CollectionMetadataEditor({
         />
       </div>
       <div>
-        <label className={labelClass}>Autor</label>
+        <label className={labelClass}>{t('metadataAuthor')}</label>
         <input
           type="text"
           value={author}
@@ -116,7 +118,7 @@ export function CollectionMetadataEditor({
       </div>
       <div className="flex gap-2">
         <div className="flex-1">
-          <label className={labelClass}>Rok od</label>
+          <label className={labelClass}>{t('metadataYearFrom')}</label>
           <input
             type="number"
             value={yearFrom}
@@ -126,7 +128,7 @@ export function CollectionMetadataEditor({
           />
         </div>
         <div className="flex-1">
-          <label className={labelClass}>Rok do</label>
+          <label className={labelClass}>{t('metadataYearTo')}</label>
           <input
             type="number"
             value={yearTo}
@@ -137,7 +139,7 @@ export function CollectionMetadataEditor({
         </div>
       </div>
       <div>
-        <label className={labelClass}>Signatura</label>
+        <label className={labelClass}>{t('metadataSignature')}</label>
         <input
           type="text"
           value={librarySignature}
@@ -147,7 +149,7 @@ export function CollectionMetadataEditor({
         />
       </div>
       <div>
-        <label className={labelClass}>Abstrakt</label>
+        <label className={labelClass}>{t('metadataAbstract')}</label>
         <textarea
           value={abstract}
           onChange={(e) => setAbstract(e.target.value)}
@@ -163,16 +165,16 @@ export function CollectionMetadataEditor({
           disabled={saving || extracting}
           className="flex-1 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
         >
-          {saving ? 'Ukládám…' : 'Uložit metadata'}
+          {saving ? t('savingMetadata') : t('saveMetadata')}
         </button>
         {hasContext && (
           <button
             onClick={() => void handleExtract()}
             disabled={extracting || saving}
             className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
-            title="Extrahovat metadata z kontextu díla pomocí AI"
+            title={t('extractMetadataTooltip')}
           >
-            {extracting ? 'Extrahuji…' : 'Extrahovat z kontextu'}
+            {extracting ? t('extractingMetadata') : t('extractMetadataFromContext')}
           </button>
         )}
       </div>

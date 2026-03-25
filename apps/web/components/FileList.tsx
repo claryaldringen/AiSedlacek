@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import type { PageItem } from './FileGrid';
 import type { Collection } from './Sidebar';
 
@@ -22,12 +23,13 @@ function cleanFilename(raw: string): string {
 }
 
 function StatusCell({ status }: { status: string }): React.JSX.Element {
+  const t = useTranslations('fileList');
   switch (status) {
     case 'done':
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
           <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-          Zpracováno
+          {t('statusDone')}
         </span>
       );
     case 'processing':
@@ -48,21 +50,21 @@ function StatusCell({ status }: { status: string }): React.JSX.Element {
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
             />
           </svg>
-          Zpracovává se
+          {t('statusProcessing')}
         </span>
       );
     case 'error':
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
           <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-          Chyba
+          {t('statusError')}
         </span>
       );
     default:
       return (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
           <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-          Čeká
+          {t('statusPending')}
         </span>
       );
   }
@@ -81,6 +83,7 @@ export function FileList({
   processingPageIds,
   showCollections = true,
 }: FileListProps): React.JSX.Element {
+  const t = useTranslations('fileList');
   const allItems = pages;
   const allSelected = selected.size === allItems.length && allItems.length > 0;
   const someSelected = selected.size > 0 && selected.size < allItems.length;
@@ -101,8 +104,8 @@ export function FileList({
             d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"
           />
         </svg>
-        <p className="text-slate-500">Tato složka je prázdná.</p>
-        <p className="mt-1 text-sm text-slate-400">Nahrajte obrázky tlačítkem "Nahrát" výše.</p>
+        <p className="text-slate-500">{t('emptyFolder')}</p>
+        <p className="mt-1 text-sm text-slate-400">{t('emptyFolderHint')}</p>
       </div>
     );
   }
@@ -124,10 +127,10 @@ export function FileList({
               />
             </th>
             <th className="w-12 px-2 py-2.5" />
-            <th className="px-2 py-2.5 font-semibold">Název</th>
-            <th className="px-2 py-2.5 font-semibold">Stav</th>
-            <th className="px-2 py-2.5 font-semibold">Jazyk</th>
-            <th className="px-2 py-2.5 font-semibold">Přidáno</th>
+            <th className="px-2 py-2.5 font-semibold">{t('columnName')}</th>
+            <th className="px-2 py-2.5 font-semibold">{t('columnStatus')}</th>
+            <th className="px-2 py-2.5 font-semibold">{t('columnLanguage')}</th>
+            <th className="px-2 py-2.5 font-semibold">{t('columnAdded')}</th>
             <th className="w-16 px-2 py-2.5" />
           </tr>
         </thead>
@@ -155,7 +158,9 @@ export function FileList({
                   )}
                 </td>
                 <td className="px-2 py-2">
-                  <span className="text-xs text-slate-500">{col._count.pages} stránek</span>
+                  <span className="text-xs text-slate-500">
+                    {t('pages', { count: col._count.pages })}
+                  </span>
                 </td>
                 <td className="px-2 py-2" />
                 <td className="px-2 py-2">
@@ -222,12 +227,12 @@ export function FileList({
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
                         {page.document.detectedLanguage}
                       </span>
-                      {page.document.translations.map((t) => (
+                      {page.document.translations.map((tr) => (
                         <span
-                          key={t.language}
+                          key={tr.language}
                           className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
                         >
-                          → {t.language}
+                          → {tr.language}
                         </span>
                       ))}
                     </div>
@@ -247,7 +252,7 @@ export function FileList({
                 <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onDelete(page.id)}
-                    title={isDone ? 'Archivovat' : 'Smazat'}
+                    title={isDone ? t('archive') : t('delete')}
                     className="rounded p-1 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
                   >
                     <svg

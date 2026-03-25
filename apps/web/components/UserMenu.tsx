@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import Link from 'next/link';
+import { useTranslations } from 'next-intl';
+import { Link } from '@/i18n/navigation';
 
 interface BalanceData {
   balance: number;
@@ -50,10 +51,9 @@ export function UserMenu(): React.JSX.Element | null {
     .map((s) => s[0]?.toUpperCase() ?? '')
     .join('');
 
+  const t = useTranslations('sidebar');
   const formattedBalance =
-    balance !== null
-      ? balance.toLocaleString('cs-CZ') + ' tokenů'
-      : null;
+    balance !== null ? t('tokenBalance', { count: balance.toLocaleString('cs-CZ') }) : null;
 
   const displayName = session.user.name ?? session.user.email ?? '';
 
@@ -67,7 +67,11 @@ export function UserMenu(): React.JSX.Element | null {
         {/* Avatar */}
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-600 text-xs font-semibold text-white">
           {session.user.image ? (
-            <img src={session.user.image} alt={session.user.name ?? 'Avatar'} className="h-7 w-7 rounded-full" />
+            <img
+              src={session.user.image}
+              alt={session.user.name ?? 'Avatar'}
+              className="h-7 w-7 rounded-full"
+            />
           ) : (
             initials
           )}
@@ -81,9 +85,7 @@ export function UserMenu(): React.JSX.Element | null {
           {formattedBalance && (
             <>
               <span className="text-slate-500">|</span>
-              <span className="whitespace-nowrap text-xs text-slate-400">
-                {formattedBalance}
-              </span>
+              <span className="whitespace-nowrap text-xs text-slate-400">{formattedBalance}</span>
             </>
           )}
         </div>
@@ -108,9 +110,7 @@ export function UserMenu(): React.JSX.Element | null {
             )}
             <p className="truncate text-xs text-slate-500">{session.user.email}</p>
             {formattedBalance && (
-              <p className="mt-1 text-xs font-medium text-slate-600">
-                {formattedBalance}
-              </p>
+              <p className="mt-1 text-xs font-medium text-slate-600">{formattedBalance}</p>
             )}
           </div>
           <Link
@@ -131,7 +131,7 @@ export function UserMenu(): React.JSX.Element | null {
                 d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"
               />
             </svg>
-            Dobít tokeny
+            {t('topUpTokens')}
           </Link>
           <button
             onClick={() => void signOut()}
@@ -150,7 +150,7 @@ export function UserMenu(): React.JSX.Element | null {
                 d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9"
               />
             </svg>
-            Odhlásit se
+            {t('logout')}
           </button>
         </div>
       )}

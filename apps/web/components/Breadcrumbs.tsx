@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import type { Collection } from './Sidebar';
 
 interface BreadcrumbsProps {
@@ -11,10 +12,11 @@ export function Breadcrumbs({
   selectedCollection,
   onNavigateRoot,
 }: BreadcrumbsProps): React.JSX.Element {
+  const t = useTranslations('breadcrumbs');
   return (
     <nav className="flex items-center gap-1 text-sm text-slate-300" aria-label="Navigace">
       <button onClick={onNavigateRoot} className="transition-colors hover:text-white">
-        Vše
+        {t('all')}
       </button>
       {selectedCollection && (
         <>

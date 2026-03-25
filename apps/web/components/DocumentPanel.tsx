@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import { ResultViewer, type DocumentResult } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
@@ -26,8 +27,8 @@ function cleanFilename(raw: string): string {
   return raw.replace(/^[a-f0-9-]+-/, '');
 }
 
-function getDisplayTitle(page: PageItem | null): string {
-  if (!page) return 'Dokument';
+function getDisplayTitle(page: PageItem | null, documentLabel: string): string {
+  if (!page) return documentLabel;
   return page.displayName || cleanFilename(page.filename);
 }
 
@@ -112,10 +113,13 @@ export function DocumentPanel({
     onPageUpdate?.(updated);
   }, [page, titleDraft, onPageUpdate]);
 
+  const t = useTranslations('document');
+  const tc = useTranslations('common');
+
   if (!page && !isLoading) return null;
 
   const status = page?.status ?? 'pending';
-  const title = getDisplayTitle(page);
+  const title = getDisplayTitle(page, t('document'));
   const showRegenerate = page && onRegenerate && (status === 'done' || status === 'error');
 
   return (
@@ -134,7 +138,7 @@ export function DocumentPanel({
                 onClick={onPrevious}
                 disabled={!hasPrevious}
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                aria-label="Předchozí"
+                aria-label={tc('previous')}
               >
                 <svg
                   className="h-4 w-4"
@@ -154,7 +158,7 @@ export function DocumentPanel({
                 onClick={onNext}
                 disabled={!hasNext}
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
-                aria-label="Další"
+                aria-label={tc('next')}
               >
                 <svg
                   className="h-4 w-4"
@@ -189,16 +193,16 @@ export function DocumentPanel({
                 <h2
                   className="cursor-text text-sm font-semibold text-white hover:text-slate-200"
                   onClick={handleTitleClick}
-                  title="Klikněte pro přejmenování"
+                  title={t('clickToRename')}
                 >
                   {title}
                 </h2>
               )}
               <p className="text-xs text-slate-400">
-                {status === 'done' && 'Zpracováno'}
-                {status === 'pending' && 'Čeká na zpracování'}
-                {status === 'processing' && 'Zpracovává se…'}
-                {status === 'error' && 'Chyba zpracování'}
+                {status === 'done' && t('processed')}
+                {status === 'pending' && t('pendingProcessing')}
+                {status === 'processing' && t('processingInProgress')}
+                {status === 'error' && t('processingError')}
               </p>
             </div>
           </div>
@@ -242,13 +246,13 @@ export function DocumentPanel({
                     />
                   </svg>
                 )}
-                {isRegenerating ? 'Generuji…' : 'Přegenerovat'}
+                {isRegenerating ? t('regenerating') : t('regenerate')}
               </button>
             )}
             <button
               onClick={onClose}
               className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
-              aria-label="Zavřít"
+              aria-label={tc('close')}
             >
               <svg
                 className="h-5 w-5"
@@ -269,7 +273,7 @@ export function DocumentPanel({
           {page && (
             <div className="flex w-1/3 flex-col border-r border-slate-200 bg-slate-50">
               <div className="shrink-0 border-b border-slate-100 px-4 py-2">
-                <span className="text-xs font-medium text-slate-500">Originál</span>
+                <span className="text-xs font-medium text-slate-500">{t('original')}</span>
               </div>
               <div className="flex-1 overflow-auto p-4">
                 <img src={page.imageUrl} alt={title} className="w-full rounded shadow-sm" />
@@ -302,7 +306,7 @@ export function DocumentPanel({
                     />
                   </svg>
                   <p className="text-sm text-slate-600">
-                    {regenerateStep ?? 'Zpracovávám dokument…'}
+                    {regenerateStep ?? t('processingDocument')}
                   </p>
                   {regenerateProgress != null && (
                     <div className="space-y-1">
@@ -339,7 +343,7 @@ export function DocumentPanel({
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                  <p className="text-sm text-slate-500">Načítám…</p>
+                  <p className="text-sm text-slate-500">{tc('loading')}</p>
                 </div>
               </div>
             ) : status === 'done' && result ? (
@@ -369,21 +373,21 @@ export function DocumentPanel({
             ) : status === 'error' ? (
               <div className="p-4">
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                  <h3 className="mb-1 text-sm font-semibold text-red-700">Chyba zpracování</h3>
-                  <p className="text-sm text-red-600">
-                    {page?.errorMessage ?? 'Při zpracování dokumentu došlo k neznámé chybě.'}
-                  </p>
+                  <h3 className="mb-1 text-sm font-semibold text-red-700">
+                    {t('processingError')}
+                  </h3>
+                  <p className="text-sm text-red-600">{page?.errorMessage ?? t('unknownError')}</p>
                 </div>
               </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center text-center">
-                <p className="mb-4 text-sm text-slate-500">Dokument zatím nebyl zpracován.</p>
+                <p className="mb-4 text-sm text-slate-500">{t('notProcessedYet')}</p>
                 {page && onRegenerate && (
                   <button
                     onClick={() => onRegenerate(page.id)}
                     className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
-                    Zpracovat
+                    {t('processButton')}
                   </button>
                 )}
               </div>

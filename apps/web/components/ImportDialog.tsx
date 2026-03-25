@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 
 export interface UploadedPage {
   id: string;
@@ -41,18 +42,13 @@ interface DiscoveredImage {
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = 20;
 
-function validateFile(file: File): string | null {
-  if (!ALLOWED_TYPES.includes(file.type)) return 'Nepodporovaný formát';
-  if (file.size > MAX_SIZE_MB * 1024 * 1024) return `Příliš velký (max ${MAX_SIZE_MB} MB)`;
-  return null;
-}
-
 export function ImportDialog({
   isOpen,
   onClose,
   onPagesImported,
   collectionId,
 }: ImportDialogProps): React.JSX.Element | null {
+  const t = useTranslations('importDialog');
   const [tab, setTab] = useState<Tab>('files');
   // Files tab
   const [isDragOver, setIsDragOver] = useState(false);
@@ -91,27 +87,39 @@ export function ImportDialog({
   }, [isOpen]);
 
   // ---- Files tab logic ----
-  const buildPreviews = (files: File[]): Promise<FileStatus[]> =>
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise<FileStatus>((resolve) => {
-            const error = validateFile(file);
-            if (error) {
-              resolve({ file, state: 'error', error });
-              return;
-            }
-            if (file.type.startsWith('image/')) {
-              const reader = new FileReader();
-              reader.onload = (e) =>
-                resolve({ file, state: 'pending', preview: e.target?.result as string });
-              reader.readAsDataURL(file);
-            } else {
-              resolve({ file, state: 'pending' });
-            }
-          }),
+  const validateFile = useCallback(
+    (file: File): string | null => {
+      if (!ALLOWED_TYPES.includes(file.type)) return t('unsupportedFormat');
+      if (file.size > MAX_SIZE_MB * 1024 * 1024) return t('tooLarge', { max: MAX_SIZE_MB });
+      return null;
+    },
+    [t],
+  );
+
+  const buildPreviews = useCallback(
+    (files: File[]): Promise<FileStatus[]> =>
+      Promise.all(
+        files.map(
+          (file) =>
+            new Promise<FileStatus>((resolve) => {
+              const error = validateFile(file);
+              if (error) {
+                resolve({ file, state: 'error', error });
+                return;
+              }
+              if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) =>
+                  resolve({ file, state: 'pending', preview: e.target?.result as string });
+                reader.readAsDataURL(file);
+              } else {
+                resolve({ file, state: 'pending' });
+              }
+            }),
+        ),
       ),
-    );
+    [validateFile],
+  );
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -141,7 +149,7 @@ export function ImportDialog({
           errors?: { filename: string; error: string }[];
           error?: string;
         };
-        if (!response.ok) throw new Error(data.error ?? 'Nahrávání selhalo');
+        if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
 
         const uploadedPages = data.pages ?? [];
         const uploadErrors = data.errors ?? [];
@@ -158,7 +166,7 @@ export function ImportDialog({
 
         if (uploadedPages.length > 0) onPagesImported(uploadedPages);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Neznámá chyba';
+        const message = err instanceof Error ? err.message : t('unknownError');
         setFileStatuses((prev) =>
           prev.map((s) =>
             s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s,
@@ -168,7 +176,7 @@ export function ImportDialog({
         setIsUploading(false);
       }
     },
-    [collectionId, onPagesImported],
+    [t, buildPreviews, collectionId, onPagesImported],
   );
 
   // ---- URL tab logic ----
@@ -190,14 +198,14 @@ export function ImportDialog({
         try {
           data = (await res.json()) as { page?: UploadedPage; error?: string };
         } catch {
-          throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+          throw new Error(t('serverError', { status: res.status }));
         }
-        if (!res.ok) throw new Error(data.error ?? 'Import selhal');
+        if (!res.ok) throw new Error(data.error ?? t('importFailed'));
         return (data.page as UploadedPage) ?? null;
       }
-      throw new Error('Import selhal po opakovaných pokusech');
+      throw new Error(t('importFailedRetry'));
     },
-    [collectionId],
+    [t, collectionId],
   );
 
   const discoverAbortRef = useRef<AbortController | null>(null);
@@ -398,7 +406,7 @@ export function ImportDialog({
         const result = results[j]!;
         if (result.status !== 'fulfilled') {
           const item = batch[j]!;
-          const message = result.reason instanceof Error ? result.reason.message : 'Chyba';
+          const message = result.reason instanceof Error ? result.reason.message : t('error');
           setDiscovered((prev) =>
             prev.map((d) =>
               d.url === item.url ? { ...d, state: 'error' as const, error: message } : d,
@@ -432,7 +440,7 @@ export function ImportDialog({
         {/* Header with tabs */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
           <div className="flex items-center gap-4">
-            <h2 className="text-base font-semibold text-slate-800">Vložit dokumenty</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t('title')}</h2>
             <div className="flex gap-0">
               <button
                 onClick={() => setTab('files')}
@@ -442,7 +450,7 @@ export function ImportDialog({
                     : 'text-slate-400 hover:text-slate-600'
                 }`}
               >
-                Soubory
+                {t('tabFiles')}
               </button>
               <button
                 onClick={() => setTab('url')}
@@ -452,7 +460,7 @@ export function ImportDialog({
                     : 'text-slate-400 hover:text-slate-600'
                 }`}
               >
-                URL
+                {t('tabUrl')}
               </button>
             </div>
           </div>
@@ -512,20 +520,19 @@ export function ImportDialog({
                   />
                 </svg>
                 {isUploading ? (
-                  <p className="text-slate-600">Nahrávám…</p>
+                  <p className="text-slate-600">{t('uploading')}</p>
                 ) : allFilesDone ? (
                   <div>
-                    <p className="font-medium text-green-700">Hotovo – {doneCount} nahráno</p>
-                    <p className="mt-1 text-sm text-slate-400">Klikněte pro nahrání dalších</p>
+                    <p className="font-medium text-green-700">
+                      {t('uploadDone', { count: doneCount })}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-400">{t('uploadMore')}</p>
                   </div>
                 ) : (
                   <>
-                    <p className="text-slate-600">
-                      Přetáhněte soubory sem nebo{' '}
-                      <span className="font-medium text-blue-600">vyberte ze zařízení</span>
-                    </p>
+                    <p className="text-slate-600">{t('dropZoneText')}</p>
                     <p className="mt-2 text-xs text-slate-400">
-                      JPEG, PNG, TIFF, WebP · max {MAX_SIZE_MB} MB
+                      {t('dropZoneFormats', { max: MAX_SIZE_MB })}
                     </p>
                   </>
                 )}
@@ -555,7 +562,7 @@ export function ImportDialog({
           {tab === 'url' && (
             <>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">URL obrázku</label>
+                <label className="text-sm font-medium text-slate-700">{t('urlLabel')}</label>
                 <input
                   type="url"
                   value={urlInput}
@@ -565,7 +572,7 @@ export function ImportDialog({
                     setUrlSuccess(null);
                   }}
                   onKeyDown={(e) => e.stopPropagation()}
-                  placeholder="https://… (přímý odkaz na obrázek)"
+                  placeholder={t('urlPlaceholder')}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
                 />
                 {urlError && <p className="text-sm text-red-600">{urlError}</p>}
@@ -590,7 +597,7 @@ export function ImportDialog({
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                  Hledám další stránky…
+                  {t('searchingPages')}
                 </div>
               )}
 
@@ -598,7 +605,7 @@ export function ImportDialog({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-slate-700">
-                      Nalezené stránky ({discovered.length})
+                      {t('foundPages', { count: discovered.length })}
                     </p>
                     <div className="flex gap-2">
                       <button
@@ -607,7 +614,7 @@ export function ImportDialog({
                         }
                         className="text-xs text-blue-600 hover:underline"
                       >
-                        Vše
+                        {t('selectAll')}
                       </button>
                       <button
                         onClick={() =>
@@ -615,7 +622,7 @@ export function ImportDialog({
                         }
                         className="text-xs text-slate-400 hover:underline"
                       >
-                        Nic
+                        {t('selectNone')}
                       </button>
                     </div>
                   </div>
@@ -711,7 +718,7 @@ export function ImportDialog({
                         {d.state === 'error' && (
                           <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
                             <span className="rounded bg-red-600 px-1 text-[9px] text-white">
-                              Chyba
+                              {t('error')}
                             </span>
                           </div>
                         )}
@@ -743,7 +750,7 @@ export function ImportDialog({
                               d="M15.75 19.5 8.25 12l7.5-7.5"
                             />
                           </svg>
-                          {isLoadingMore ? 'Načítám…' : 'Načíst předchozí'}
+                          {isLoadingMore ? t('loading') : t('loadPrevious')}
                         </button>
                       )}
                       <select
@@ -766,7 +773,7 @@ export function ImportDialog({
                           disabled={isLoadingMore}
                           className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                         >
-                          {isLoadingMore ? 'Načítám…' : 'Načíst další'}
+                          {isLoadingMore ? t('loading') : t('loadNext')}
                           <svg
                             className="h-3 w-3"
                             fill="none"
@@ -792,8 +799,11 @@ export function ImportDialog({
                       className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isImportingDiscovered
-                        ? 'Importuji…'
-                        : `Importovat vybrané (${discovered.filter((d) => d.selected && d.state === 'pending').length})`}
+                        ? t('importing')
+                        : t('importSelected', {
+                            count: discovered.filter((d) => d.selected && d.state === 'pending')
+                              .length,
+                          })}
                     </button>
                   )}
                 </div>
@@ -808,7 +818,7 @@ export function ImportDialog({
             onClick={onClose}
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-50"
           >
-            Zavřít
+            {t('close')}
           </button>
         </div>
       </div>
@@ -817,9 +827,12 @@ export function ImportDialog({
 }
 
 function FileStatusRow({ status: s }: { status: FileStatus }): React.JSX.Element {
+  const t = useTranslations('importDialog');
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
-      {s.preview && <img src={s.preview} alt={s.file.name} className="h-8 w-8 rounded object-cover" />}
+      {s.preview && (
+        <img src={s.preview} alt={s.file.name} className="h-8 w-8 rounded object-cover" />
+      )}
       <span className="flex-1 truncate text-slate-700">{s.file.name}</span>
       {s.state === 'uploading' && (
         <svg className="h-4 w-4 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
@@ -849,7 +862,7 @@ function FileStatusRow({ status: s }: { status: FileStatus }): React.JSX.Element
           <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
         </svg>
       )}
-      {s.state === 'error' && <span className="text-xs text-red-500">{s.error ?? 'Chyba'}</span>}
+      {s.state === 'error' && <span className="text-xs text-red-500">{s.error ?? t('error')}</span>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, forwardRef, useImperativeHandle } from 'react';
+import { useTranslations } from 'next-intl';
 
 export interface MarkdownEditorHandle {
   getMarkdown: () => string;
@@ -13,6 +14,7 @@ interface MarkdownEditorProps {
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
   function MarkdownEditor({ initialValue, onChange }, ref) {
+    const t = useTranslations('markdownEditor');
     const [value, setValue] = useState(initialValue);
 
     useImperativeHandle(ref, () => ({
@@ -68,7 +70,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => wrapSelection('**', '**')}
             className="rounded px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
-            title="Tučné (Ctrl+B)"
+            title={t('bold')}
           >
             B
           </button>
@@ -76,7 +78,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => wrapSelection('*', '*')}
             className="rounded px-2 py-1 text-xs italic text-slate-600 hover:bg-slate-200"
-            title="Kurzíva (Ctrl+I)"
+            title={t('italic')}
           >
             I
           </button>
@@ -85,7 +87,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => insertAtLineStart('# ')}
             className="rounded px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
-            title="Nadpis 1"
+            title={t('heading1')}
           >
             H1
           </button>
@@ -93,7 +95,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => insertAtLineStart('## ')}
             className="rounded px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
-            title="Nadpis 2"
+            title={t('heading2')}
           >
             H2
           </button>
@@ -101,7 +103,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => insertAtLineStart('### ')}
             className="rounded px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
-            title="Nadpis 3"
+            title={t('heading3')}
           >
             H3
           </button>
@@ -110,7 +112,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => insertAtLineStart('- ')}
             className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-200"
-            title="Odrážka"
+            title={t('bulletList')}
           >
             • List
           </button>
@@ -118,7 +120,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             type="button"
             onClick={() => insertAtLineStart('> ')}
             className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-200"
-            title="Citace"
+            title={t('blockquote')}
           >
             ❝ Quote
           </button>

@@ -451,6 +451,13 @@
     "close": "Zavřít",
     "uploading": "Nahrávám…",
     "uploadDone": "Hotovo – {count} nahráno",
+    "uploadMore": "Klikněte pro nahrání dalších",
+    "dropZoneText": "Přetáhněte soubory sem nebo vyberte ze zařízení",
+    "dropZoneFormats": "JPEG, PNG, TIFF, WebP · max {max} MB",
+    "unsupportedFormat": "Nepodporovaný formát",
+    "tooLarge": "Příliš velký (max {max} MB)",
+    "uploadFailed": "Nahrávání selhalo",
+    "unknownError": "Neznámá chyba",
     "serverError": "Server vrátil {status} bez platné odpovědi",
     "importFailed": "Import selhal",
     "importFailedRetry": "Import selhal po opakovaných pokusech"

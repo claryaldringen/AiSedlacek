@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, memo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { Collection } from './Sidebar';
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
 
@@ -68,11 +69,12 @@ function cleanFilename(raw: string): string {
 }
 
 function StatusBadge({ status }: { status: string }): React.JSX.Element {
+  const t = useTranslations('fileGrid');
   switch (status) {
     case 'done':
       return (
         <span
-          title="Zpracovano"
+          title={t('statusDone')}
           className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500 shadow"
         >
           <svg
@@ -89,7 +91,7 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
     case 'processing':
       return (
         <span
-          title="Zpracovava se"
+          title={t('statusProcessing')}
           className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 shadow"
         >
           <svg className="h-3 w-3 animate-spin text-white" fill="none" viewBox="0 0 24 24">
@@ -112,7 +114,7 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
     case 'error':
       return (
         <span
-          title="Chyba"
+          title={t('statusError')}
           className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 shadow"
         >
           <svg
@@ -129,7 +131,7 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
     case 'blank':
       return (
         <span
-          title="Prázdná stránka"
+          title={t('statusBlank')}
           className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 shadow"
         >
           <svg
@@ -146,7 +148,7 @@ function StatusBadge({ status }: { status: string }): React.JSX.Element {
     default:
       return (
         <span
-          title="Čeká na zpracování"
+          title={t('statusPending')}
           className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-400 shadow"
         >
           <svg
@@ -354,6 +356,7 @@ const PageCard = memo(function PageCard({
   onTouchMove,
   registerRef,
 }: PageCardProps): React.JSX.Element {
+  const t = useTranslations('fileGrid');
   return (
     <div
       ref={(el) => registerRef(page.id, el)}
@@ -402,14 +405,14 @@ const PageCard = memo(function PageCard({
         {effectiveStatus === 'blank' && (
           <div className="absolute inset-0 flex items-center justify-center bg-amber-50/60">
             <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-              Prázdná
+              {t('blankLabel')}
             </span>
           </div>
         )}
 
         {/* Public share badge (top-right) */}
         {page.isPublic === true && (
-          <div className="absolute right-1.5 top-1.5" title="Veřejně sdíleno">
+          <div className="absolute right-1.5 top-1.5" title={t('publiclyShared')}>
             <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
               <svg
                 className="h-3 w-3 text-white"
@@ -544,6 +547,7 @@ export function FileGrid({
   onToggleBlank,
   onShareItem,
 }: FileGridProps): React.JSX.Element {
+  const t = useTranslations('fileGrid');
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
 
   // Context menu state
@@ -640,13 +644,13 @@ export function FileGrid({
       const items: ContextMenuEntry[] = [];
 
       items.push({
-        label: 'Otevřít',
+        label: t('contextMenuOpen'),
         icon: <OpenIcon />,
         onClick: () => onPageDoubleClick(page),
       });
 
       items.push({
-        label: 'Zpracovat',
+        label: t('contextMenuProcess'),
         icon: <ProcessIcon />,
         onClick: onProcessSelected,
         disabled: isDone,
@@ -656,7 +660,7 @@ export function FileGrid({
         const isBlank = page.status === 'blank';
         const selectedPageIds = Array.from(selected).length > 0 ? Array.from(selected) : [page.id];
         items.push({
-          label: isBlank ? 'Zrušit prázdné' : 'Označit jako prázdné',
+          label: isBlank ? t('contextMenuCancelBlank') : t('contextMenuMarkBlank'),
           icon: <BlankIcon />,
           onClick: () => onToggleBlank(selectedPageIds, !isBlank),
           disabled: isDone,
@@ -664,7 +668,7 @@ export function FileGrid({
       }
 
       items.push({
-        label: 'Presunout do...',
+        label: t('contextMenuMoveTo'),
         icon: <MoveIcon />,
         onClick: () => {
           // Placeholder – we could show a sub-menu, but for now we just hint
@@ -675,7 +679,7 @@ export function FileGrid({
       if (onShareItem) {
         items.push({ type: 'divider' });
         items.push({
-          label: page.isPublic ? 'Nastavení sdílení' : 'Sdílet veřejně',
+          label: page.isPublic ? t('contextMenuShareSettings') : t('contextMenuSharePublic'),
           icon: <ShareIcon />,
           onClick: () => onShareItem(page.id, 'page'),
         });
@@ -684,7 +688,10 @@ export function FileGrid({
       items.push({ type: 'divider' });
 
       items.push({
-        label: selCount > 1 ? `Smazat (${String(selCount)})` : 'Smazat',
+        label:
+          selCount > 1
+            ? t('contextMenuDeleteSelected', { count: selCount })
+            : t('contextMenuDelete'),
         icon: <DeleteIcon />,
         onClick: onDeleteSelected,
         variant: 'danger',
@@ -692,19 +699,27 @@ export function FileGrid({
 
       return items;
     },
-    [selected, onPageDoubleClick, onProcessSelected, onDeleteSelected, onToggleBlank, onShareItem],
+    [
+      t,
+      selected,
+      onPageDoubleClick,
+      onProcessSelected,
+      onDeleteSelected,
+      onToggleBlank,
+      onShareItem,
+    ],
   );
 
   const buildCollectionContextMenu = useCallback(
     (col: Collection): ContextMenuEntry[] => {
       const items: ContextMenuEntry[] = [
         {
-          label: 'Otevřít',
+          label: t('contextMenuOpen'),
           icon: <OpenIcon />,
           onClick: () => onCollectionDoubleClick(col.id),
         },
         {
-          label: 'Přejmenovat',
+          label: t('contextMenuRename'),
           icon: <RenameIcon />,
           onClick: () => {
             // Placeholder for rename
@@ -716,7 +731,7 @@ export function FileGrid({
       if (onShareItem) {
         items.push({ type: 'divider' });
         items.push({
-          label: col.isPublic ? 'Nastavení sdílení' : 'Sdílet veřejně',
+          label: col.isPublic ? t('contextMenuShareSettings') : t('contextMenuSharePublic'),
           icon: <ShareIcon />,
           onClick: () => onShareItem(col.id, 'collection'),
         });
@@ -724,7 +739,7 @@ export function FileGrid({
 
       items.push({ type: 'divider' });
       items.push({
-        label: 'Smazat',
+        label: t('contextMenuDelete'),
         icon: <DeleteIcon />,
         onClick: () => {
           // Placeholder for collection delete
@@ -735,23 +750,23 @@ export function FileGrid({
 
       return items;
     },
-    [onCollectionDoubleClick, onShareItem],
+    [t, onCollectionDoubleClick, onShareItem],
   );
 
   const buildEmptyContextMenu = useCallback((): ContextMenuEntry[] => {
     return [
       {
-        label: 'Vybrat vse',
+        label: t('contextMenuSelectAll'),
         icon: <SelectAllIcon />,
         onClick: onSelectAll,
       },
       {
-        label: 'Nahrat',
+        label: t('contextMenuUpload'),
         icon: <UploadIcon />,
         onClick: onImportClick,
       },
     ];
-  }, [onSelectAll, onImportClick]);
+  }, [t, onSelectAll, onImportClick]);
 
   // ---------- Right-click handler ----------
   const handleContextMenu = useCallback(
@@ -1047,7 +1062,7 @@ export function FileGrid({
                       {col._count.pages} str.
                     </span>
                     {col.isPublic && (
-                      <div className="absolute right-1.5 top-1.5" title="Veřejně sdíleno">
+                      <div className="absolute right-1.5 top-1.5" title={t('publiclyShared')}>
                         <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">
                           <svg
                             className="h-3 w-3 text-white"

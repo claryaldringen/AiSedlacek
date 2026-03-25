@@ -1,5 +1,7 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
+
 interface ToolbarProps {
   totalCount: number;
   doneCount: number;
@@ -52,6 +54,7 @@ export function Toolbar({
   onProcessSelected,
   onDeleteSelected,
   onCreateCollection,
+  onSortByName,
   onEditContext,
   hasCollection,
   processingStep,
@@ -69,6 +72,7 @@ export function Toolbar({
   doneSelectedCount,
   onRenameCollection,
 }: ToolbarProps): React.JSX.Element {
+  const t = useTranslations('toolbar');
   return (
     <div className="flex flex-col border-b border-slate-200 bg-white">
       {/* Main toolbar row */}
@@ -85,7 +89,7 @@ export function Toolbar({
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            Vložit
+            {t('insert')}
           </button>
 
           {onCreateCollection && (
@@ -103,7 +107,7 @@ export function Toolbar({
                   d="M12 10.5v6m3-3H9m4.06-7.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"
                 />
               </svg>
-              Nový svazek
+              {t('newCollection')}
             </button>
           )}
         </div>
@@ -113,7 +117,7 @@ export function Toolbar({
         {/* Group 2: Tools */}
         <div className="flex items-center gap-1">
           {hasCollection && onEditContext && (
-            <button onClick={onEditContext} title="Kontext díla" className={btnDefault}>
+            <button onClick={onEditContext} title={t('contextTitle')} className={btnDefault}>
               <svg
                 className="h-3.5 w-3.5"
                 fill="none"
@@ -127,14 +131,14 @@ export function Toolbar({
                   d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
                 />
               </svg>
-              Kontext
+              {t('context')}
             </button>
           )}
 
           {onShareCollection && (
             <button
               onClick={onShareCollection}
-              title={isCollectionPublic ? 'Nastavení sdílení' : 'Sdílet veřejně'}
+              title={isCollectionPublic ? t('share') : t('share')}
               className={
                 isCollectionPublic ? `${btnBase} text-blue-500 hover:bg-blue-50` : btnDefault
               }
@@ -152,7 +156,26 @@ export function Toolbar({
                   d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
                 />
               </svg>
-              Sdílet
+              {t('share')}
+            </button>
+          )}
+
+          {onSortByName && (
+            <button onClick={onSortByName} title={t('sortTitle')} className={btnDefault}>
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
+                />
+              </svg>
+              {t('sort')}
             </button>
           )}
 
@@ -160,7 +183,7 @@ export function Toolbar({
             <button
               onClick={onDetectBlank}
               disabled={detectingBlank || isProcessing}
-              title="Detekovat prázdné stránky"
+              title={t('detectBlankTitle')}
               className={`${btnDefault} ${btnDisabled}`}
             >
               {detectingBlank ? (
@@ -194,7 +217,7 @@ export function Toolbar({
                   />
                 </svg>
               )}
-              Detekce
+              {t('detectBlank')}
             </button>
           )}
         </div>
@@ -222,7 +245,7 @@ export function Toolbar({
                     d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"
                   />
                 </svg>
-                Zpracovat
+                {t('process')}
                 {pendingSelectedCount > 0 && (
                   <span className="text-slate-400">({pendingSelectedCount})</span>
                 )}
@@ -265,7 +288,9 @@ export function Toolbar({
                       />
                     </svg>
                   )}
-                  {generatingContext ? 'Generuji...' : `Kontext z vybraných (${doneSelectedCount})`}
+                  {generatingContext
+                    ? t('generatingContext')
+                    : t('generateContext', { count: doneSelectedCount ?? 0 })}
                 </button>
               )}
 
@@ -284,7 +309,7 @@ export function Toolbar({
                       d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"
                     />
                   </svg>
-                  Přejmenovat
+                  {t('rename')}
                 </button>
               )}
 
@@ -302,7 +327,7 @@ export function Toolbar({
                     d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
                   />
                 </svg>
-                Smazat ({selectedCount})
+                {t('delete', { count: selectedCount })}
               </button>
             </div>
           </>
@@ -313,10 +338,16 @@ export function Toolbar({
 
         {/* Stats */}
         <span className="text-xs text-slate-500">
-          {totalCount} {totalCount === 1 ? 'položka' : totalCount < 5 ? 'položky' : 'položek'}
-          {doneCount > 0 && <span className="ml-1 text-slate-400">· {doneCount} zpracováno</span>}
+          {t('items', { count: totalCount })}
+          {doneCount > 0 && (
+            <span className="ml-1 text-slate-400">
+              · {t('processedCount', { count: doneCount })}
+            </span>
+          )}
           {selectedCount > 0 && (
-            <span className="ml-1 text-blue-600">· {selectedCount} vybráno</span>
+            <span className="ml-1 text-blue-600">
+              · {t('selectedCount', { count: selectedCount })}
+            </span>
           )}
         </span>
 
@@ -326,7 +357,7 @@ export function Toolbar({
         <div className="flex overflow-hidden rounded-md border border-slate-200">
           <button
             onClick={() => onViewModeChange('grid')}
-            title="Mřížka"
+            title={t('gridView')}
             className={[
               'p-1.5 transition-colors',
               viewMode === 'grid'
@@ -350,7 +381,7 @@ export function Toolbar({
           </button>
           <button
             onClick={() => onViewModeChange('list')}
-            title="Seznam"
+            title={t('listView')}
             className={[
               'p-1.5 transition-colors',
               viewMode === 'list'
@@ -410,7 +441,7 @@ export function Toolbar({
                 ' ',
               )}
             >
-              {processingStep ?? 'Zpracovávám...'}
+              {processingStep ?? t('processingDefault')}
             </span>
             {processingProgress != null && (
               <span
@@ -424,38 +455,38 @@ export function Toolbar({
               ? onResumeProcessing && (
                   <button
                     onClick={onResumeProcessing}
-                    title="Pokračovat ve zpracování"
+                    title={t('resumeTitle')}
                     className={`${btnBase} border border-blue-200 bg-white text-blue-600 hover:bg-blue-50`}
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
                     </svg>
-                    Pokračovat
+                    {t('resume')}
                   </button>
                 )
               : onPauseProcessing && (
                   <button
                     onClick={onPauseProcessing}
-                    title="Pozastavit zpracování"
+                    title={t('pauseTitle')}
                     className={`${btnBase} border border-amber-200 bg-white text-amber-600 hover:bg-amber-50`}
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                     </svg>
-                    Pozastavit
+                    {t('pause')}
                   </button>
                 )}
             {/* Stop / Cancel button */}
             {onCancelProcessing && (
               <button
                 onClick={onCancelProcessing}
-                title="Zrušit zpracování"
+                title={t('cancelTitle')}
                 className={`${btnBase} border border-red-200 bg-white text-red-600 hover:bg-red-50`}
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M6 6h12v12H6V6z" />
                 </svg>
-                Zrušit
+                {t('cancel')}
               </button>
             )}
           </div>

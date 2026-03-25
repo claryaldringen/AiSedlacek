@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import type { Workspace } from './Sidebar';
 
 interface Props {
@@ -14,6 +15,7 @@ export function CreateWorkspaceDialog({
   onClose,
   onCreated,
 }: Props): React.JSX.Element | null {
+  const t = useTranslations('createWorkspaceDialog');
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,11 +50,11 @@ export function CreateWorkspaceDialog({
       onCreated(data);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Neznámá chyba');
+      setError(err instanceof Error ? err.message : t('unknownError'));
     } finally {
       setSaving(false);
     }
-  }, [name, onCreated, onClose]);
+  }, [t, name, onCreated, onClose]);
 
   if (!open) return null;
 
@@ -63,11 +65,11 @@ export function CreateWorkspaceDialog({
 
       {/* Dialog */}
       <div className="relative w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold text-slate-800">Nový workspace</h2>
+        <h2 className="mb-4 text-lg font-semibold text-slate-800">{t('title')}</h2>
 
         <input
           type="text"
-          placeholder="Název workspace..."
+          placeholder={t('namePlaceholder')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
@@ -90,14 +92,14 @@ export function CreateWorkspaceDialog({
             onClick={onClose}
             className="rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
           >
-            Zrušit
+            {t('cancel')}
           </button>
           <button
             onClick={() => void handleCreate()}
             disabled={!name.trim() || saving}
             className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
           >
-            {saving ? 'Vytvářím...' : 'Vytvořit'}
+            {saving ? t('creating') : t('create')}
           </button>
         </div>
       </div>

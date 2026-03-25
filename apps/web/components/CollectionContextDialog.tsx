@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -23,6 +24,8 @@ export function CollectionContextDialog({
   initialContextUrls,
   onSaved,
 }: CollectionContextDialogProps): React.JSX.Element | null {
+  const t = useTranslations('collection');
+  const tc = useTranslations('common');
   const [context, setContext] = useState(initialContext);
   const [contextUrls, setContextUrls] = useState<string[]>(initialContextUrls);
   const [urlInput, setUrlInput] = useState('');
@@ -53,15 +56,15 @@ export function CollectionContextDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context, contextUrls }),
       });
-      if (!res.ok) throw new Error('Ukládání selhalo');
+      if (!res.ok) throw new Error(t('savingFailed'));
       onSaved(context, contextUrls);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : tc('error'));
     } finally {
       setSaving(false);
     }
-  }, [collectionId, context, contextUrls, onSaved]);
+  }, [t, tc, collectionId, context, contextUrls, onSaved]);
 
   const handleFetchFromUrl = useCallback(async () => {
     const trimmed = urlInput.trim();
@@ -78,9 +81,9 @@ export function CollectionContextDialog({
       try {
         data = (await res.json()) as { context?: string; contextUrls?: string[]; error?: string };
       } catch {
-        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+        throw new Error(t('serverReturnedStatus', { status: res.status }));
       }
-      if (!res.ok) throw new Error(data.error ?? 'Stahování selhalo');
+      if (!res.ok) throw new Error(data.error ?? t('downloadFailed'));
       const newContext = data.context ?? '';
       const newUrls = data.contextUrls ?? contextUrls;
       setContext(newContext);
@@ -89,11 +92,11 @@ export function CollectionContextDialog({
       setEditing(false);
       onSaved(newContext, newUrls);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : tc('error'));
     } finally {
       setFetching(false);
     }
-  }, [collectionId, urlInput, contextUrls, onSaved]);
+  }, [t, tc, collectionId, urlInput, contextUrls, onSaved]);
 
   const handleMergeText = useCallback(async () => {
     const trimmed = textInput.trim();
@@ -110,9 +113,9 @@ export function CollectionContextDialog({
       try {
         data = (await res.json()) as { context?: string; contextUrls?: string[]; error?: string };
       } catch {
-        throw new Error(`Server vrátil ${res.status} bez platné odpovědi`);
+        throw new Error(t('serverReturnedStatus', { status: res.status }));
       }
-      if (!res.ok) throw new Error(data.error ?? 'Sloučení selhalo');
+      if (!res.ok) throw new Error(data.error ?? t('mergeFailed'));
       const newContext = data.context ?? '';
       const newUrls = data.contextUrls ?? contextUrls;
       setContext(newContext);
@@ -121,11 +124,11 @@ export function CollectionContextDialog({
       setEditing(false);
       onSaved(newContext, newUrls);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : tc('error'));
     } finally {
       setMerging(false);
     }
-  }, [collectionId, textInput, contextUrls, onSaved]);
+  }, [t, tc, collectionId, textInput, contextUrls, onSaved]);
 
   const handleRemoveUrl = useCallback((urlToRemove: string) => {
     setContextUrls((prev) => prev.filter((u) => u !== urlToRemove));
@@ -139,7 +142,7 @@ export function CollectionContextDialog({
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-800">Kontext díla</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t('contextDialogTitle')}</h2>
             <p className="text-xs text-slate-400">{collectionName}</p>
           </div>
           <button
@@ -170,10 +173,21 @@ export function CollectionContextDialog({
             <div className="mb-3 overflow-hidden rounded border border-blue-200 bg-blue-50">
               <div className="flex items-center gap-2 px-3 py-2 text-sm text-blue-700">
                 <svg className="h-4 w-4 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
                 </svg>
-                <span>{fetching ? 'Stahuji a zpracovávám kontext z URL...' : 'Slučuji text s kontextem...'}</span>
+                <span>{fetching ? t('downloadingContext') : t('mergingText')}</span>
               </div>
               <div className="h-1 bg-blue-200">
                 <div
@@ -189,7 +203,7 @@ export function CollectionContextDialog({
               value={context}
               onChange={(e) => setContext(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              placeholder="Zadejte kontext díla v markdown formátu…&#10;&#10;Například: název, autor, datace, jazyk, obsah, historický kontext…"
+              placeholder={t('contextPlaceholder')}
               rows={15}
               className="w-full resize-none rounded border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
             />
@@ -198,16 +212,14 @@ export function CollectionContextDialog({
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{context}</ReactMarkdown>
             </div>
           ) : (
-            <p className="text-center text-sm text-slate-400">
-              Žádný kontext. Zadejte text nebo stáhněte z URL.
-            </p>
+            <p className="text-center text-sm text-slate-400">{t('noContext')}</p>
           )}
         </div>
 
         {/* URL import */}
         <div className="shrink-0 border-t border-slate-100 px-6 py-3">
           <label className="mb-1 block text-xs font-medium text-slate-500">
-            Načíst kontext z URL
+            {t('loadContextFromUrl')}
           </label>
           <div className="flex gap-2">
             <input
@@ -218,7 +230,7 @@ export function CollectionContextDialog({
                 if (e.key === 'Enter' && urlInput.trim()) void handleFetchFromUrl();
                 e.stopPropagation();
               }}
-              placeholder="https://… (stránka s popisem díla)"
+              placeholder={t('urlPlaceholder')}
               disabled={fetching}
               className="flex-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
             />
@@ -227,20 +239,20 @@ export function CollectionContextDialog({
               disabled={!urlInput.trim() || fetching}
               className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
             >
-              {fetching ? 'Načítám…' : 'Načíst'}
+              {fetching ? tc('loading') : t('loadContextButton')}
             </button>
           </div>
 
           {/* Text input */}
           <div className="mt-3">
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Přidat informace z textu
+              {t('addInfoFromText')}
             </label>
             <textarea
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
-              placeholder="Vložte text s informacemi o díle (např. z katalogu, knihy, článku)…"
+              placeholder={t('textPlaceholder')}
               rows={3}
               disabled={merging}
               className="w-full resize-none rounded border border-slate-300 px-2.5 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
@@ -251,7 +263,7 @@ export function CollectionContextDialog({
                 disabled={!textInput.trim() || merging}
                 className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
               >
-                {merging ? 'Zpracovávám…' : 'Sloučit s kontextem'}
+                {merging ? tc('generating') : t('mergeWithContext')}
               </button>
             </div>
           </div>
@@ -260,7 +272,7 @@ export function CollectionContextDialog({
           {contextUrls.length > 0 && (
             <div className="mt-2 space-y-1">
               <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                Zdroje
+                {t('sources')}
               </span>
               {contextUrls.map((sourceUrl) => (
                 <div key={sourceUrl} className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -275,7 +287,7 @@ export function CollectionContextDialog({
                   <button
                     onClick={() => handleRemoveUrl(sourceUrl)}
                     className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-red-500"
-                    title="Odebrat zdroj"
+                    title={t('removeSource')}
                   >
                     <svg
                       className="h-3.5 w-3.5"
@@ -301,7 +313,7 @@ export function CollectionContextDialog({
                 onClick={() => setEditing(true)}
                 className="text-sm text-slate-500 hover:text-slate-700"
               >
-                Upravit
+                {t('editContext')}
               </button>
             )}
           </div>
@@ -310,7 +322,7 @@ export function CollectionContextDialog({
               onClick={onClose}
               className="rounded border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
             >
-              Zavřít
+              {t('closeContext')}
             </button>
             {editing && (
               <button
@@ -318,7 +330,7 @@ export function CollectionContextDialog({
                 disabled={saving}
                 className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {saving ? 'Ukládám…' : 'Uložit'}
+                {saving ? tc('saving') : t('saveContext')}
               </button>
             )}
           </div>

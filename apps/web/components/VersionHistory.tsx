@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -14,36 +15,7 @@ interface Version {
   content: string;
 }
 
-const SOURCE_LABEL: Record<string, string> = {
-  ai_initial: 'AI zpracování',
-  ai_retranslate: 'AI retranslace',
-  ai_regenerate: 'AI přegenerování',
-  manual_edit: 'Ruční úprava',
-};
-
-const FIELD_LABEL: Record<string, string> = {
-  transcription: 'Transkripce',
-  context: 'Kontext',
-};
-
-function fieldLabel(field: string): string {
-  if (field.startsWith('translation:')) {
-    const lang = field.split(':')[1];
-    return `Překlad (${lang})`;
-  }
-  return FIELD_LABEL[field] ?? field;
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'právě teď';
-  if (minutes < 60) return `před ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `před ${hours} h`;
-  const days = Math.floor(hours / 24);
-  return `před ${days} dny`;
-}
+// Source/field label maps are now handled via i18n in the component
 
 interface VersionHistoryProps {
   documentId: string;
@@ -51,6 +23,41 @@ interface VersionHistoryProps {
 }
 
 export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): React.JSX.Element {
+  const t = useTranslations('versionHistory');
+
+  const sourceLabel = (source: string): string => {
+    const map: Record<string, string> = {
+      ai_initial: t('sourceAiInitial'),
+      ai_retranslate: t('sourceAiRetranslate'),
+      ai_regenerate: t('sourceAiRegenerate'),
+      manual_edit: t('sourceManualEdit'),
+    };
+    return map[source] ?? source;
+  };
+
+  const fieldLabel = (field: string): string => {
+    if (field.startsWith('translation:')) {
+      const lang = field.split(':')[1] ?? '';
+      return t('fieldTranslation', { lang });
+    }
+    const map: Record<string, string> = {
+      transcription: t('fieldTranscription'),
+      context: t('fieldContext'),
+    };
+    return map[field] ?? field;
+  };
+
+  const timeAgo = (dateStr: string): string => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return t('justNow');
+    if (minutes < 60) return t('minutesAgo', { n: minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return t('hoursAgo', { n: hours });
+    const days = Math.floor(hours / 24);
+    return t('daysAgo', { n: days });
+  };
+
   const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -74,11 +81,11 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
   }, [load]);
 
   if (loading) {
-    return <p className="py-4 text-center text-xs text-slate-400">Načítám historii…</p>;
+    return <p className="py-4 text-center text-xs text-slate-400">{t('loading')}</p>;
   }
 
   if (versions.length === 0) {
-    return <p className="py-4 text-center text-xs text-slate-400">Žádná historie verzí.</p>;
+    return <p className="py-4 text-center text-xs text-slate-400">{t('noHistory')}</p>;
   }
 
   // Group by field
@@ -111,7 +118,7 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
                             : 'bg-amber-50 text-amber-600',
                         ].join(' ')}
                       >
-                        {SOURCE_LABEL[v.source] ?? v.source}
+                        {sourceLabel(v.source)}
                       </span>
                       {v.model && <span className="text-[10px] text-slate-300">{v.model}</span>}
                       <span className="ml-auto text-slate-400">{timeAgo(v.createdAt)}</span>
@@ -143,7 +150,7 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
                               onClick={() => onRestore(v.field, v.content)}
                               className="rounded bg-slate-800 px-2.5 py-1 text-xs text-white hover:bg-slate-700"
                             >
-                              Obnovit tuto verzi
+                              {t('restore')}
                             </button>
                           </div>
                         )}

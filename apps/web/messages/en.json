@@ -451,6 +451,13 @@
     "close": "Close",
     "uploading": "Uploading…",
     "uploadDone": "Done – {count} uploaded",
+    "uploadMore": "Click to upload more",
+    "dropZoneText": "Drag files here or select from device",
+    "dropZoneFormats": "JPEG, PNG, TIFF, WebP · max {max} MB",
+    "unsupportedFormat": "Unsupported format",
+    "tooLarge": "Too large (max {max} MB)",
+    "uploadFailed": "Upload failed",
+    "unknownError": "Unknown error",
     "serverError": "Server returned {status} without valid response",
     "importFailed": "Import failed",
     "importFailedRetry": "Import failed after repeated attempts"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 
 export interface ShareDialogProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ export function ShareDialog({
   currentSlug,
   onUpdate,
 }: ShareDialogProps): React.JSX.Element | null {
+  const t = useTranslations('collection');
   const [isPublic, setIsPublic] = useState(currentIsPublic);
   const [slug, setSlug] = useState(currentSlug ?? '');
   const [saving, setSaving] = useState(false);
@@ -61,20 +63,20 @@ export function ShareDialog({
       try {
         data = JSON.parse(text) as typeof data;
       } catch {
-        throw new Error(`Server vrátil neplatnou odpověď (${res.status})`);
+        throw new Error(t('shareServerError', { status: res.status }));
       }
       if (!res.ok) {
-        throw new Error(data.error ?? 'Chyba při ukládání');
+        throw new Error(data.error ?? t('shareSavingError'));
       }
       setIsPublic(data.isPublic ?? newIsPublic);
       setSlug(data.slug ?? '');
       onUpdate(data.isPublic ?? newIsPublic, data.slug ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : t('shareError'));
     } finally {
       setSaving(false);
     }
-  }, [isPublic, apiEndpoint, onUpdate]);
+  }, [t, isPublic, apiEndpoint, onUpdate]);
 
   const handleSaveSlug = useCallback(async (): Promise<void> => {
     setSaving(true);
@@ -90,19 +92,19 @@ export function ShareDialog({
       try {
         data = JSON.parse(text) as typeof data;
       } catch {
-        throw new Error(`Server vrátil neplatnou odpověď (${res.status})`);
+        throw new Error(t('shareServerError', { status: res.status }));
       }
       if (!res.ok) {
-        throw new Error(data.error ?? 'Chyba při ukládání');
+        throw new Error(data.error ?? t('shareSavingError'));
       }
       setSlug(data.slug ?? '');
       onUpdate(data.isPublic ?? isPublic, data.slug ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chyba');
+      setError(err instanceof Error ? err.message : t('shareError'));
     } finally {
       setSaving(false);
     }
-  }, [apiEndpoint, slug, onUpdate]);
+  }, [t, apiEndpoint, slug, isPublic, onUpdate]);
 
   const handleCopy = useCallback((): void => {
     if (!publicUrl) return;
@@ -123,7 +125,7 @@ export function ShareDialog({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-800">Sdílet veřejně</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t('shareTitle')}</h2>
             <p className="mt-0.5 truncate text-sm text-slate-500" title={itemName}>
               {itemName}
             </p>
@@ -132,7 +134,13 @@ export function ShareDialog({
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
@@ -150,11 +158,9 @@ export function ShareDialog({
           {/* Public toggle */}
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-700">Veřejný přístup</p>
+              <p className="text-sm font-medium text-slate-700">{t('publicAccess')}</p>
               <p className="text-xs text-slate-400">
-                {isPublic
-                  ? 'Kdokoliv s odkazem může zobrazit tento dokument'
-                  : 'Dokument je přístupný pouze vám'}
+                {isPublic ? t('publicAccessDescription') : t('privateAccessDescription')}
               </p>
             </div>
             <button
@@ -180,7 +186,7 @@ export function ShareDialog({
               {/* Slug input */}
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-500">
-                  Adresa odkazu (slug)
+                  {t('slugLabel')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -199,19 +205,17 @@ export function ShareDialog({
                     disabled={saving || slug.trim() === ''}
                     className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-40"
                   >
-                    Uložit
+                    {t('saveShareSettings')}
                   </button>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  Pouze malá písmena, číslice a pomlčky.
-                </p>
+                <p className="mt-1 text-[11px] text-slate-400">{t('slugHint')}</p>
               </div>
 
               {/* Public URL */}
               {publicUrl && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">
-                    Veřejný odkaz
+                    {t('publicLink')}
                   </label>
                   <div className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2">
                     <span className="flex-1 truncate text-sm text-slate-700" title={publicUrl}>
@@ -219,16 +223,36 @@ export function ShareDialog({
                     </span>
                     <button
                       onClick={handleCopy}
-                      title="Kopírovat odkaz"
+                      title={t('copyLink')}
                       className="shrink-0 rounded p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
                     >
                       {copied ? (
-                        <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                        <svg
+                          className="h-4 w-4 text-green-500"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m4.5 12.75 6 6 9-13.5"
+                          />
                         </svg>
                       ) : (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.75a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={1.5}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.75a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"
+                          />
                         </svg>
                       )}
                     </button>
@@ -245,7 +269,7 @@ export function ShareDialog({
             onClick={onClose}
             className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200"
           >
-            Zavřít
+            {t('closeContext')}
           </button>
         </div>
       </div>
