@@ -42,6 +42,10 @@ function LoginForm(): React.JSX.Element {
         setLoading(false);
         return;
       }
+      // Redirect to verify-email page
+      sessionStorage.setItem('verify-email', email);
+      router.push('/verify-email');
+      return;
     }
 
     const result = await signIn('credentials', {
@@ -51,9 +55,18 @@ function LoginForm(): React.JSX.Element {
     });
 
     if (result?.error) {
-      setError(
-        mode === 'login' ? 'Nesprávný email nebo heslo' : 'Přihlášení po registraci selhalo',
-      );
+      // Check if email is unverified
+      const checkRes = await fetch('/api/auth/check-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const checkData = (await checkRes.json()) as { verified: boolean };
+      if (!checkData.verified) {
+        setError('EMAIL_NOT_VERIFIED');
+      } else {
+        setError('Nesprávný email nebo heslo');
+      }
       setLoading(false);
       return;
     }
@@ -87,6 +100,22 @@ function LoginForm(): React.JSX.Element {
                 : 'Vytvořte si účet a začněte číst rukopisy'}
             </p>
           </div>
+
+          {searchParams.get('verified') === 'true' && (
+            <div className="rounded-lg bg-green-100 px-3 py-2 text-sm text-green-800">
+              Email úspěšně ověřen. Nyní se můžete přihlásit.
+            </div>
+          )}
+          {searchParams.get('error') === 'invalid-token' && (
+            <div className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">
+              Ověřovací odkaz je neplatný nebo vypršel. Zaregistrujte se znovu nebo si nechte poslat nový.
+            </div>
+          )}
+          {searchParams.get('error') === 'missing-token' && (
+            <div className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">
+              Chybí ověřovací token. Použijte odkaz z emailu.
+            </div>
+          )}
 
           {/* OAuth */}
           <button
@@ -219,9 +248,22 @@ function LoginForm(): React.JSX.Element {
               </div>
             )}
 
-            {error && (
+            {error === 'EMAIL_NOT_VERIFIED' ? (
+              <div className="space-y-2 rounded-lg bg-[#8b1a1a]/10 px-3 py-2">
+                <p className="text-sm text-[#8b1a1a]">Email není ověřen.</p>
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('verify-email', email);
+                    router.push('/verify-email');
+                  }}
+                  className="text-sm font-semibold text-[#8b1a1a] hover:underline"
+                >
+                  Odeslat ověřovací email znovu
+                </button>
+              </div>
+            ) : error ? (
               <p className="rounded-lg bg-[#8b1a1a]/10 px-3 py-2 text-sm text-[#8b1a1a]">{error}</p>
-            )}
+            ) : null}
 
             <button
               onClick={() => void handleCredentials()}
