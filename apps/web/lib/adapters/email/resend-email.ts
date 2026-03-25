@@ -5,7 +5,7 @@ import cs from '../../../messages/cs.json';
 
 const messages: Record<string, typeof en> = { en, cs };
 
-function getEmailMessages(locale: string) {
+function getEmailMessages(locale: string): (typeof en)['emails'] {
   return (messages[locale] ?? messages['en']!).emails;
 }
 

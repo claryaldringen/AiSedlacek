@@ -9,7 +9,10 @@ export function getLocaleFromRequest(request: Request): string {
   return routing.defaultLocale;
 }
 
-export async function getApiTranslations(request: Request, namespace: string) {
+export async function getApiTranslations(
+  request: Request,
+  namespace: string,
+): Promise<ReturnType<typeof getTranslations>> {
   const locale = getLocaleFromRequest(request);
   return getTranslations({ locale, namespace });
 }
