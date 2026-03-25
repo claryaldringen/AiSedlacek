@@ -20,6 +20,7 @@ model User {
   variableSymbol Int?     @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  locale        String?
   accounts      Account[]
   sessions      Session[]
   collections   Collection[]
