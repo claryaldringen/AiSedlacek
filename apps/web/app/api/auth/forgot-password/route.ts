@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { getEmailProvider } from '@/lib/adapters/email';
-import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
+  const locale = getLocaleFromRequest(request);
 
   let body: unknown;
   try {
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const email = rawEmail.toLowerCase().trim();
 
   // Always return success to prevent email enumeration
-  const successMessage = 'Pokud existuje účet s tímto emailem, obdržíte odkaz pro obnovení hesla.';
+  const successMessage = t('forgotPasswordSuccess');
 
   // Delete any existing tokens for this email
   await prisma.passwordResetToken.deleteMany({ where: { email } });
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3003';
   const resetUrl = `${baseUrl}/reset-password?token=${token}`;
 
-  await (await getEmailProvider()).sendPasswordReset(email, resetUrl);
+  await (await getEmailProvider()).sendPasswordReset(email, resetUrl, locale);
 
   return NextResponse.json({ message: successMessage });
 }

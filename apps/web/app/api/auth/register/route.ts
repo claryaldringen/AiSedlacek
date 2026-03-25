@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/infrastructure/db';
 import { sendVerificationEmail } from '@/lib/infrastructure/verification';
-import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
+  const locale = getLocaleFromRequest(request);
 
   let body: unknown;
   try {
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   });
 
   try {
-    await sendVerificationEmail(email);
+    await sendVerificationEmail(email, locale);
   } catch (err) {
     console.error('[register] Failed to send verification email:', err);
     // User is created but email failed — they can use "resend" later

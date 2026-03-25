@@ -9,7 +9,7 @@ const RATE_LIMIT_MS = 60 * 1000; // 60s
  * Generate verification token, store hash in DB, send email.
  * Returns true if sent, false if rate-limited.
  */
-export async function sendVerificationEmail(email: string): Promise<boolean> {
+export async function sendVerificationEmail(email: string, locale: string = 'en'): Promise<boolean> {
   // Rate limit: check if token was sent < 60s ago
   const existing = await prisma.verificationToken.findFirst({
     where: { identifier: email },
@@ -40,6 +40,6 @@ export async function sendVerificationEmail(email: string): Promise<boolean> {
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3003';
   const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${rawToken}`;
 
-  await (await getEmailProvider()).sendVerification(email, verifyUrl);
+  await (await getEmailProvider()).sendVerification(email, verifyUrl, locale);
   return true;
 }

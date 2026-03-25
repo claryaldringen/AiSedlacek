@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { sendVerificationEmail } from '@/lib/infrastructure/verification';
-import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
+  const locale = getLocaleFromRequest(request);
 
   let body: unknown;
   try {
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const email = rawEmail.toLowerCase().trim();
-  const successMessage = 'Pokud existuje neověřený účet, odeslali jsme ověřovací email.';
+  const successMessage = t('sendVerificationSuccess');
 
   // Silent success for non-existent, OAuth-only, or already-verified users
   const user = await prisma.user.findUnique({
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ message: successMessage });
   }
 
-  const sent = await sendVerificationEmail(email);
+  const sent = await sendVerificationEmail(email, locale);
   if (!sent) {
     // Rate limited — return 200 with rateLimited flag (anti-enumeration: no 429)
     return NextResponse.json({ message: successMessage, rateLimited: true });

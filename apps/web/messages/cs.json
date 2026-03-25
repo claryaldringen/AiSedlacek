@@ -329,7 +329,9 @@
     "missingMessages": "Chybí messages",
     "missingJobId": "Chybí jobId",
     "missingUrls": "Chybí urls",
-    "noProcessedDocuments": "Žádné zpracované dokumenty"
+    "noProcessedDocuments": "Žádné zpracované dokumenty",
+    "forgotPasswordSuccess": "Pokud existuje účet s tímto emailem, obdržíte odkaz pro obnovení hesla.",
+    "sendVerificationSuccess": "Pokud existuje neověřený účet, odeslali jsme ověřovací email."
   },
   "emails": {
     "fromName": "Čtečka rukopisů",

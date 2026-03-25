@@ -329,7 +329,9 @@
     "missingMessages": "Missing messages",
     "missingJobId": "Missing jobId",
     "missingUrls": "Missing urls",
-    "noProcessedDocuments": "No processed documents"
+    "noProcessedDocuments": "No processed documents",
+    "forgotPasswordSuccess": "If an account exists with this email, you will receive a password reset link.",
+    "sendVerificationSuccess": "If an unverified account exists, we have sent a verification email."
   },
   "emails": {
     "fromName": "Manuscript Reader",
