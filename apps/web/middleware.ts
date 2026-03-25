@@ -1,32 +1,51 @@
+import createMiddleware from 'next-intl/middleware';
 import { NextRequest, NextResponse } from 'next/server';
+import { routing } from './i18n/routing';
+
+const intlMiddleware = createMiddleware(routing);
+
+const PUBLIC_PATHS = ['/', '/login', '/forgot-password', '/reset-password', '/verify-email', '/view'];
+
+function isPublicRoute(pathname: string): boolean {
+  const localePrefix = new RegExp(`^/(${routing.locales.join('|')})`);
+  const withoutLocale = pathname.replace(localePrefix, '') || '/';
+  return PUBLIC_PATHS.some(
+    (p) => withoutLocale === p || withoutLocale.startsWith(p + '/'),
+  );
+}
+
+function getLocaleFromPath(pathname: string): string {
+  const match = pathname.match(new RegExp(`^/(${routing.locales.join('|')})\\b`));
+  return match?.[1] ?? routing.defaultLocale;
+}
 
 export function middleware(req: NextRequest): NextResponse {
-  const isPublic =
-    req.nextUrl.pathname === '/' ||
-    req.nextUrl.pathname.startsWith('/login') ||
-    req.nextUrl.pathname.startsWith('/forgot-password') ||
-    req.nextUrl.pathname.startsWith('/reset-password') ||
-    req.nextUrl.pathname.startsWith('/verify-email') ||
-    req.nextUrl.pathname.startsWith('/view') ||
-    req.nextUrl.pathname.startsWith('/api/auth') ||
-    req.nextUrl.pathname.startsWith('/api/public') ||
-    req.nextUrl.pathname.startsWith('/api/billing/webhook');
-
-  if (isPublic) {
+  if (req.nextUrl.pathname.startsWith('/api/')) {
     return NextResponse.next();
   }
 
-  // Check for session cookie (NextAuth v5 uses authjs.session-token)
-  const hasSession =
-    req.cookies.has('authjs.session-token') || req.cookies.has('__Secure-authjs.session-token');
+  const response = intlMiddleware(req);
 
-  if (!hasSession) {
-    const loginUrl = new URL('/login', req.nextUrl.origin);
-    loginUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+  // If next-intl returned a redirect, return it directly
+  if (!response.ok) {
+    return response;
   }
 
-  return NextResponse.next();
+  // Auth check for non-public routes
+  const pathname = req.nextUrl.pathname;
+  if (!isPublicRoute(pathname)) {
+    const hasSession =
+      req.cookies.has('authjs.session-token') ||
+      req.cookies.has('__Secure-authjs.session-token');
+    if (!hasSession) {
+      const locale = getLocaleFromPath(pathname);
+      const loginUrl = new URL(`/${locale}/login`, req.nextUrl.origin);
+      loginUrl.searchParams.set('callbackUrl', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  return response;
 }
 
 export const config = {
