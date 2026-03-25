@@ -1,5 +1,8 @@
 import type { NextConfig } from 'next';
 import { execSync } from 'child_process';
+import createNextIntlPlugin from 'next-intl/plugin';
+
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
 
 const gitHash = (() => {
   try {
@@ -18,4 +21,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withNextIntl(nextConfig);
