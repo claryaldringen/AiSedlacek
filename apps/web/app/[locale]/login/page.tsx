@@ -74,6 +74,16 @@ function LoginForm(): React.JSX.Element {
       return;
     }
 
+    // Set NEXT_LOCALE cookie from user preference
+    try {
+      const localeRes = await fetch('/api/user/locale');
+      const { locale: userLocale } = (await localeRes.json()) as { locale: string | null };
+      if (userLocale) {
+        document.cookie = `NEXT_LOCALE=${userLocale};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
+      }
+    } catch {
+      // ignore — cookie will be set on next locale switch
+    }
     router.push(callbackUrl);
   };
 
@@ -175,7 +185,7 @@ function LoginForm(): React.JSX.Element {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="vas@email.cz"
+                placeholder="name@example.com"
                 className={inputClasses}
               />
             </div>
@@ -271,11 +281,7 @@ function LoginForm(): React.JSX.Element {
               disabled={loading || !email || !password}
               className="w-full rounded-lg bg-[#8b1a1a] px-4 py-2.5 font-serif text-sm font-semibold text-[#f5edd6] shadow-md shadow-[#8b1a1a]/20 transition-all hover:bg-[#a52020] disabled:opacity-50"
             >
-              {loading
-                ? tc('wait')
-                : mode === 'login'
-                  ? t('loginButton')
-                  : t('registerButton')}
+              {loading ? tc('wait') : mode === 'login' ? t('loginButton') : t('registerButton')}
             </button>
           </div>
 
