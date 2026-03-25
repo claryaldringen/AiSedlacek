@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useRouter, Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
 
 export default function LoginPage(): React.JSX.Element {
   return (
@@ -95,11 +96,14 @@ function LoginForm(): React.JSX.Element {
       {/* Left — form */}
       <div className="flex w-full flex-col justify-between bg-[#f0e6d0] px-8 py-8 lg:w-[480px] lg:min-w-[480px]">
         {/* Top — logo */}
-        <Link href="/" className="inline-flex items-center gap-2">
-          <span className="font-serif text-xl font-bold text-[#3d2b1f]">
-            A<span className="text-[#a08060]">i</span>Sedlacek
-          </span>
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/" className="inline-flex items-center gap-2">
+            <span className="font-serif text-xl font-bold text-[#3d2b1f]">
+              A<span className="text-[#a08060]">i</span>Sedlacek
+            </span>
+          </Link>
+          <LocaleSwitcher />
+        </div>
 
         {/* Center — form */}
         <div className="mx-auto w-full max-w-[340px] space-y-6">

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
+import LocaleSwitcher from './LocaleSwitcher';
 
 interface BalanceData {
   balance: number;
@@ -112,6 +113,9 @@ export function UserMenu(): React.JSX.Element | null {
             {formattedBalance && (
               <p className="mt-1 text-xs font-medium text-slate-600">{formattedBalance}</p>
             )}
+          </div>
+          <div className="border-b border-slate-100 px-3 py-2">
+            <LocaleSwitcher />
           </div>
           <Link
             href="/workspace/billing"
