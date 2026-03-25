@@ -14,12 +14,14 @@ interface CollectionMetadata {
 interface Props {
   collectionId: string;
   metadata: CollectionMetadata;
+  hasContext?: boolean;
   onSaved?: () => void;
 }
 
 export function CollectionMetadataEditor({
   collectionId,
   metadata,
+  hasContext,
   onSaved,
 }: Props): React.JSX.Element {
   const [title, setTitle] = useState(metadata.title ?? '');
@@ -29,6 +31,7 @@ export function CollectionMetadataEditor({
   const [librarySignature, setLibrarySignature] = useState(metadata.librarySignature ?? '');
   const [abstract, setAbstract] = useState(metadata.abstract ?? '');
   const [saving, setSaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = useCallback(async () => {
@@ -58,6 +61,32 @@ export function CollectionMetadataEditor({
       setSaving(false);
     }
   }, [collectionId, title, author, yearFrom, yearTo, librarySignature, abstract, onSaved]);
+
+  const handleExtract = useCallback(async () => {
+    setExtracting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/collections/${collectionId}/extract-metadata`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as CollectionMetadata;
+      setTitle(data.title ?? '');
+      setAuthor(data.author ?? '');
+      setYearFrom(data.yearFrom?.toString() ?? '');
+      setYearTo(data.yearTo?.toString() ?? '');
+      setLibrarySignature(data.librarySignature ?? '');
+      setAbstract(data.abstract ?? '');
+      onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Extrakce selhala');
+    } finally {
+      setExtracting(false);
+    }
+  }, [collectionId, onSaved]);
 
   const inputClass =
     'w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400';
@@ -128,13 +157,25 @@ export function CollectionMetadataEditor({
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <button
-        onClick={() => void handleSave()}
-        disabled={saving}
-        className="w-full rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
-      >
-        {saving ? 'Ukládám…' : 'Uložit metadata'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => void handleSave()}
+          disabled={saving || extracting}
+          className="flex-1 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+        >
+          {saving ? 'Ukládám…' : 'Uložit metadata'}
+        </button>
+        {hasContext && (
+          <button
+            onClick={() => void handleExtract()}
+            disabled={extracting || saving}
+            className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            title="Extrahovat metadata z kontextu díla pomocí AI"
+          >
+            {extracting ? 'Extrahuji…' : 'Extrahovat z kontextu'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

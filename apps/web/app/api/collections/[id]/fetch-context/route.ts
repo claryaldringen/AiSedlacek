@@ -77,9 +77,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const existingContext = collection.context || '';
 
   // Use Claude to extract and merge context
+  const client = new Anthropic();
   let response;
   try {
-    const client = new Anthropic();
 
     const hasExisting = existingContext.trim().length > 0;
     let prompt: string;
@@ -159,10 +159,65 @@ ${newContent}`;
     data: { context, contextUrls: updatedUrls },
   });
 
+  // Extract structured metadata from context (fire-and-forget)
+  void extractMetadata(client, context, id);
+
   return NextResponse.json({
     context,
     contextUrls: updatedUrls,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   });
+}
+
+async function extractMetadata(
+  client: Anthropic,
+  context: string,
+  collectionId: string,
+): Promise<void> {
+  try {
+    const metaResponse = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      messages: [
+        {
+          role: 'user',
+          content: `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
+
+Formát:
+{
+  "title": "název díla nebo null",
+  "author": "autor nebo null",
+  "yearFrom": číslo nebo null,
+  "yearTo": číslo nebo null,
+  "librarySignature": "signatura nebo null",
+  "abstract": "stručný popis do 200 znaků nebo null"
+}
+
+Kontext:
+${context}`,
+        },
+      ],
+    });
+
+    const text = metaResponse.content[0]?.type === 'text' ? metaResponse.content[0].text : '';
+    if (!text) return;
+
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    await prisma.collection.update({
+      where: { id: collectionId },
+      data: {
+        title: typeof parsed.title === 'string' ? parsed.title : undefined,
+        author: typeof parsed.author === 'string' ? parsed.author : undefined,
+        yearFrom: typeof parsed.yearFrom === 'number' ? parsed.yearFrom : undefined,
+        yearTo: typeof parsed.yearTo === 'number' ? parsed.yearTo : undefined,
+        librarySignature:
+          typeof parsed.librarySignature === 'string' ? parsed.librarySignature : undefined,
+        abstract: typeof parsed.abstract === 'string' ? parsed.abstract : undefined,
+      },
+    });
+    console.log(`[fetch-context] Metadata extracted for collection ${collectionId}`);
+  } catch (err) {
+    console.error('[fetch-context] Metadata extraction failed:', err);
+  }
 }

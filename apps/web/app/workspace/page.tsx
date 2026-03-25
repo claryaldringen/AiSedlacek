@@ -1054,6 +1054,7 @@ function WorkspaceContent(): React.JSX.Element {
                       librarySignature: selectedCollection.librarySignature,
                       abstract: selectedCollection.abstract,
                     }}
+                    hasContext={!!selectedCollection.context}
                     onSaved={() => void loadCollections()}
                   />
                 </div>
