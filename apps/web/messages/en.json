@@ -445,6 +445,8 @@
   },
   "sidebar": {
     "loading": "Loading...",
+    "myWorkspace": "My workspace",
+    "publicDocuments": "Public documents",
     "shared": "Shared",
     "newSharedWorkspace": "New shared workspace",
     "noSharedWorkspaces": "No shared workspaces",
@@ -474,7 +476,8 @@
     "contextMenuDelete": "Delete",
     "contextMenuRename": "Rename",
     "contextMenuSelectAll": "Select all",
-    "contextMenuUpload": "Upload"
+    "contextMenuUpload": "Upload",
+    "collectionsHeading": "Collections"
   },
   "fileList": {
     "statusDone": "Processed",

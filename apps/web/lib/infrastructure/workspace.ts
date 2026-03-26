@@ -45,17 +45,18 @@ export async function ensureWorkspaces(
         members: { create: { userId, role: 'owner' } },
       },
     });
-    // Backfill: add all user's existing collections to home workspace
-    const collections = await prisma.collection.findMany({
-      where: { userId },
-      select: { id: true },
+  }
+
+  // Always sync: ensure all user's collections are in home workspace
+  const collections = await prisma.collection.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  if (collections.length > 0) {
+    await prisma.workspaceItem.createMany({
+      data: collections.map((c) => ({ workspaceId: home.id, collectionId: c.id })),
+      skipDuplicates: true,
     });
-    if (collections.length > 0) {
-      await prisma.workspaceItem.createMany({
-        data: collections.map((c) => ({ workspaceId: home!.id, collectionId: c.id })),
-        skipDuplicates: true,
-      });
-    }
   }
 
   return { homeId: home.id, publicId: PUBLIC_WORKSPACE_ID };

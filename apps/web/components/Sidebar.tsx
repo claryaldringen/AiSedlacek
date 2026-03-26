@@ -131,6 +131,9 @@ function WorkspaceButton({
   selected: boolean;
   onClick: () => void;
 }): React.JSX.Element {
+  const t = useTranslations('sidebar');
+  const displayName =
+    ws.type === 'home' ? t('myWorkspace') : ws.type === 'public' ? t('publicDocuments') : ws.name;
   return (
     <button
       onClick={onClick}
@@ -142,7 +145,7 @@ function WorkspaceButton({
       ].join(' ')}
     >
       <WorkspaceIcon type={ws.type} />
-      <span className="truncate">{ws.name}</span>
+      <span className="truncate">{displayName}</span>
       <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
     </button>
   );

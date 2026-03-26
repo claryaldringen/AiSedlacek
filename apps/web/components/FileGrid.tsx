@@ -1003,7 +1003,7 @@ export function FileGrid({
       {showCollections && collections.length > 0 && (
         <div className="filegrid-bg mb-6">
           <h3 className="filegrid-bg mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Svazky
+            {t('collectionsHeading')}
           </h3>
           <div
             ref={collectionsGridRef}

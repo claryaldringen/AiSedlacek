@@ -445,6 +445,8 @@
   },
   "sidebar": {
     "loading": "Načítám...",
+    "myWorkspace": "Můj workspace",
+    "publicDocuments": "Veřejné dokumenty",
     "shared": "Sdílené",
     "newSharedWorkspace": "Nový sdílený workspace",
     "noSharedWorkspaces": "Žádné sdílené workspacy",
@@ -474,7 +476,8 @@
     "contextMenuDelete": "Smazat",
     "contextMenuRename": "Přejmenovat",
     "contextMenuSelectAll": "Vybrat vše",
-    "contextMenuUpload": "Nahrát"
+    "contextMenuUpload": "Nahrát",
+    "collectionsHeading": "Svazky"
   },
   "fileList": {
     "statusDone": "Zpracováno",
