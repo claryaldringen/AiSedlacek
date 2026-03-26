@@ -103,10 +103,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
             >
               {t('navHowItWorks')}
             </a>
-            <a
-              href="#texts"
-              className="text-sm text-white/70 transition-colors hover:text-white"
-            >
+            <a href="#texts" className="text-sm text-white/70 transition-colors hover:text-white">
               {t('navTexts')}
             </a>
             <Link
@@ -207,7 +204,9 @@ export default async function LandingPage(): Promise<React.ReactElement> {
       {collections.length > 0 && (
         <section className="bg-[#f0e6d0] py-24">
           <div className="mx-auto max-w-6xl px-6">
-            <h2 className="text-center font-serif text-3xl font-bold text-[#3d2b1f]">{t('samplesHeading')}</h2>
+            <h2 className="text-center font-serif text-3xl font-bold text-[#3d2b1f]">
+              {t('samplesHeading')}
+            </h2>
             <div
               className={`mt-14 grid gap-8 ${collections.length === 1 ? 'mx-auto max-w-sm' : collections.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}
             >

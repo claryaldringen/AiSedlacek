@@ -24,7 +24,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const displayTitle = collection.title || collection.name;
     return {
       title: `${displayTitle} — AiSedlacek`,
-      description: collection.abstract || collection.description || t('publicCollectionTitle', { name: displayTitle }),
+      description:
+        collection.abstract ||
+        collection.description ||
+        t('publicCollectionTitle', { name: displayTitle }),
     };
   }
 
@@ -79,8 +82,18 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
               href="/"
               className="inline-flex items-center gap-1.5 text-sm text-[#a08060] transition-colors hover:text-[#d4a855]"
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15.75 19.5 8.25 12l7.5-7.5"
+                />
               </svg>
               AiSedlacek
             </Link>
@@ -98,7 +111,10 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
               </p>
             )}
             {/* Metadata badges */}
-            {(collection.author || collection.yearFrom || collection.yearTo || collection.librarySignature) && (
+            {(collection.author ||
+              collection.yearFrom ||
+              collection.yearTo ||
+              collection.librarySignature) && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {collection.author && (
                   <span className="inline-flex items-center rounded-full bg-[#3d2b1f] px-2.5 py-0.5 text-xs font-medium text-[#d4a855]">
@@ -128,14 +144,10 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
         </header>
 
         <main className="mx-auto max-w-6xl px-6 py-10">
-          {collection.context && (
-            <CollectionContextCard context={collection.context} />
-          )}
+          {collection.context && <CollectionContextCard context={collection.context} />}
 
           {collection.pages.length === 0 ? (
-            <p className="text-center font-serif text-[#a08060]">
-              {t('emptyCollection')}
-            </p>
+            <p className="text-center font-serif text-[#a08060]">{t('emptyCollection')}</p>
           ) : (
             <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {collection.pages.map((page, index) => {
@@ -159,8 +171,18 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center text-[#d4c5a9]">
-                          <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                          <svg
+                            className="h-10 w-10"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={1.5}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                            />
                           </svg>
                         </div>
                       )}

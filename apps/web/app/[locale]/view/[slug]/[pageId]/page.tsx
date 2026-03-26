@@ -61,8 +61,7 @@ export default async function PublicCollectionPageView({
 
   if (!page || page.collectionId !== collection.id) notFound();
 
-  const displayName =
-    page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Dokument';
+  const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Dokument';
 
   const prevPage = currentIndex > 0 ? allPages[currentIndex - 1] : null;
   const nextPage = currentIndex < allPages.length - 1 ? allPages[currentIndex + 1] : null;
@@ -80,7 +79,9 @@ export default async function PublicCollectionPageView({
             href={prevPage ? `/view/${slug}/${prevPage.id}` : null}
             title={
               prevPage
-                ? (prevPage.displayName ?? prevPage.filename.replace(/^[a-f0-9-]+-/, '') ?? t('previous'))
+                ? (prevPage.displayName ??
+                  prevPage.filename.replace(/^[a-f0-9-]+-/, '') ??
+                  t('previous'))
                 : t('previous')
             }
             direction="prev"
@@ -92,7 +93,9 @@ export default async function PublicCollectionPageView({
             href={nextPage ? `/view/${slug}/${nextPage.id}` : null}
             title={
               nextPage
-                ? (nextPage.displayName ?? nextPage.filename.replace(/^[a-f0-9-]+-/, '') ?? t('next'))
+                ? (nextPage.displayName ??
+                  nextPage.filename.replace(/^[a-f0-9-]+-/, '') ??
+                  t('next'))
                 : t('next')
             }
             direction="next"

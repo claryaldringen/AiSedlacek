@@ -18,7 +18,9 @@ export class R2StorageProvider implements IStorageProvider {
     const secretAccessKey = process.env['R2_SECRET_ACCESS_KEY'];
 
     if (!accountId || !accessKeyId || !secretAccessKey) {
-      throw new Error('Missing R2 configuration: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY');
+      throw new Error(
+        'Missing R2 configuration: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY',
+      );
     }
 
     this.bucket = process.env['R2_BUCKET_NAME'] ?? 'ai-sedlacek';

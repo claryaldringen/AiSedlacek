@@ -39,6 +39,17 @@ export interface ProcessPagesJobData {
 export async function processPages(data: ProcessPagesJobData): Promise<void> {
   const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = data;
 
+  // Load collection name for transaction descriptions
+  let collectionName: string | null = null;
+  if (collectionId) {
+    const col = await prisma.collection.findUnique({
+      where: { id: collectionId },
+      select: { name: true },
+    });
+    collectionName = col?.name ?? null;
+  }
+  const collectionLabel = collectionName ? ` [${collectionName}]` : '';
+
   const errors: string[] = [];
 
   // ── Sort pages by order ──────────────────────────────
@@ -145,7 +156,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           userId,
           origInput,
           origOutput,
-          `OCR stránky ${pageId} (deduplikace)`,
+          `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
           `copy-${copiedDoc.id}`,
         );
       }
@@ -358,7 +369,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       userId,
       inputTokens,
       outputTokens,
-      `OCR dávka ${batchIdx + 1} (${batch.length} stránek)`,
+      `OCR dávka ${batchIdx + 1} (${batch.length} stránek)${collectionLabel}`,
       savedDocs.length > 0 ? savedDocs[0]!.docId : `batch-${batchIdx}`,
     );
 

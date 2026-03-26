@@ -114,7 +114,7 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         userId,
         response.usage.input_tokens,
         response.usage.output_tokens,
-        `Oprava kontextu dokumentu ${doc.id}`,
+        `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
         `fix-context:${doc.id}:${Date.now()}`,
       ).catch(() => {
         // Non-critical

@@ -24,7 +24,10 @@ export async function ensureWorkspaces(
   });
   if (publicCollections.length > 0) {
     await prisma.workspaceItem.createMany({
-      data: publicCollections.map((c) => ({ workspaceId: PUBLIC_WORKSPACE_ID, collectionId: c.id })),
+      data: publicCollections.map((c) => ({
+        workspaceId: PUBLIC_WORKSPACE_ID,
+        collectionId: c.id,
+      })),
       skipDuplicates: true,
     });
   }

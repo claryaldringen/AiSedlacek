@@ -27,7 +27,7 @@ export async function handleRetranslate(jobId: string, data: RetranslateJobData)
     where: { id: documentId },
     include: {
       translations: { where: { language: targetLang } },
-      page: { select: { userId: true } },
+      page: { select: { userId: true, collection: { select: { name: true } } } },
     },
   });
 
@@ -89,7 +89,7 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
     userId,
     response.usage.input_tokens,
     response.usage.output_tokens,
-    `Retranslace dokumentu ${documentId}`,
+    `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
     `retranslate-${documentId}-${Date.now()}`,
   );
 

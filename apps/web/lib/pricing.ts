@@ -28,7 +28,10 @@ export function computeCostRaw(
   if (!model || inputTokens == null || outputTokens == null) return 0;
   const pricing = MODEL_PRICING[model];
   if (!pricing) return 0;
-  return ((inputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.input + ((outputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.output;
+  return (
+    ((inputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.input +
+    ((outputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.output
+  );
 }
 
 /**
@@ -57,5 +60,8 @@ export function computeCostFromTokens(
   inputRate: number = 15,
   outputRate: number = 75,
 ): number {
-  return (inputTokens * TOKEN_MULTIPLIER * inputRate + outputTokens * TOKEN_MULTIPLIER * outputRate) / 1_000_000;
+  return (
+    (inputTokens * TOKEN_MULTIPLIER * inputRate + outputTokens * TOKEN_MULTIPLIER * outputRate) /
+    1_000_000
+  );
 }

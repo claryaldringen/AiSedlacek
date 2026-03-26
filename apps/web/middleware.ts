@@ -4,14 +4,19 @@ import { routing } from './i18n/routing';
 
 const intlMiddleware = createMiddleware(routing);
 
-const PUBLIC_PATHS = ['/', '/login', '/forgot-password', '/reset-password', '/verify-email', '/view'];
+const PUBLIC_PATHS = [
+  '/',
+  '/login',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/view',
+];
 
 function isPublicRoute(pathname: string): boolean {
   const localePrefix = new RegExp(`^/(${routing.locales.join('|')})`);
   const withoutLocale = pathname.replace(localePrefix, '') || '/';
-  return PUBLIC_PATHS.some(
-    (p) => withoutLocale === p || withoutLocale.startsWith(p + '/'),
-  );
+  return PUBLIC_PATHS.some((p) => withoutLocale === p || withoutLocale.startsWith(p + '/'));
 }
 
 function getLocaleFromPath(pathname: string): string {
@@ -35,8 +40,7 @@ export function middleware(req: NextRequest): NextResponse {
   const pathname = req.nextUrl.pathname;
   if (!isPublicRoute(pathname)) {
     const hasSession =
-      req.cookies.has('authjs.session-token') ||
-      req.cookies.has('__Secure-authjs.session-token');
+      req.cookies.has('authjs.session-token') || req.cookies.has('__Secure-authjs.session-token');
     if (!hasSession) {
       const locale = getLocaleFromPath(pathname);
       const loginUrl = new URL(`/${locale}/login`, req.nextUrl.origin);
