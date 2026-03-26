@@ -4,9 +4,9 @@ import { useLocale } from 'next-intl';
 import { useRouter, usePathname } from '@/i18n/navigation';
 import { routing } from '@/i18n/routing';
 
-const LOCALE_LABELS: Record<string, string> = {
-  en: 'EN',
-  cs: 'CZ',
+const LOCALES: Record<string, { flag: string; label: string }> = {
+  en: { flag: '🇬🇧', label: 'English' },
+  cs: { flag: '🇨🇿', label: 'Čeština' },
 };
 
 export default function LocaleSwitcher({
@@ -19,7 +19,6 @@ export default function LocaleSwitcher({
   const pathname = usePathname();
 
   const handleChange = async (newLocale: string): Promise<void> => {
-    // If user is logged in, save preference
     try {
       await fetch('/api/user/locale', {
         method: 'PATCH',
@@ -32,26 +31,25 @@ export default function LocaleSwitcher({
     router.replace(pathname, { locale: newLocale });
   };
 
-  const activeClass =
-    variant === 'dark' ? 'bg-white/20 text-white' : 'bg-[#8b1a1a] text-white';
-  const inactiveClass =
+  const selectClass =
     variant === 'dark'
-      ? 'text-white/60 hover:bg-white/10 hover:text-white'
-      : 'text-[#7a6652] hover:bg-[#e8dcc6] hover:text-[#3d2b1f]';
+      ? 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+      : 'bg-[#f5edd6] text-[#3d2b1f] border-[#d4c5a9] hover:bg-[#ebe0c8]';
 
   return (
-    <div className="flex items-center gap-1">
-      {routing.locales.map((l) => (
-        <button
-          key={l}
-          onClick={() => void handleChange(l)}
-          className={`rounded px-2 py-1 font-serif text-xs font-medium transition-colors ${
-            l === locale ? activeClass : inactiveClass
-          }`}
-        >
-          {LOCALE_LABELS[l] ?? l.toUpperCase()}
-        </button>
-      ))}
-    </div>
+    <select
+      value={locale}
+      onChange={(e) => void handleChange(e.target.value)}
+      className={`cursor-pointer rounded-lg border px-2 py-1.5 font-serif text-xs font-medium outline-none transition-colors ${selectClass}`}
+    >
+      {routing.locales.map((l) => {
+        const info = LOCALES[l];
+        return (
+          <option key={l} value={l}>
+            {info ? `${info.flag} ${info.label}` : l.toUpperCase()}
+          </option>
+        );
+      })}
+    </select>
   );
 }
