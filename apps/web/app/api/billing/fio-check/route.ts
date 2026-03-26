@@ -1,4 +1,4 @@
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import {
@@ -11,11 +11,9 @@ import {
 const lastFioCallByUser = new Map<string, number>();
 
 export async function POST(): Promise<NextResponse> {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Neautorizováno' }, { status: 401 });
-  }
-  const userId = session.user.id;
+  const authResult = await getAuthenticatedUserId();
+  if (authResult.error) return authResult.error;
+  const { userId } = authResult;
 
   // Rate limiting - FIO API allows 1 request per 30 seconds (per user)
   const now = Date.now();

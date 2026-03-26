@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { parseOcrJson } from '@ai-sedlacek/ocr';
 import { createVersion } from '@/lib/infrastructure/versioning';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -14,12 +14,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   const { id } = await params;
 

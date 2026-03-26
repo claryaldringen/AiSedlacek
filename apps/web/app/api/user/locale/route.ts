@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { routing } from '@/i18n/routing';
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: unknown;
   try {
@@ -42,12 +39,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function GET(): Promise<NextResponse> {
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ locale: null });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return NextResponse.json({ locale: null });
+  const { userId } = auth;
 
   const user = await prisma.user.findUnique({
     where: { id: userId },

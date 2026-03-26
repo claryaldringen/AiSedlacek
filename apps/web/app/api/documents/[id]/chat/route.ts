@@ -7,7 +7,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { detectMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -50,12 +50,9 @@ Odpovídej v jazyce, kterým píše uživatel.`;
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<Response> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   const { balance, sufficient } = await checkBalance(userId);
   if (!sufficient) {

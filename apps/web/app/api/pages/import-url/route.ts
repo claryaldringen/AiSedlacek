@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -32,12 +32,9 @@ async function withSharpLimit<T>(fn: () => Promise<T>): Promise<T> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: unknown;
   try {

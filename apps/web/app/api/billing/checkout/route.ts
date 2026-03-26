@@ -1,15 +1,15 @@
-import { auth } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { prisma } from '@/lib/infrastructure/db';
 
 export async function POST(request: Request): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: t('unauthorized') }, { status: 401 });
-  }
+  const authResult = await getAuthenticatedUserId();
+  if (authResult.error) return authResult.error;
+  const { userId } = authResult;
 
   const { amountCzk } = (await request.json()) as { amountCzk: number };
 
@@ -39,9 +39,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         },
       ],
       mode: 'payment',
-      customer_email: session.user.email ?? undefined,
+      customer_email:
+        (await prisma.user.findUnique({ where: { id: userId }, select: { email: true } }))?.email ??
+        undefined,
       locale: 'cs',
-      metadata: { userId: session.user.id },
+      metadata: { userId },
       success_url: `${baseUrl}/workspace/billing?success=true`,
       cancel_url: `${baseUrl}/workspace/billing?cancelled=true`,
     });

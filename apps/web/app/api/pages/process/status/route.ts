@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { prisma } from '@/lib/infrastructure/db';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -9,12 +9,9 @@ import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   const jobId = request.nextUrl.searchParams.get('jobId');
   if (!jobId) {
@@ -67,12 +64,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return NextResponse.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: { jobId?: string; action?: string } = {};
   try {

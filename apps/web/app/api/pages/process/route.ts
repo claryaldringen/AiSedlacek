@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
-import { requireUserId } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance } from '@/lib/infrastructure/billing';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -11,12 +11,9 @@ import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 export async function POST(request: NextRequest): Promise<Response> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: unknown;
   try {
@@ -119,12 +116,9 @@ export async function POST(request: NextRequest): Promise<Response> {
 export async function GET(request: NextRequest): Promise<Response> {
   const t = await getApiTranslations(request, 'api');
 
-  let userId: string;
-  try {
-    userId = await requireUserId();
-  } catch {
-    return Response.json({ error: t('notLoggedIn') }, { status: 401 });
-  }
+  const auth = await getAuthenticatedUserId();
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   // Only reconnect to OCR jobs — non-OCR jobs (retranslate, generate-context, fix-contexts)
   // have their own polling loops started by the triggering UI action.
