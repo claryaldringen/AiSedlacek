@@ -4,6 +4,8 @@ import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
+export const maxDuration = 120;
+
 type RouteContext = { params: Promise<{ id: string }> };
 
 const LANGUAGE_NAMES: Record<string, string> = {
