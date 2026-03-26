@@ -11,6 +11,7 @@ interface UseProcessingJobOptions {
   selected: Set<string>;
   collections: Collection[];
   loadingPages: boolean;
+  locale: string;
 }
 
 interface UseProcessingJobReturn {
@@ -44,6 +45,7 @@ export function useProcessingJob({
   selected,
   collections,
   loadingPages,
+  locale,
 }: UseProcessingJobOptions): UseProcessingJobReturn {
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
   const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
@@ -256,7 +258,7 @@ export function useProcessingJob({
       const response = await apiFetch('/api/pages/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageIds, language: 'cs', mode: 'transcribe+translate' }),
+        body: JSON.stringify({ pageIds, language: locale, mode: 'transcribe+translate' }),
       });
 
       if (!response.ok) {

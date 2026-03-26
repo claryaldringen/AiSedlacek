@@ -264,11 +264,19 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const firstPage = batch[0]!;
     const previousContext = await getPreviousPageContext(firstPage.collectionId, firstPage.pageId);
 
-    // Build user prompt
-    let userPrompt = 'Přepiš text z tohoto rukopisu.';
+    // Build user prompt — localized so Claude responds in the target language
+    const transcribePrompt =
+      language === 'en'
+        ? 'Transcribe the text from this manuscript.'
+        : 'Přepiš text z tohoto rukopisu.';
+    const contextPrefix =
+      language === 'en'
+        ? 'Context of the work (use for better understanding of the document):'
+        : 'Kontext díla (použij pro lepší porozumění dokumentu):';
+    let userPrompt = transcribePrompt;
     const batchCollectionContext = firstPage.collectionContext;
     if (batchCollectionContext) {
-      userPrompt = `Kontext díla (použij pro lepší porozumění dokumentu):\n${batchCollectionContext}\n\n---\n\nPřepiš text z tohoto rukopisu.`;
+      userPrompt = `${contextPrefix}\n${batchCollectionContext}\n\n---\n\n${transcribePrompt}`;
     }
 
     // Prepare images for the batch call

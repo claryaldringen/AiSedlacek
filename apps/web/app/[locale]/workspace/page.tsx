@@ -141,6 +141,7 @@ function WorkspaceContent(): React.JSX.Element {
     selected,
     collections,
     loadingPages,
+    locale,
   });
 
   // ---- Load workspaces ----
@@ -652,7 +653,10 @@ function WorkspaceContent(): React.JSX.Element {
             updatedAt?: string;
           };
 
-          const translation = doc.translations[0];
+          // Prefer translation matching current locale, fall back to first available
+          const translation =
+            doc.translations.find((tr: { language: string }) => tr.language === locale) ??
+            doc.translations[0];
           setPanelResult({
             id: doc.id,
             transcription: doc.transcription,
@@ -820,7 +824,7 @@ function WorkspaceContent(): React.JSX.Element {
         const response = await apiFetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pageIds: [pageId], language: 'cs' }),
+          body: JSON.stringify({ pageIds: [pageId], language: locale }),
         });
         if (!response.ok) {
           const errData = (await response.json()) as { error?: string };
