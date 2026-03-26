@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/infrastructure/db';
 import HeroCarousel from '@/components/HeroCarousel';
 import AnimatedCounter from '@/components/AnimatedCounter';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
 
 async function getStats(): Promise<{
   pages: number;
@@ -112,6 +113,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
             >
               {t('navLogin')}
             </Link>
+            <LocaleSwitcher variant="dark" />
           </nav>
         </div>
       </header>

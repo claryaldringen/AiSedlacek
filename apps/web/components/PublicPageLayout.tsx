@@ -2,6 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import ImageZoom from '@/components/ImageZoom';
 import { PublicResultViewer, type PublicDocument } from '@/components/PublicResultViewer';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
 
 export async function PublicPageLayout({
   backHref,
@@ -47,7 +48,10 @@ export async function PublicPageLayout({
             <h1 className="font-serif text-base font-semibold text-[#f5edd6]">{title}</h1>
           </div>
 
-          {navigation && <div className="flex items-center gap-1">{navigation}</div>}
+          <div className="flex items-center gap-3">
+            {navigation && <div className="flex items-center gap-1">{navigation}</div>}
+            <LocaleSwitcher variant="dark" />
+          </div>
         </div>
       </header>
 

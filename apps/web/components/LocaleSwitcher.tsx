@@ -9,7 +9,11 @@ const LOCALE_LABELS: Record<string, string> = {
   cs: 'CZ',
 };
 
-export default function LocaleSwitcher(): React.JSX.Element {
+export default function LocaleSwitcher({
+  variant = 'default',
+}: {
+  variant?: 'default' | 'dark';
+}): React.JSX.Element {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
@@ -28,6 +32,13 @@ export default function LocaleSwitcher(): React.JSX.Element {
     router.replace(pathname, { locale: newLocale });
   };
 
+  const activeClass =
+    variant === 'dark' ? 'bg-white/20 text-white' : 'bg-[#8b1a1a] text-white';
+  const inactiveClass =
+    variant === 'dark'
+      ? 'text-white/60 hover:bg-white/10 hover:text-white'
+      : 'text-[#7a6652] hover:bg-[#e8dcc6] hover:text-[#3d2b1f]';
+
   return (
     <div className="flex items-center gap-1">
       {routing.locales.map((l) => (
@@ -35,9 +46,7 @@ export default function LocaleSwitcher(): React.JSX.Element {
           key={l}
           onClick={() => void handleChange(l)}
           className={`rounded px-2 py-1 font-serif text-xs font-medium transition-colors ${
-            l === locale
-              ? 'bg-[#8b1a1a] text-white'
-              : 'text-[#7a6652] hover:bg-[#e8dcc6] hover:text-[#3d2b1f]'
+            l === locale ? activeClass : inactiveClass
           }`}
         >
           {LOCALE_LABELS[l] ?? l.toUpperCase()}
