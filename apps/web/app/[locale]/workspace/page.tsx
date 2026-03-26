@@ -16,6 +16,7 @@ import type { Collection, Workspace } from '@/components/Sidebar';
 import type { DocumentResult } from '@/components/ResultViewer';
 import { useDesktopSelection } from '@/hooks/useDesktopSelection';
 import { useProcessingJob } from '@/hooks/useProcessingJob';
+import { useJobPolling } from '@/hooks/useJobPolling';
 import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
@@ -215,6 +216,8 @@ function WorkspaceContent(): React.JSX.Element {
     locale,
   });
 
+  const { pollJob } = useJobPolling();
+
   // ---- Load workspaces ----
   const loadWorkspaces = useCallback(async (): Promise<void> => {
     setLoadingWorkspaces(true);
@@ -337,53 +340,23 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
-        // Poll for job completion
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
-            if (!statusRes.ok) {
-              clearInterval(pollInterval);
-              setFixingContexts(false);
-              setFixingContextsProgress(null);
-              return;
-            }
-            const statusData = (await statusRes.json()) as {
-              status: string;
-              currentStep?: string;
-              progress?: number;
-              completedPages?: number;
-              totalPages?: number;
-            };
-            if (statusData.currentStep) {
-              setFixingContextsProgress(statusData.currentStep);
-            }
-            if (
-              statusData.status === 'completed' ||
-              statusData.status === 'error' ||
-              statusData.status === 'cancelled'
-            ) {
-              clearInterval(pollInterval);
-              setFixingContexts(false);
-              setFixingContextsProgress(null);
-              if (statusData.status === 'error') {
-                setError(t('contextFixesFailed'));
-              }
-              // Reload pages to get updated contexts
-              void loadPages(selectedCollectionId);
-            }
-          } catch {
-            clearInterval(pollInterval);
-            setFixingContexts(false);
-            setFixingContextsProgress(null);
-          }
-        }, 2000);
+        const result = await pollJob(jobId, {
+          onStep: (step) => setFixingContextsProgress(step),
+        });
+        setFixingContexts(false);
+        setFixingContextsProgress(null);
+        if (result === 'error') {
+          setError(t('contextFixesFailed'));
+        }
+        // Reload pages to get updated contexts
+        void loadPages(selectedCollectionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : t('error'));
         setFixingContexts(false);
         setFixingContextsProgress(null);
       }
     },
-    [setError, selectedCollectionId, loadPages],
+    [setError, selectedCollectionId, loadPages, pollJob],
   );
 
   const translateContext = useCallback(
@@ -403,42 +376,18 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
-        // Poll for job completion
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
-            if (!statusRes.ok) {
-              clearInterval(pollInterval);
-              setTranslatingContext(false);
-              return;
-            }
-            const statusData = (await statusRes.json()) as {
-              status: string;
-              currentStep?: string;
-            };
-            if (
-              statusData.status === 'completed' ||
-              statusData.status === 'error' ||
-              statusData.status === 'cancelled'
-            ) {
-              clearInterval(pollInterval);
-              setTranslatingContext(false);
-              if (statusData.status === 'error') {
-                setError('Context translation failed');
-              }
-              void loadCollections();
-            }
-          } catch {
-            clearInterval(pollInterval);
-            setTranslatingContext(false);
-          }
-        }, 2000);
+        const result = await pollJob(jobId);
+        setTranslatingContext(false);
+        if (result === 'error') {
+          setError('Context translation failed');
+        }
+        void loadCollections();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error');
         setTranslatingContext(false);
       }
     },
-    [locale, loadCollections, setError],
+    [locale, loadCollections, setError, pollJob],
   );
 
   const handleCollectionSelect = useCallback(
@@ -574,44 +523,19 @@ function WorkspaceContent(): React.JSX.Element {
       const { jobId } = data;
       if (!jobId) throw new Error('Server nevrátil jobId');
 
-      // Poll for job completion
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
-          if (!statusRes.ok) {
-            clearInterval(pollInterval);
-            setGeneratingContext(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            status: string;
-            currentStep?: string;
-            progress?: number;
-          };
-          if (
-            statusData.status === 'completed' ||
-            statusData.status === 'error' ||
-            statusData.status === 'cancelled'
-          ) {
-            clearInterval(pollInterval);
-            setGeneratingContext(false);
-            if (statusData.status === 'completed') {
-              // Reload collection to get updated context and metadata
-              void loadCollections();
-            } else if (statusData.status === 'error') {
-              setError(t('generationFailed'));
-            }
-          }
-        } catch {
-          clearInterval(pollInterval);
-          setGeneratingContext(false);
-        }
-      }, 2000);
+      const result = await pollJob(jobId);
+      setGeneratingContext(false);
+      if (result === 'completed') {
+        // Reload collection to get updated context and metadata
+        void loadCollections();
+      } else if (result === 'error') {
+        setError(t('generationFailed'));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('error'));
       setGeneratingContext(false);
     }
-  }, [selectedCollectionId, selected, pages, setError, loadCollections]);
+  }, [selectedCollectionId, selected, pages, setError, loadCollections, pollJob]);
 
   // ---- Rename collection ----
   const handleRenameCollection = useCallback(async (): Promise<void> => {
@@ -849,28 +773,12 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await response.json()) as { jobId: string };
 
-        // Poll for completion
-        let jobDone = false;
-        while (!jobDone) {
-          await new Promise((r) => setTimeout(r, 2000));
-          const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
-          if (!statusRes.ok) break;
-          const statusData = (await statusRes.json()) as {
-            status: string;
-            currentStep?: string;
-            progress?: number;
-            completedPages?: number;
-          };
-          if (statusData.currentStep) setRegenerateStep(statusData.currentStep);
-          if (statusData.progress != null) setRegenerateProgress(statusData.progress);
-          if (
-            statusData.status === 'completed' ||
-            statusData.status === 'error' ||
-            statusData.status === 'cancelled'
-          ) {
-            jobDone = true;
-          }
-        }
+        await pollJob(jobId, {
+          onStep: (step) => setRegenerateStep(step),
+          onProgress: (completed, total) => {
+            if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
+          },
+        });
 
         // Reload the document after job completes
         const pageRes = await apiFetch(`/api/pages/${pageId}`);
@@ -894,7 +802,7 @@ function WorkspaceContent(): React.JSX.Element {
         setRegenerateProgress(undefined);
       }
     },
-    [pages, setError],
+    [pages, setError, pollJob],
   );
 
   // ---- Derived values ----
