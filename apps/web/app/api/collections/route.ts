@@ -11,17 +11,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const workspaceId = request.nextUrl.searchParams.get('workspaceId');
 
-  let collections;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let collections: any[];
   if (workspaceId) {
-    // Ensure user's collections are synced to home workspace items
-    // (handles race condition where workspaces API hasn't finished syncing yet)
+    // Check if user is a member of this workspace
+    const member = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+      select: { role: true },
+    });
     const ws = await prisma.workspace.findUnique({
       where: { id: workspaceId },
       select: { type: true, ownerId: true },
     });
 
-    // Sync user's collections to home workspace
-    if (ws?.type === 'home' && ws.ownerId === userId) {
+    // Sync user's collections to their home workspace
+    if (ws?.type === 'home') {
       const userCollections = await prisma.collection.findMany({
         where: { userId },
         select: { id: true },
@@ -32,9 +36,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           skipDuplicates: true,
         });
       }
-      console.log(
-        `[collections/GET] home sync: userId=${userId}, ws=${workspaceId}, userCollections=${userCollections.length}`,
-      );
     }
 
     // Filter collections by workspace membership
@@ -43,17 +44,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       select: { collectionId: true },
     });
     const collectionIds = items.map((i) => i.collectionId!);
-    console.log(
-      `[collections/GET] workspaceId=${workspaceId}, wsType=${ws?.type}, wsOwner=${ws?.ownerId}, userId=${userId}, itemsWithCollection=${items.length}, collectionIds=${JSON.stringify(collectionIds)}`,
-    );
-    collections = await prisma.collection.findMany({
-      where: { id: { in: collectionIds } },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { pages: true } },
-      },
-    });
-    console.log(`[collections/GET] returned ${collections.length} collections`);
+
+    if (collectionIds.length > 0) {
+      collections = await prisma.collection.findMany({
+        where: { id: { in: collectionIds } },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: { select: { pages: true } },
+        },
+      });
+    } else if (ws?.type === 'home' || (member && ws?.type !== 'public')) {
+      // Fallback: if workspace has no collection items, return user's collections directly
+      collections = await prisma.collection.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: { select: { pages: true } },
+        },
+      });
+    } else {
+      collections = [];
+    }
   } else {
     collections = await prisma.collection.findMany({
       where: { userId },
