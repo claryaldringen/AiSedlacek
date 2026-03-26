@@ -5,6 +5,7 @@
  * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 import { processWithClaudeBatch } from '@ai-sedlacek/ocr';
@@ -119,13 +120,57 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       continue;
     }
 
-    // Skip pages with existing translation
+    // Skip pages with existing translation in the target language
     if (page.document !== null) {
       const hasTranslation = page.document.translations.some(
         (t: { language: string }) => t.language === language,
       );
       if (hasTranslation) {
         skippedCount.alreadyTranslated++;
+        continue;
+      }
+
+      // Document exists but no translation in target language → translate existing content
+      const sourceTranslation = page.document.translations[0] as
+        | { language: string; text: string }
+        | undefined;
+      if (sourceTranslation) {
+        await prisma.page.update({
+          where: { id: pageId },
+          data: { status: 'processing', errorMessage: null },
+        });
+
+        try {
+          await translateExistingDocument(
+            jobId,
+            userId,
+            page.document as {
+              id: string;
+              context: string;
+              glossary: { term: string; definition: string }[];
+            },
+            sourceTranslation,
+            language,
+            collectionLabel,
+          );
+          await prisma.page.update({
+            where: { id: pageId },
+            data: { status: 'done', errorMessage: null },
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Chyba překladu';
+          errors.push(msg);
+          await prisma.page.update({
+            where: { id: pageId },
+            data: { status: 'done', errorMessage: msg },
+          });
+        }
+
+        completed++;
+        await prisma.processingJob.update({
+          where: { id: jobId },
+          data: { completedPages: completed },
+        });
         continue;
       }
     }
@@ -457,4 +502,113 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       completedPages: total,
     },
   });
+}
+
+const LANG_NAMES: Record<string, string> = {
+  cs: 'Czech',
+  en: 'English',
+  de: 'German',
+  fr: 'French',
+  la: 'Latin',
+};
+
+/**
+ * Translate an existing document's translation, context, and glossary
+ * from one language to another using Claude Sonnet.
+ */
+async function translateExistingDocument(
+  jobId: string,
+  userId: string,
+  doc: { id: string; context: string; glossary: { term: string; definition: string }[] },
+  sourceTranslation: { language: string; text: string },
+  targetLanguage: string,
+  collectionLabel: string,
+): Promise<void> {
+  const sourceLang = LANG_NAMES[sourceTranslation.language] ?? sourceTranslation.language;
+  const targetLang = LANG_NAMES[targetLanguage] ?? targetLanguage;
+
+  await prisma.processingJob.update({
+    where: { id: jobId },
+    data: { currentStep: `Překládám do ${targetLang}…` },
+  });
+
+  // Build a single prompt that translates translation + context + glossary
+  const glossaryText =
+    doc.glossary.length > 0
+      ? doc.glossary.map((g) => `- **${g.term}**: ${g.definition}`).join('\n')
+      : '';
+
+  const prompt = `Translate the following historical manuscript data from ${sourceLang} to ${targetLang}. Keep all markdown formatting intact. Translate naturally — this is scholarly/academic text.
+
+Return your response as valid JSON with this exact structure:
+{
+  "translation": "the translated text in markdown",
+  "context": "the translated context in markdown",
+  "glossary": [{"term": "translated term", "definition": "translated definition"}]
+}
+
+=== TRANSLATION ===
+${sourceTranslation.text}
+
+=== CONTEXT ===
+${doc.context || '(empty)'}
+
+=== GLOSSARY ===
+${glossaryText || '(empty)'}
+
+Return ONLY the JSON object, no markdown fences, no extra text.`;
+
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8192,
+    temperature: 0.3,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+
+  let parsed: {
+    translation: string;
+    context: string;
+    glossary: { term: string; definition: string }[];
+  };
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Fallback: treat the whole response as translation text
+    parsed = { translation: text, context: '', glossary: [] };
+  }
+
+  // Save the translated content
+  await prisma.translation.upsert({
+    where: { documentId_language: { documentId: doc.id, language: targetLanguage } },
+    update: {
+      text: parsed.translation,
+      context: parsed.context || null,
+      glossaryJson: parsed.glossary?.length > 0 ? JSON.stringify(parsed.glossary) : null,
+      model: response.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    },
+    create: {
+      documentId: doc.id,
+      language: targetLanguage,
+      text: parsed.translation,
+      context: parsed.context || null,
+      glossaryJson: parsed.glossary?.length > 0 ? JSON.stringify(parsed.glossary) : null,
+      model: response.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    },
+  });
+
+  // Deduct tokens
+  await deductTokensIfSufficient(
+    userId,
+    response.usage.input_tokens,
+    response.usage.output_tokens,
+    `Překlad dokumentu ${doc.id}${collectionLabel}`,
+    `translate-doc-${doc.id}-${targetLanguage}-${Date.now()}`,
+  ).catch(() => {});
 }

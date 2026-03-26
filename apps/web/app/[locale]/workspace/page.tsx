@@ -194,28 +194,45 @@ function WorkspaceContent(): React.JSX.Element {
   }, [loadCollections]);
 
   // ---- Load pages ----
-  const loadPages = useCallback(async (collectionId: string | null): Promise<void> => {
-    setLoadingPages(true);
-    try {
-      const url = collectionId !== null ? `/api/collections/${collectionId}` : '/api/pages';
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const data = (await res.json()) as
-        | PageItem[]
-        | { pages: PageItem[] }
-        | { id: string; pages: PageItem[] };
+  const loadPages = useCallback(
+    async (collectionId: string | null): Promise<void> => {
+      setLoadingPages(true);
+      try {
+        const url = collectionId !== null ? `/api/collections/${collectionId}` : '/api/pages';
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = (await res.json()) as
+          | PageItem[]
+          | { pages: PageItem[] }
+          | { id: string; pages: PageItem[] };
 
-      if (Array.isArray(data)) {
-        setPages(data);
-      } else if ('pages' in data) {
-        setPages((data as { pages: PageItem[] }).pages);
+        // Pages with status 'done' but no translation in the current locale
+        // should appear as 'pending' (needs translation)
+        const adjustStatus = (pages: PageItem[]): PageItem[] =>
+          pages.map((p) => {
+            if (
+              p.status === 'done' &&
+              p.document &&
+              !p.document.translations.some((tr) => tr.language === locale)
+            ) {
+              return { ...p, status: 'pending' };
+            }
+            return p;
+          });
+
+        if (Array.isArray(data)) {
+          setPages(adjustStatus(data));
+        } else if ('pages' in data) {
+          setPages(adjustStatus((data as { pages: PageItem[] }).pages));
+        }
+      } catch {
+        // ignore
+      } finally {
+        setLoadingPages(false);
       }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingPages(false);
-    }
-  }, []);
+    },
+    [locale],
+  );
 
   useEffect(() => {
     void loadPages(selectedCollectionId);
@@ -640,6 +657,8 @@ function WorkspaceContent(): React.JSX.Element {
             translations: {
               language: string;
               text: string;
+              context?: string | null;
+              glossaryJson?: string | null;
               model?: string;
               inputTokens?: number;
               outputTokens?: number;
@@ -657,14 +676,21 @@ function WorkspaceContent(): React.JSX.Element {
           const translation =
             doc.translations.find((tr: { language: string }) => tr.language === locale) ??
             doc.translations[0];
+
+          // Use per-language context/glossary if available, otherwise fall back to document's
+          const context = translation?.context || doc.context;
+          const glossary: { term: string; definition: string }[] = translation?.glossaryJson
+            ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
+            : doc.glossary;
+
           setPanelResult({
             id: doc.id,
             transcription: doc.transcription,
             detectedLanguage: doc.detectedLanguage,
             translation: translation?.text ?? '',
             translationLanguage: translation?.language ?? '',
-            context: doc.context,
-            glossary: doc.glossary,
+            context,
+            glossary,
             cached: true,
             // Processing metadata
             model: doc.model,
@@ -766,6 +792,8 @@ function WorkspaceContent(): React.JSX.Element {
                     translations: {
                       language: string;
                       text: string;
+                      context?: string | null;
+                      glossaryJson?: string | null;
                       model?: string;
                       inputTokens?: number;
                       outputTokens?: number;
@@ -778,15 +806,24 @@ function WorkspaceContent(): React.JSX.Element {
                     createdAt?: string;
                     updatedAt?: string;
                   };
-                  const translation = doc.translations[0];
+                  const translation =
+                    doc.translations.find((tr: { language: string }) => tr.language === locale) ??
+                    doc.translations[0];
+                  const ctx = translation?.context || doc.context;
+                  const gls: { term: string; definition: string }[] = translation?.glossaryJson
+                    ? (JSON.parse(translation.glossaryJson) as {
+                        term: string;
+                        definition: string;
+                      }[])
+                    : doc.glossary;
                   setPanelResult({
                     id: doc.id,
                     transcription: doc.transcription,
                     detectedLanguage: doc.detectedLanguage,
                     translation: translation?.text ?? '',
                     translationLanguage: translation?.language ?? '',
-                    context: doc.context,
-                    glossary: doc.glossary,
+                    context: ctx,
+                    glossary: gls,
                     cached: false,
                     model: doc.model,
                     inputTokens: doc.inputTokens,
@@ -869,18 +906,32 @@ function WorkspaceContent(): React.JSX.Element {
                 transcription: string;
                 detectedLanguage: string;
                 context: string;
-                translations: { language: string; text: string }[];
+                translations: {
+                  language: string;
+                  text: string;
+                  context?: string | null;
+                  glossaryJson?: string | null;
+                }[];
                 glossary: { term: string; definition: string }[];
               };
-              const translation = doc.translations[0];
+              const translation =
+                doc.translations.find((tr: { language: string }) => tr.language === locale) ??
+                doc.translations[0];
+              const ctx = translation?.context || doc.context;
+              const gls: { term: string; definition: string }[] = translation?.glossaryJson
+                ? (JSON.parse(translation.glossaryJson) as {
+                    term: string;
+                    definition: string;
+                  }[])
+                : doc.glossary;
               setPanelResult({
                 id: doc.id,
                 transcription: doc.transcription,
                 detectedLanguage: doc.detectedLanguage,
                 translation: translation?.text ?? '',
                 translationLanguage: translation?.language ?? '',
-                context: doc.context,
-                glossary: doc.glossary,
+                context: ctx,
+                glossary: gls,
                 cached: false,
               });
             }

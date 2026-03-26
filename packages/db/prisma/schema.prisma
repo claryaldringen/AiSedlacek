@@ -176,6 +176,10 @@ model Translation {
   inputTokens  Int?
   outputTokens Int?
 
+  // Per-language context and glossary (translated from document's original)
+  context      String?
+  glossaryJson String?
+
   @@unique([documentId, language])
 }
 
