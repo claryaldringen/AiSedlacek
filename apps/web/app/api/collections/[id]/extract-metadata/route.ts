@@ -35,14 +35,14 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('collectionHasNoContext') }, { status: 400 });
   }
 
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
+  const locale =
+    request.headers.get('X-Locale') ||
+    request.headers.get('Accept-Language')?.split(',')[0]?.split('-')[0] ||
+    'cs';
+
+  const prompt =
+    locale === 'cs'
+      ? `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
 
 Formát:
 {
@@ -55,9 +55,27 @@ Formát:
 }
 
 Kontext:
-${collection.context}`,
-      },
-    ],
+${collection.context}`
+      : `Extract structured metadata from the following historical manuscript context. Return ONLY a valid JSON object without markdown backticks, without any other text. Write all values in ${locale === 'en' ? 'English' : locale}.
+
+Format:
+{
+  "title": "work title or null",
+  "author": "author or null",
+  "yearFrom": number or null,
+  "yearTo": number or null,
+  "librarySignature": "library signature or null",
+  "abstract": "brief description up to 200 characters or null"
+}
+
+Context:
+${collection.context}`;
+
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
   });
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';

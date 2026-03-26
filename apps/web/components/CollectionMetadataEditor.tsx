@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface CollectionMetadata {
   title?: string | null;
@@ -40,7 +41,7 @@ export function CollectionMetadataEditor({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/collections/${collectionId}`, {
+      const res = await apiFetch(`/api/collections/${collectionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -68,7 +69,7 @@ export function CollectionMetadataEditor({
     setExtracting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/collections/${collectionId}/extract-metadata`, {
+      const res = await apiFetch(`/api/collections/${collectionId}/extract-metadata`, {
         method: 'POST',
       });
       if (!res.ok) {
