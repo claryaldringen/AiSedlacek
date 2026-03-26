@@ -405,7 +405,9 @@
     "glossary": "Glossary",
     "pageContext": "Page context",
     "original": "Original",
-    "notProcessed": "This document has not been processed yet."
+    "notProcessed": "This document has not been processed yet.",
+    "yearFrom": "from {year}",
+    "yearTo": "until {year}"
   },
   "toolbar": {
     "insert": "Insert",

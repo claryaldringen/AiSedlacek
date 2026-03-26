@@ -405,7 +405,9 @@
     "glossary": "Glosář",
     "pageContext": "Kontext stránky",
     "original": "Originál",
-    "notProcessed": "Dokument zatím nebyl zpracován."
+    "notProcessed": "Dokument zatím nebyl zpracován.",
+    "yearFrom": "od {year}",
+    "yearTo": "do {year}"
   },
   "toolbar": {
     "insert": "Vložit",

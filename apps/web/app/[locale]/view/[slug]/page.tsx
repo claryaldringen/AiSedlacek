@@ -126,8 +126,8 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
                     {collection.yearFrom && collection.yearTo
                       ? `${collection.yearFrom}–${collection.yearTo}`
                       : collection.yearFrom
-                        ? `od ${collection.yearFrom}`
-                        : `do ${collection.yearTo}`}
+                        ? t('yearFrom', { year: collection.yearFrom! })
+                        : t('yearTo', { year: collection.yearTo! })}
                   </span>
                 )}
                 {collection.librarySignature && (
@@ -226,7 +226,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
 
     if (!page || !page.isPublic) notFound();
 
-    const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? 'Dokument';
+    const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? t('pageTitle', { n: 1 });
 
     return (
       <PublicPageLayout
