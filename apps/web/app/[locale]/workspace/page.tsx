@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useRouter } from '@/i18n/navigation';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { AppShell } from '@/components/AppShell';
 import { Toolbar } from '@/components/Toolbar';
 import { FileGrid, type PageItem } from '@/components/FileGrid';
@@ -34,6 +34,7 @@ export default function HomePage(): React.JSX.Element {
 
 function WorkspaceContent(): React.JSX.Element {
   const t = useTranslations('workspace');
+  const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -60,6 +61,7 @@ function WorkspaceContent(): React.JSX.Element {
   const [contextDialogOpen, setContextDialogOpen] = useState(false);
   const [fixingContexts, setFixingContexts] = useState(false);
   const [fixingContextsProgress, setFixingContextsProgress] = useState<string | null>(null);
+  const [translatingContext, setTranslatingContext] = useState(false);
 
   // Share dialog
   const [shareTarget, setShareTarget] = useState<{
@@ -293,6 +295,31 @@ function WorkspaceContent(): React.JSX.Element {
       }
     },
     [setError, selectedCollectionId, loadPages],
+  );
+
+  const translateContext = useCallback(
+    async (collectionId: string): Promise<void> => {
+      setTranslatingContext(true);
+      try {
+        const res = await apiFetch(`/api/collections/${collectionId}/translate-context`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetLanguage: locale }),
+        });
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as { error?: string };
+          setError(errData.error ?? 'Translation failed');
+          return;
+        }
+        // Reload collections to get updated context
+        void loadCollections();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Error');
+      } finally {
+        setTranslatingContext(false);
+      }
+    },
+    [locale, loadCollections, setError],
   );
 
   const handleCollectionSelect = useCallback(
@@ -1073,9 +1100,11 @@ function WorkspaceContent(): React.JSX.Element {
                     collectionId={selectedCollection.id}
                     metadata={{
                       title: selectedCollection.title,
+                      author: selectedCollection.author,
                       yearFrom: selectedCollection.yearFrom,
                       yearTo: selectedCollection.yearTo,
                       librarySignature: selectedCollection.librarySignature,
+                      abstract: selectedCollection.abstract,
                     }}
                     hasContext={!!selectedCollection.context}
                     onSaved={() => void loadCollections()}
@@ -1085,7 +1114,9 @@ function WorkspaceContent(): React.JSX.Element {
             </div>
 
             {/* Kontext díla — 1/3 */}
-            {selectedCollection.context ? (
+            {selectedCollection.context &&
+            (!selectedCollection.contextLanguage ||
+              selectedCollection.contextLanguage === locale) ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
@@ -1138,6 +1169,45 @@ function WorkspaceContent(): React.JSX.Element {
                           </svg>
                           {t('fixContextFromCollection')}
                         </>
+                      )}
+                    </button>
+                  </div>
+                </details>
+              </div>
+            ) : selectedCollection.context && selectedCollection.contextLanguage !== locale ? (
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                <details>
+                  <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                    {t('collectionContextTitle', { name: selectedCollection.name })}
+                  </summary>
+                  <div className="border-t border-slate-100 px-4 py-3">
+                    <p className="mb-3 text-sm text-slate-400">{t('contextInOtherLanguage')}</p>
+                    <button
+                      onClick={() => void translateContext(selectedCollection.id)}
+                      disabled={translatingContext}
+                      className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      {translatingContext ? (
+                        <>
+                          <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                            />
+                          </svg>
+                          {t('translatingContext')}
+                        </>
+                      ) : (
+                        t('translateContext')
                       )}
                     </button>
                   </div>

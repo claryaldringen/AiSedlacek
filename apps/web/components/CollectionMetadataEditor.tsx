@@ -5,9 +5,11 @@ import { useTranslations } from 'next-intl';
 
 interface CollectionMetadata {
   title?: string | null;
+  author?: string | null;
   yearFrom?: number | null;
   yearTo?: number | null;
   librarySignature?: string | null;
+  abstract?: string | null;
 }
 
 interface Props {
@@ -25,9 +27,11 @@ export function CollectionMetadataEditor({
 }: Props): React.JSX.Element {
   const t = useTranslations('collection');
   const [title, setTitle] = useState(metadata.title ?? '');
+  const [author, setAuthor] = useState(metadata.author ?? '');
   const [yearFrom, setYearFrom] = useState(metadata.yearFrom?.toString() ?? '');
   const [yearTo, setYearTo] = useState(metadata.yearTo?.toString() ?? '');
   const [librarySignature, setLibrarySignature] = useState(metadata.librarySignature ?? '');
+  const [abstract, setAbstract] = useState(metadata.abstract ?? '');
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +45,11 @@ export function CollectionMetadataEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim() || null,
+          author: author.trim() || null,
           yearFrom: yearFrom.trim() ? parseInt(yearFrom, 10) : null,
           yearTo: yearTo.trim() ? parseInt(yearTo, 10) : null,
           librarySignature: librarySignature.trim() || null,
+          abstract: abstract.trim() || null,
         }),
       });
       if (!res.ok) {
@@ -56,7 +62,7 @@ export function CollectionMetadataEditor({
     } finally {
       setSaving(false);
     }
-  }, [t, collectionId, title, yearFrom, yearTo, librarySignature, onSaved]);
+  }, [t, collectionId, title, author, yearFrom, yearTo, librarySignature, abstract, onSaved]);
 
   const handleExtract = useCallback(async () => {
     setExtracting(true);
@@ -71,9 +77,11 @@ export function CollectionMetadataEditor({
       }
       const data = (await res.json()) as CollectionMetadata;
       setTitle(data.title ?? '');
+      setAuthor(data.author ?? '');
       setYearFrom(data.yearFrom?.toString() ?? '');
       setYearTo(data.yearTo?.toString() ?? '');
       setLibrarySignature(data.librarySignature ?? '');
+      setAbstract(data.abstract ?? '');
       onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('extractionFailed'));
@@ -95,6 +103,16 @@ export function CollectionMetadataEditor({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('metadataTitlePlaceholder')}
+          className={inputClass}
+        />
+      </div>
+      <div>
+        <label className={labelClass}>{t('metadataAuthor')}</label>
+        <input
+          type="text"
+          value={author}
+          onChange={(e) => setAuthor(e.target.value)}
+          placeholder={t('metadataAuthorPlaceholder')}
           className={inputClass}
         />
       </div>
@@ -128,6 +146,16 @@ export function CollectionMetadataEditor({
           onChange={(e) => setLibrarySignature(e.target.value)}
           placeholder="MS.7756"
           className={inputClass}
+        />
+      </div>
+      <div>
+        <label className={labelClass}>{t('metadataAbstract')}</label>
+        <textarea
+          value={abstract}
+          onChange={(e) => setAbstract(e.target.value)}
+          rows={3}
+          placeholder={t('metadataAbstractPlaceholder')}
+          className={inputClass + ' resize-none'}
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}

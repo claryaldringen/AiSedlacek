@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface CollectionContextDialogProps {
   isOpen: boolean;
@@ -72,7 +73,7 @@ export function CollectionContextDialog({
     setFetching(true);
     setError(null);
     try {
-      const res = await fetch(`/api/collections/${collectionId}/fetch-context`, {
+      const res = await apiFetch(`/api/collections/${collectionId}/fetch-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: trimmed }),
@@ -104,7 +105,7 @@ export function CollectionContextDialog({
     setMerging(true);
     setError(null);
     try {
-      const res = await fetch(`/api/collections/${collectionId}/fetch-context`, {
+      const res = await apiFetch(`/api/collections/${collectionId}/fetch-context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: trimmed }),

@@ -12,6 +12,7 @@ export interface Collection {
   name: string;
   description: string;
   context: string;
+  contextLanguage: string | null;
   contextUrls: string[];
   createdAt: string;
   isPublic: boolean;

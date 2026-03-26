@@ -83,8 +83,9 @@ model Collection {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   description String   @default("")
-  context     String   @default("")
-  contextUrls String[]
+  context         String   @default("")
+  contextLanguage String?
+  contextUrls     String[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   pages       Page[]

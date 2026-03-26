@@ -155,10 +155,16 @@ ${newContent}`;
       : [...collection.contextUrls, url!.trim()]
     : collection.contextUrls;
 
+  // Detect context language from request locale header
+  const locale =
+    request.headers.get('X-Locale') ||
+    request.headers.get('Accept-Language')?.split(',')[0]?.split('-')[0] ||
+    'cs';
+
   // Save to collection
   await prisma.collection.update({
     where: { id },
-    data: { context, contextUrls: updatedUrls },
+    data: { context, contextLanguage: locale, contextUrls: updatedUrls },
   });
 
   // Extract structured metadata from context (fire-and-forget)

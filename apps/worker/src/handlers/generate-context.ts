@@ -178,7 +178,8 @@ ${context}`,
   });
 
   // Save context and metadata to collection
-  const updateData: Record<string, unknown> = { context };
+  // Worker prompt is in Czech, so generated context is always in Czech
+  const updateData: Record<string, unknown> = { context, contextLanguage: 'cs' };
   if (metadata) {
     if (metadata.title) updateData.title = metadata.title;
     if (metadata.author) updateData.author = metadata.author;

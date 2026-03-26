@@ -226,7 +226,8 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
 
     if (!page || !page.isPublic) notFound();
 
-    const displayName = page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? t('pageTitle', { n: 1 });
+    const displayName =
+      page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? t('pageTitle', { n: 1 });
 
     return (
       <PublicPageLayout
