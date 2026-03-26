@@ -15,6 +15,7 @@ import { processPages } from './handlers/process-pages';
 import { handleRetranslate } from './handlers/retranslate';
 import { handleGenerateContext } from './handlers/generate-context';
 import { handleFixContexts } from './handlers/fix-contexts';
+import { handleTranslateContext } from './handlers/translate-context';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_CONCURRENT_JOBS = 5;
@@ -62,6 +63,10 @@ async function executeJob(job: {
 
       case 'fix-contexts':
         await handleFixContexts(job.id, JSON.parse(job.jobData!));
+        break;
+
+      case 'translate-context':
+        await handleTranslateContext(job.id, JSON.parse(job.jobData!));
         break;
 
       default:

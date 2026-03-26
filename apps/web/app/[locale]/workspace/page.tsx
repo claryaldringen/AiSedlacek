@@ -309,13 +309,43 @@ function WorkspaceContent(): React.JSX.Element {
         if (!res.ok) {
           const errData = (await res.json().catch(() => ({}))) as { error?: string };
           setError(errData.error ?? 'Translation failed');
+          setTranslatingContext(false);
           return;
         }
-        // Reload collections to get updated context
-        void loadCollections();
+        const { jobId } = (await res.json()) as { jobId: string };
+
+        // Poll for job completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
+            if (!statusRes.ok) {
+              clearInterval(pollInterval);
+              setTranslatingContext(false);
+              return;
+            }
+            const statusData = (await statusRes.json()) as {
+              status: string;
+              currentStep?: string;
+            };
+            if (
+              statusData.status === 'completed' ||
+              statusData.status === 'error' ||
+              statusData.status === 'cancelled'
+            ) {
+              clearInterval(pollInterval);
+              setTranslatingContext(false);
+              if (statusData.status === 'error') {
+                setError('Context translation failed');
+              }
+              void loadCollections();
+            }
+          } catch {
+            clearInterval(pollInterval);
+            setTranslatingContext(false);
+          }
+        }, 2000);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error');
-      } finally {
         setTranslatingContext(false);
       }
     },

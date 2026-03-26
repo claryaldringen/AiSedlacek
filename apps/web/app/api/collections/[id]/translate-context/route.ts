@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { requireUserId } from '@/lib/auth';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-export const maxDuration = 120;
+export const maxDuration = 10;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  cs: 'Czech',
-  en: 'English',
-};
-
 /**
- * Translate collection context from one language to another using Claude.
+ * Translate collection context to another language.
+ * Enqueues a job for the VPS worker.
  * POST body: { targetLanguage: string }
  */
 export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
@@ -50,41 +45,23 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: 'No context to translate' }, { status: 400 });
   }
 
-  const sourceLang =
-    LANGUAGE_NAMES[collection.contextLanguage ?? 'cs'] ?? collection.contextLanguage ?? 'Czech';
-  const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
-
-  const client = new Anthropic();
-  let response;
-  try {
-    response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: `Translate the following historical manuscript context from ${sourceLang} to ${targetLang}. Keep the markdown formatting intact. Translate naturally — this is scholarly/academic text about a historical manuscript.
-
-${collection.context}`,
-        },
-      ],
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'AI error';
-    return NextResponse.json({ error: `Translation failed: ${message}` }, { status: 422 });
-  }
-
-  const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
-
-  await prisma.collection.update({
-    where: { id },
-    data: { context, contextLanguage: targetLanguage },
+  const job = await prisma.processingJob.create({
+    data: {
+      userId,
+      status: 'queued',
+      type: 'translate-context',
+      jobData: JSON.stringify({
+        collectionId: id,
+        targetLanguage,
+        userId,
+      }),
+      totalPages: 1,
+      completedPages: 0,
+      pageIds: [],
+      collectionId: id,
+      currentStep: 'Queued — waiting for context translation…',
+    },
   });
 
-  return NextResponse.json({
-    context,
-    contextLanguage: targetLanguage,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-  });
+  return NextResponse.json({ jobId: job.id });
 }
