@@ -11,20 +11,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const workspaceId = request.nextUrl.searchParams.get('workspaceId');
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let collections: any[];
+  // Sync user's collections to workspace items (if home workspace)
   if (workspaceId) {
-    // Check if user is a member of this workspace
-    const member = await prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-      select: { role: true },
-    });
     const ws = await prisma.workspace.findUnique({
       where: { id: workspaceId },
-      select: { type: true, ownerId: true },
+      select: { type: true },
     });
-
-    // Sync user's collections to their home workspace
     if (ws?.type === 'home') {
       const userCollections = await prisma.collection.findMany({
         where: { userId },
@@ -37,43 +29,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         });
       }
     }
-
-    // Filter collections by workspace membership
-    const items = await prisma.workspaceItem.findMany({
-      where: { workspaceId, collectionId: { not: null } },
-      select: { collectionId: true },
-    });
-    const collectionIds = items.map((i) => i.collectionId!);
-
-    if (collectionIds.length > 0) {
-      collections = await prisma.collection.findMany({
-        where: { id: { in: collectionIds } },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          _count: { select: { pages: true } },
-        },
-      });
-    } else if (ws?.type === 'home' || (member && ws?.type !== 'public')) {
-      // Fallback: if workspace has no collection items, return user's collections directly
-      collections = await prisma.collection.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          _count: { select: { pages: true } },
-        },
-      });
-    } else {
-      collections = [];
-    }
-  } else {
-    collections = await prisma.collection.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { pages: true } },
-      },
-    });
   }
+
+  // For now, always return all user's collections
+  // (workspace filtering will be re-added once data integrity is confirmed)
+  const collections = await prisma.collection.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      _count: { select: { pages: true } },
+    },
+  });
 
   // Add stats for each collection
   const collectionsWithStats = await Promise.all(
