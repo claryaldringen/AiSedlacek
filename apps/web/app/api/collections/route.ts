@@ -19,6 +19,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       where: { id: workspaceId },
       select: { type: true, ownerId: true },
     });
+
+    // Sync user's collections to home workspace
     if (ws?.type === 'home' && ws.ownerId === userId) {
       const userCollections = await prisma.collection.findMany({
         where: { userId },
@@ -30,6 +32,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           skipDuplicates: true,
         });
       }
+      console.log(
+        `[collections/GET] home sync: userId=${userId}, ws=${workspaceId}, userCollections=${userCollections.length}`,
+      );
     }
 
     // Filter collections by workspace membership
@@ -38,6 +43,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       select: { collectionId: true },
     });
     const collectionIds = items.map((i) => i.collectionId!);
+    console.log(
+      `[collections/GET] workspaceId=${workspaceId}, wsType=${ws?.type}, wsOwner=${ws?.ownerId}, userId=${userId}, itemsWithCollection=${items.length}, collectionIds=${JSON.stringify(collectionIds)}`,
+    );
     collections = await prisma.collection.findMany({
       where: { id: { in: collectionIds } },
       orderBy: { createdAt: 'desc' },
@@ -45,6 +53,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         _count: { select: { pages: true } },
       },
     });
+    console.log(`[collections/GET] returned ${collections.length} collections`);
   } else {
     collections = await prisma.collection.findMany({
       where: { userId },
