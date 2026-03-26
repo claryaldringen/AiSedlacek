@@ -2,10 +2,10 @@
  * Worker handler for fixing document-level contexts against collection context.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '../lib/anthropic';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import { deductTokens } from '@ai-sedlacek/db/billing';
+import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 
 export interface FixContextsJobData {
   collectionId: string;
@@ -56,7 +56,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
     },
   });
 
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   let completed = 0;
   const errors: string[] = [];
 
@@ -110,14 +110,14 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       }
 
       // Deduct tokens
-      await deductTokens(
+      await deductTokensIfSufficient(
         userId,
         response.usage.input_tokens,
         response.usage.output_tokens,
         `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
         `fix-context:${doc.id}:${Date.now()}`,
-      ).catch(() => {
-        // Non-critical
+      ).catch((err) => {
+        console.warn('[Worker:fix-contexts] Token deduction failed:', err);
       });
 
       completed++;

@@ -2,9 +2,9 @@
  * Worker handler for generating collection context from transcriptions.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '../lib/anthropic';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokens } from '@ai-sedlacek/db/billing';
+import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 
 export interface GenerateContextJobData {
   collectionId: string;
@@ -90,7 +90,7 @@ Přepisy stránek:
 ${concatenated}`;
 
   // Call Claude Sonnet
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 4096,
@@ -159,14 +159,14 @@ ${context}`,
     }
 
     // Deduct tokens for metadata call too
-    await deductTokens(
+    await deductTokensIfSufficient(
       userId,
       metadataResponse.usage.input_tokens,
       metadataResponse.usage.output_tokens,
       `Metadata kontextu svazku ${collection.name}`,
       `generate-context-meta:${collectionId}:${Date.now()}`,
-    ).catch(() => {
-      // Non-critical
+    ).catch((err) => {
+      console.warn('[Worker:generate-context] Token deduction failed:', err);
     });
   } catch {
     // Metadata extraction is best-effort — ignore errors
@@ -195,14 +195,14 @@ ${context}`,
   });
 
   // Deduct tokens for main context call
-  await deductTokens(
+  await deductTokensIfSufficient(
     userId,
     response.usage.input_tokens,
     response.usage.output_tokens,
     `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
     `generate-context:${collectionId}:${Date.now()}`,
-  ).catch(() => {
-    // Non-critical
+  ).catch((err) => {
+    console.warn('[Worker:generate-context] Token deduction failed:', err);
   });
 
   // Mark job as completed

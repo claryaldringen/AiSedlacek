@@ -2,7 +2,8 @@
  * Worker handler for retranslation jobs.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '../lib/anthropic';
+import { LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
@@ -39,14 +40,6 @@ export async function handleRetranslate(jobId: string, data: RetranslateJobData)
     throw new Error('Přístup zamítnut');
   }
 
-  const langName: Record<string, string> = {
-    cs: 'češtiny',
-    en: 'angličtiny',
-    de: 'němčiny',
-    fr: 'francouzštiny',
-    la: 'latiny',
-  };
-
   const existingTranslation = previousTranslation ?? doc.translations[0]?.text;
 
   await prisma.processingJob.update({
@@ -66,10 +59,10 @@ ${existingTranslation}
 
 Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
   } else {
-    prompt = `Přelož tento historický přepis do moderní ${langName[targetLang] ?? targetLang}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`;
+    prompt = `Přelož tento historický přepis do moderní ${LANGUAGE_NAMES_CS_GENITIVE[targetLang] ?? targetLang}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`;
   }
 
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,

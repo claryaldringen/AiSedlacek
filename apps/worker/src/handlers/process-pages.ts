@@ -5,7 +5,8 @@
  * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '../lib/anthropic';
+import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 import { processWithClaudeBatch } from '@ai-sedlacek/ocr';
@@ -504,14 +505,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   });
 }
 
-const LANG_NAMES: Record<string, string> = {
-  cs: 'Czech',
-  en: 'English',
-  de: 'German',
-  fr: 'French',
-  la: 'Latin',
-};
-
 /**
  * Translate an existing document's translation, context, and glossary
  * from one language to another using Claude Sonnet.
@@ -524,8 +517,8 @@ async function translateExistingDocument(
   targetLanguage: string,
   collectionLabel: string,
 ): Promise<void> {
-  const sourceLang = LANG_NAMES[sourceTranslation.language] ?? sourceTranslation.language;
-  const targetLang = LANG_NAMES[targetLanguage] ?? targetLanguage;
+  const sourceLang = LANGUAGE_NAMES[sourceTranslation.language] ?? sourceTranslation.language;
+  const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -558,7 +551,7 @@ ${glossaryText || '(empty)'}
 
 Return ONLY the JSON object, no markdown fences, no extra text.`;
 
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,

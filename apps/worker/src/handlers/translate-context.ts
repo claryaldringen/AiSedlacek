@@ -2,14 +2,10 @@
  * Worker handler for translating collection context to another language.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicClient } from '../lib/anthropic';
+import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokens } from '@ai-sedlacek/db/billing';
-
-const LANGUAGE_NAMES: Record<string, string> = {
-  cs: 'Czech',
-  en: 'English',
-};
+import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 
 export interface TranslateContextJobData {
   collectionId: string;
@@ -41,7 +37,7 @@ export async function handleTranslateContext(
     LANGUAGE_NAMES[collection.contextLanguage ?? 'cs'] ?? collection.contextLanguage ?? 'Czech';
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 4096,
@@ -63,7 +59,7 @@ ${collection.context}`,
   });
 
   // Deduct tokens
-  await deductTokens(
+  await deductTokensIfSufficient(
     userId,
     response.usage.input_tokens,
     response.usage.output_tokens,
