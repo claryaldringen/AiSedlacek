@@ -5,6 +5,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import LocaleSwitcher from './LocaleSwitcher';
 
 export interface Collection {
   id: string;
@@ -276,6 +277,9 @@ export function Sidebar({
       {/* User section at bottom */}
       {user && (
         <div ref={menuRef} className="relative border-t border-slate-200 p-2">
+          <div className="mb-1 flex items-center justify-between px-2">
+            <LocaleSwitcher />
+          </div>
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-slate-100"
