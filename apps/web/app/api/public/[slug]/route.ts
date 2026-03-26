@@ -22,7 +22,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
           include: {
             document: {
               include: {
-                translations: { select: { language: true, text: true } },
+                translations: {
+                  select: { language: true, text: true, context: true, glossaryJson: true },
+                },
                 glossary: { select: { term: true, definition: true } },
               },
             },
@@ -66,7 +68,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
       include: {
         document: {
           include: {
-            translations: { select: { language: true, text: true } },
+            translations: {
+              select: { language: true, text: true, context: true, glossaryJson: true },
+            },
             glossary: { select: { term: true, definition: true } },
           },
         },

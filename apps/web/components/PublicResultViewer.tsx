@@ -1,4 +1,4 @@
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -6,7 +6,12 @@ export interface PublicDocument {
   transcription: string;
   detectedLanguage: string;
   context: string;
-  translations: { language: string; text: string }[];
+  translations: {
+    language: string;
+    text: string;
+    context?: string | null;
+    glossaryJson?: string | null;
+  }[];
   glossary: { term: string; definition: string }[];
 }
 
@@ -41,7 +46,13 @@ export async function PublicResultViewer({
   document: PublicDocument;
 }): Promise<React.JSX.Element> {
   const t = await getTranslations('view');
-  const translation = document.translations[0];
+  const locale = await getLocale();
+  const translation =
+    document.translations.find((tr) => tr.language === locale) ?? document.translations[0];
+  const context = translation?.context || document.context;
+  const glossary: { term: string; definition: string }[] = translation?.glossaryJson
+    ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
+    : document.glossary;
 
   return (
     <div className="flex flex-col gap-4">
@@ -58,12 +69,12 @@ export async function PublicResultViewer({
       </div>
 
       {/* Row 2: Glossary | Page Context */}
-      {(document.glossary.length > 0 || document.context) && (
+      {(glossary.length > 0 || context) && (
         <div className="flex gap-4">
-          {document.glossary.length > 0 && (
+          {glossary.length > 0 && (
             <Card title={t('glossary')}>
               <dl className="space-y-3">
-                {document.glossary.map((g) => (
+                {glossary.map((g) => (
                   <div key={g.term}>
                     <dt className="font-serif text-sm font-semibold text-[#3d2b1f]">{g.term}</dt>
                     <dd className="mt-0.5 text-sm leading-relaxed text-[#7a6652]">
@@ -74,9 +85,9 @@ export async function PublicResultViewer({
               </dl>
             </Card>
           )}
-          {document.context && (
+          {context && (
             <Card title={t('pageContext')}>
-              <MarkdownContent content={document.context} />
+              <MarkdownContent content={context} />
             </Card>
           )}
         </div>

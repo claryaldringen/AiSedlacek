@@ -1,4 +1,4 @@
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
@@ -30,14 +30,14 @@ async function getStats(): Promise<{
   }
 }
 
-async function getPublicCollections(): Promise<
+async function getPublicCollections(locale: string): Promise<
   {
     id: string;
     name: string;
     slug: string | null;
     context: string | null;
     pages: { imageUrl: string }[];
-    _count: { pages: number };
+    pageCount: number;
   }[]
 > {
   try {
@@ -50,13 +50,30 @@ async function getPublicCollections(): Promise<
         context: true,
         pages: {
           where: { status: 'done', document: { isNot: null } },
-          select: { imageUrl: true },
-          take: 1,
+          select: {
+            imageUrl: true,
+            document: { select: { translations: { select: { language: true } } } },
+          },
         },
-        _count: { select: { pages: true } },
       },
     });
-    return collections.filter((c) => c.pages.length > 0);
+
+    // Filter pages that have a translation in the current locale
+    return collections
+      .map((c) => {
+        const pagesWithLocale = c.pages.filter((p) =>
+          p.document?.translations.some((t) => t.language === locale),
+        );
+        return {
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          context: c.context,
+          pages: pagesWithLocale.slice(0, 1).map((p) => ({ imageUrl: p.imageUrl })),
+          pageCount: pagesWithLocale.length,
+        };
+      })
+      .filter((c) => c.pages.length > 0);
   } catch (e) {
     console.error('getPublicCollections error:', e);
     return [];
@@ -69,7 +86,8 @@ export default async function LandingPage(): Promise<React.ReactElement> {
 
   const t = await getTranslations('landing');
 
-  const [stats, collections] = await Promise.all([getStats(), getPublicCollections()]);
+  const locale = await getLocale();
+  const [stats, collections] = await Promise.all([getStats(), getPublicCollections(locale)]);
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -250,7 +268,7 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                         {col.name}
                       </h3>
                       <p className="mt-1 text-xs text-[#a08060]">
-                        {t('samplePages', { count: col._count.pages })}
+                        {t('samplePages', { count: col.pageCount })}
                       </p>
                       {perex && (
                         <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-[#7a6652]">
