@@ -69,7 +69,17 @@ ${collection.context}`,
     response.usage.output_tokens,
     `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
     `translate-context:${collectionId}:${Date.now()}`,
-  ).catch(() => {
-    // Non-critical
+  ).catch((err) => {
+    console.warn('[Worker:translate-context] Token deduction failed:', err);
+  });
+
+  // Mark job as completed
+  await prisma.processingJob.update({
+    where: { id: jobId },
+    data: {
+      status: 'completed',
+      currentStep: 'Hotovo',
+      completedPages: 1,
+    },
   });
 }

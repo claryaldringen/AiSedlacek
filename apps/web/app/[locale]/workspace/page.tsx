@@ -24,6 +24,77 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch } from '@/lib/infrastructure/api-client';
 
+/** Shape of a document API response with translations */
+interface DocApiResponse {
+  id: string;
+  transcription: string;
+  detectedLanguage: string;
+  context: string;
+  hash?: string;
+  translations: {
+    language: string;
+    text: string;
+    context?: string | null;
+    glossaryJson?: string | null;
+    model?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+  }[];
+  glossary: { term: string; definition: string }[];
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  processingTimeMs?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Map a document API response + page metadata into a DocumentResult */
+function mapDocToResult(
+  doc: DocApiResponse,
+  page: {
+    mimeType?: string | null;
+    fileSize?: number | null;
+    width?: number | null;
+    height?: number | null;
+    createdAt?: string;
+  },
+  locale: string,
+  cached: boolean,
+): DocumentResult {
+  const translation = doc.translations.find((tr) => tr.language === locale) ?? doc.translations[0];
+  const context = translation?.context || doc.context;
+  const glossary: { term: string; definition: string }[] = translation?.glossaryJson
+    ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
+    : doc.glossary;
+
+  return {
+    id: doc.id,
+    transcription: doc.transcription,
+    detectedLanguage: doc.detectedLanguage,
+    translation: translation?.text ?? '',
+    translationLanguage: translation?.language ?? '',
+    context,
+    glossary,
+    cached,
+    model: doc.model,
+    inputTokens: doc.inputTokens,
+    outputTokens: doc.outputTokens,
+    processingTimeMs: doc.processingTimeMs,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    hash: doc.hash,
+    mimeType: page.mimeType,
+    fileSize: page.fileSize,
+    width: page.width,
+    height: page.height,
+    pageCreatedAt: page.createdAt,
+    translationModel: translation?.model,
+    translationInputTokens: translation?.inputTokens,
+    translationOutputTokens: translation?.outputTokens,
+  };
+}
+
 export default function HomePage(): React.JSX.Element {
   return (
     <Suspense>
@@ -199,7 +270,7 @@ function WorkspaceContent(): React.JSX.Element {
       setLoadingPages(true);
       try {
         const url = collectionId !== null ? `/api/collections/${collectionId}` : '/api/pages';
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         if (!res.ok) return;
         const data = (await res.json()) as
           | PageItem[]
@@ -661,69 +732,8 @@ function WorkspaceContent(): React.JSX.Element {
         try {
           const res = await apiFetch(`/api/documents/${page.document.id}`);
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
-          const doc = (await res.json()) as {
-            id: string;
-            transcription: string;
-            detectedLanguage: string;
-            context: string;
-            hash: string;
-            translations: {
-              language: string;
-              text: string;
-              context?: string | null;
-              glossaryJson?: string | null;
-              model?: string;
-              inputTokens?: number;
-              outputTokens?: number;
-            }[];
-            glossary: { term: string; definition: string }[];
-            model?: string;
-            inputTokens?: number;
-            outputTokens?: number;
-            processingTimeMs?: number;
-            createdAt?: string;
-            updatedAt?: string;
-          };
-
-          // Prefer translation matching current locale, fall back to first available
-          const translation =
-            doc.translations.find((tr: { language: string }) => tr.language === locale) ??
-            doc.translations[0];
-
-          // Use per-language context/glossary if available, otherwise fall back to document's
-          const context = translation?.context || doc.context;
-          const glossary: { term: string; definition: string }[] = translation?.glossaryJson
-            ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
-            : doc.glossary;
-
-          setPanelResult({
-            id: doc.id,
-            transcription: doc.transcription,
-            detectedLanguage: doc.detectedLanguage,
-            translation: translation?.text ?? '',
-            translationLanguage: translation?.language ?? '',
-            context,
-            glossary,
-            cached: true,
-            // Processing metadata
-            model: doc.model,
-            inputTokens: doc.inputTokens,
-            outputTokens: doc.outputTokens,
-            processingTimeMs: doc.processingTimeMs,
-            createdAt: doc.createdAt,
-            updatedAt: doc.updatedAt,
-            hash: doc.hash,
-            // Page metadata
-            mimeType: page.mimeType,
-            fileSize: page.fileSize,
-            width: page.width,
-            height: page.height,
-            pageCreatedAt: page.createdAt,
-            // Translation metadata
-            translationModel: translation?.model,
-            translationInputTokens: translation?.inputTokens,
-            translationOutputTokens: translation?.outputTokens,
-          });
+          const doc = (await res.json()) as DocApiResponse;
+          setPanelResult(mapDocToResult(doc, page, locale, true));
         } catch (err) {
           setError(err instanceof Error ? err.message : t('error'));
         } finally {
@@ -809,64 +819,8 @@ function WorkspaceContent(): React.JSX.Element {
               if (updatedPage.document) {
                 const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
                 if (docRes.ok) {
-                  const doc = (await docRes.json()) as {
-                    id: string;
-                    transcription: string;
-                    detectedLanguage: string;
-                    context: string;
-                    hash: string;
-                    translations: {
-                      language: string;
-                      text: string;
-                      context?: string | null;
-                      glossaryJson?: string | null;
-                      model?: string;
-                      inputTokens?: number;
-                      outputTokens?: number;
-                    }[];
-                    glossary: { term: string; definition: string }[];
-                    model?: string;
-                    inputTokens?: number;
-                    outputTokens?: number;
-                    processingTimeMs?: number;
-                    createdAt?: string;
-                    updatedAt?: string;
-                  };
-                  const translation =
-                    doc.translations.find((tr: { language: string }) => tr.language === locale) ??
-                    doc.translations[0];
-                  const ctx = translation?.context || doc.context;
-                  const gls: { term: string; definition: string }[] = translation?.glossaryJson
-                    ? (JSON.parse(translation.glossaryJson) as {
-                        term: string;
-                        definition: string;
-                      }[])
-                    : doc.glossary;
-                  setPanelResult({
-                    id: doc.id,
-                    transcription: doc.transcription,
-                    detectedLanguage: doc.detectedLanguage,
-                    translation: translation?.text ?? '',
-                    translationLanguage: translation?.language ?? '',
-                    context: ctx,
-                    glossary: gls,
-                    cached: false,
-                    model: doc.model,
-                    inputTokens: doc.inputTokens,
-                    outputTokens: doc.outputTokens,
-                    processingTimeMs: doc.processingTimeMs,
-                    createdAt: doc.createdAt,
-                    updatedAt: doc.updatedAt,
-                    hash: doc.hash,
-                    mimeType: page.mimeType,
-                    fileSize: page.fileSize,
-                    width: page.width,
-                    height: page.height,
-                    pageCreatedAt: page.createdAt,
-                    translationModel: translation?.model,
-                    translationInputTokens: translation?.inputTokens,
-                    translationOutputTokens: translation?.outputTokens,
-                  });
+                  const doc = (await docRes.json()) as DocApiResponse;
+                  setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
                 }
               }
             }
@@ -927,39 +881,8 @@ function WorkspaceContent(): React.JSX.Element {
           if (updatedPage.document) {
             const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
             if (docRes.ok) {
-              const doc = (await docRes.json()) as {
-                id: string;
-                transcription: string;
-                detectedLanguage: string;
-                context: string;
-                translations: {
-                  language: string;
-                  text: string;
-                  context?: string | null;
-                  glossaryJson?: string | null;
-                }[];
-                glossary: { term: string; definition: string }[];
-              };
-              const translation =
-                doc.translations.find((tr: { language: string }) => tr.language === locale) ??
-                doc.translations[0];
-              const ctx = translation?.context || doc.context;
-              const gls: { term: string; definition: string }[] = translation?.glossaryJson
-                ? (JSON.parse(translation.glossaryJson) as {
-                    term: string;
-                    definition: string;
-                  }[])
-                : doc.glossary;
-              setPanelResult({
-                id: doc.id,
-                transcription: doc.transcription,
-                detectedLanguage: doc.detectedLanguage,
-                translation: translation?.text ?? '',
-                translationLanguage: translation?.language ?? '',
-                context: ctx,
-                glossary: gls,
-                cached: false,
-              });
+              const doc = (await docRes.json()) as DocApiResponse;
+              setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
             }
           }
         }

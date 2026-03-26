@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
 import { computeCostRaw, formatCost, TOKEN_MULTIPLIER } from '@/lib/pricing';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
   id: string;
@@ -137,7 +138,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         if (field === 'translation') {
           body.translationLanguage = result.translationLanguage;
         }
-        await fetch(`/api/documents/${result.id}`, {
+        await apiFetch(`/api/documents/${result.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -159,7 +160,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
       // Re-translate based on updated transcription via worker job
       setRetranslating(true);
       try {
-        const res = await fetch(`/api/documents/${result.id}/retranslate`, {
+        const res = await apiFetch(`/api/documents/${result.id}/retranslate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -176,7 +177,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
         // Poll for job completion
         const pollInterval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`/api/pages/process/status?jobId=${jobId}`);
+            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
             if (!statusRes.ok) {
               clearInterval(pollInterval);
               setRetranslating(false);
@@ -195,7 +196,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
               setRetranslating(false);
               if (statusData.status === 'completed') {
                 // Reload the document to get the new translation
-                const docRes = await fetch(`/api/documents/${result.id}`);
+                const docRes = await apiFetch(`/api/documents/${result.id}`);
                 if (docRes.ok) {
                   const doc = (await docRes.json()) as {
                     translations: {
