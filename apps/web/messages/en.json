@@ -198,7 +198,7 @@
     "metadataSignature": "Signature",
     "metadataAbstract": "Abstract",
     "savingMetadata": "Saving…",
-    "saveMetadata": "Save metadata",
+    "saveMetadata": "Save",
     "extractingMetadata": "Extracting…",
     "extractMetadataFromContext": "Extract from context",
     "extractMetadataTooltip": "Extract metadata from work context using AI",
