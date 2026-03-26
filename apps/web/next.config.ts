@@ -13,7 +13,7 @@ const gitHash = (() => {
 })();
 
 const nextConfig: NextConfig = {
-  transpilePackages: ['@ai-sedlacek/shared'],
+  transpilePackages: ['@ai-sedlacek/shared', '@ai-sedlacek/ocr'],
   serverExternalPackages: ['sharp', 'tesseract.js'],
   env: {
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),

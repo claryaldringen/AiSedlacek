@@ -1,4 +1,4 @@
-import type { ImageMediaType, StructuredOcrResult } from './types.js';
+import type { ImageMediaType, StructuredOcrResult } from './types';
 
 export function detectMediaType(buffer: Buffer): ImageMediaType {
   if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';

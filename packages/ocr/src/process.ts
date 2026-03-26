@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { BATCH_OCR_INSTRUCTION, TRANSLATE_ONLY_SYSTEM_PROMPT } from '@ai-sedlacek/shared';
-import { parseOcrJson, parseOcrJsonBatch } from './parse.js';
-import { prepareImage } from './prepare-image.js';
-import type { ImageMediaType, ProcessingMode, StructuredOcrResult } from './types.js';
+import { parseOcrJson, parseOcrJsonBatch } from './parse';
+import { prepareImage } from './prepare-image';
+import type { ImageMediaType, ProcessingMode, StructuredOcrResult } from './types';
 
 const SYSTEM_PROMPT = `You are an expert in paleography and historical manuscripts. Transcribe the text from this manuscript. Use your knowledge of historical orthography to disambiguate unclear characters (e.g. long ſ looks like f — always transcribe it as s). Then translate the transcribed text fully into the modern standard form of the language the user writes in. Do not summarize — translate the complete text. Preserve all references and citations. Use square brackets to clarify archaic terms or add context a modern reader would need. Then add a brief contextual explanation and a glossary. Respond in the user's language.
 

@@ -1,6 +1,6 @@
 import sharp from 'sharp';
-import { detectMediaType } from './parse.js';
-import type { ImageMediaType } from './types.js';
+import { detectMediaType } from './parse';
+import type { ImageMediaType } from './types';
 
 export async function prepareImage(
   image: Buffer,
