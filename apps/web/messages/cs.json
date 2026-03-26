@@ -192,6 +192,7 @@
     "collapseContext": "Sbalit",
     "showFullContext": "Zobrazit celý kontext",
     "metadataTitle": "Název díla",
+    "metadataTitlePlaceholder": "např. Kronika česká",
     "metadataAuthor": "Autor",
     "metadataYearFrom": "Rok od",
     "metadataYearTo": "Rok do",

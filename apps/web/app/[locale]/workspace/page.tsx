@@ -1073,11 +1073,9 @@ function WorkspaceContent(): React.JSX.Element {
                     collectionId={selectedCollection.id}
                     metadata={{
                       title: selectedCollection.title,
-                      author: selectedCollection.author,
                       yearFrom: selectedCollection.yearFrom,
                       yearTo: selectedCollection.yearTo,
                       librarySignature: selectedCollection.librarySignature,
-                      abstract: selectedCollection.abstract,
                     }}
                     hasContext={!!selectedCollection.context}
                     onSaved={() => void loadCollections()}

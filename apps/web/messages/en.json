@@ -192,6 +192,7 @@
     "collapseContext": "Collapse",
     "showFullContext": "Show full context",
     "metadataTitle": "Work title",
+    "metadataTitlePlaceholder": "e.g. Chronica Boemorum",
     "metadataAuthor": "Author",
     "metadataYearFrom": "Year from",
     "metadataYearTo": "Year to",
