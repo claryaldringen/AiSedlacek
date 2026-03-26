@@ -379,6 +379,7 @@ function WorkspaceContent(): React.JSX.Element {
         const params = wsParam ? `${wsParam}&collection=${id}` : `collection=${id}`;
         router.push(`/workspace?${params}`);
       }
+      setPanelPage(null);
       setPanelResult(null);
     },
     [router, selectedWorkspaceId],
@@ -636,12 +637,24 @@ function WorkspaceContent(): React.JSX.Element {
     setSelected(new Set());
   }, [selected, handleDeletePage, setSelected]);
 
+  // ---- Update URL with page parameter ----
+  const setPageInUrl = useCallback((pageId: string | null): void => {
+    const params = new URLSearchParams(window.location.search);
+    if (pageId) {
+      params.set('page', pageId);
+    } else {
+      params.delete('page');
+    }
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  }, []);
+
   // ---- Page double-click (open panel for any status) ----
   const handlePageDoubleClick = useCallback(
     async (page: PageItem): Promise<void> => {
       setPanelPage(page);
       setPanelResult(null);
       setError(null);
+      setPageInUrl(page.id);
 
       if (page.document) {
         setPanelLoading(true);
@@ -734,8 +747,21 @@ function WorkspaceContent(): React.JSX.Element {
         }
       }
     },
-    [setError],
+    [setError, setPageInUrl],
   );
+
+  // ---- Restore panel from URL ?page=ID on initial load ----
+  const pageIdFromUrl = searchParams.get('page');
+  const restoredPageRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pageIdFromUrl || loadingPages || pages.length === 0) return;
+    if (restoredPageRef.current === pageIdFromUrl) return; // already restored
+    const page = pages.find((p) => p.id === pageIdFromUrl);
+    if (page) {
+      restoredPageRef.current = pageIdFromUrl;
+      void handlePageDoubleClick(page);
+    }
+  }, [pageIdFromUrl, pages, loadingPages, handlePageDoubleClick]);
 
   // ---- Keyboard shortcuts hook ----
   const { focusedItemId, setColumnsCount } = useWorkspaceKeyboard({
@@ -1573,6 +1599,7 @@ function WorkspaceContent(): React.JSX.Element {
           setPanelPage(null);
           setPanelResult(null);
           setPanelLoading(false);
+          setPageInUrl(null);
         }}
         onResultUpdate={(updated) => setPanelResult(updated)}
         onPageUpdate={(updated) => {
