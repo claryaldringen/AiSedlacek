@@ -1,7 +1,8 @@
 'use client';
 
 import { useLocale } from 'next-intl';
-import { useRouter, usePathname } from '@/i18n/navigation';
+import { usePathname as useNextPathname, useSearchParams } from 'next/navigation';
+import { useRouter } from '@/i18n/navigation';
 import { routing } from '@/i18n/routing';
 
 const LOCALES: Record<string, { flag: string; label: string }> = {
@@ -16,7 +17,8 @@ export default function LocaleSwitcher({
 }): React.JSX.Element {
   const locale = useLocale();
   const router = useRouter();
-  const pathname = usePathname();
+  const nextPathname = useNextPathname();
+  const searchParams = useSearchParams();
 
   const handleChange = async (newLocale: string): Promise<void> => {
     try {
@@ -28,7 +30,16 @@ export default function LocaleSwitcher({
     } catch {
       // Not logged in or error — just redirect, cookie set by PATCH response
     }
-    router.replace(pathname, { locale: newLocale });
+
+    // Strip locale prefix to get the raw pathname
+    const localePrefix = new RegExp(`^/(${routing.locales.join('|')})`);
+    const rawPath = nextPathname.replace(localePrefix, '') || '/';
+
+    // Preserve query parameters
+    const qs = searchParams.toString();
+    const fullPath = qs ? `${rawPath}?${qs}` : rawPath;
+
+    router.replace(fullPath, { locale: newLocale });
   };
 
   const selectClass =
