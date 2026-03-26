@@ -1181,7 +1181,6 @@ function WorkspaceContent(): React.JSX.Element {
                     {t('collectionContextTitle', { name: selectedCollection.name })}
                   </summary>
                   <div className="border-t border-slate-100 px-4 py-3">
-                    <p className="mb-3 text-sm text-slate-400">{t('contextInOtherLanguage')}</p>
                     <button
                       onClick={() => void translateContext(selectedCollection.id)}
                       disabled={translatingContext}
