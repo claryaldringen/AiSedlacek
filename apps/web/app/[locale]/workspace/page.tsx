@@ -1115,8 +1115,7 @@ function WorkspaceContent(): React.JSX.Element {
 
             {/* Kontext díla — 1/3 */}
             {selectedCollection.context &&
-            (!selectedCollection.contextLanguage ||
-              selectedCollection.contextLanguage === locale) ? (
+            (selectedCollection.contextLanguage ?? 'cs') === locale ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
@@ -1174,7 +1173,8 @@ function WorkspaceContent(): React.JSX.Element {
                   </div>
                 </details>
               </div>
-            ) : selectedCollection.context && selectedCollection.contextLanguage !== locale ? (
+            ) : selectedCollection.context &&
+              (selectedCollection.contextLanguage ?? 'cs') !== locale ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
