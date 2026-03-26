@@ -40,7 +40,7 @@ export default function LocaleSwitcher({
     <select
       value={locale}
       onChange={(e) => void handleChange(e.target.value)}
-      className={`cursor-pointer rounded-lg border px-2 py-1.5 font-serif text-xs font-medium outline-none transition-colors ${selectClass}`}
+      className={`cursor-pointer rounded-lg border px-2 py-1.5 text-xs font-medium outline-none transition-colors ${selectClass}`}
     >
       {routing.locales.map((l) => {
         const info = LOCALES[l];
