@@ -477,7 +477,9 @@
     "contextMenuRename": "Rename",
     "contextMenuSelectAll": "Select all",
     "contextMenuUpload": "Upload",
-    "collectionsHeading": "Collections"
+    "collectionsHeading": "Collections",
+    "emptyFolder": "This folder is empty.",
+    "emptyFolderHint": "Upload images using the \"Upload\" button above."
   },
   "fileList": {
     "statusDone": "Processed",

@@ -13,6 +13,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   let collections;
   if (workspaceId) {
+    // Ensure user's collections are synced to home workspace items
+    // (handles race condition where workspaces API hasn't finished syncing yet)
+    const ws = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { type: true, ownerId: true },
+    });
+    if (ws?.type === 'home' && ws.ownerId === userId) {
+      const userCollections = await prisma.collection.findMany({
+        where: { userId },
+        select: { id: true },
+      });
+      if (userCollections.length > 0) {
+        await prisma.workspaceItem.createMany({
+          data: userCollections.map((c) => ({ workspaceId, collectionId: c.id })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
     // Filter collections by workspace membership
     const items = await prisma.workspaceItem.findMany({
       where: { workspaceId, collectionId: { not: null } },

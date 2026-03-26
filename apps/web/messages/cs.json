@@ -477,7 +477,9 @@
     "contextMenuRename": "Přejmenovat",
     "contextMenuSelectAll": "Vybrat vše",
     "contextMenuUpload": "Nahrát",
-    "collectionsHeading": "Svazky"
+    "collectionsHeading": "Svazky",
+    "emptyFolder": "Tato složka je prázdná.",
+    "emptyFolderHint": "Nahrajte obrázky tlačítkem \"Nahrát\" výše."
   },
   "fileList": {
     "statusDone": "Zpracováno",
