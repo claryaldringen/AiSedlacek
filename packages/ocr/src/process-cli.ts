@@ -65,7 +65,6 @@ async function callCli(
   const tmpFiles: string[] = [];
   try {
     const args = [
-      '--bare',
       '--output-format',
       'json',
       '--allowedTools',
@@ -150,7 +149,8 @@ function spawnCli(args: string[], promptFile: string): Promise<string> {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`claude CLI exited with code ${code}: ${stderr.slice(0, 500)}`));
+        const detail = stderr.trim() || stdout.slice(0, 500);
+        reject(new Error(`claude CLI exited with code ${code}: ${detail}`));
       } else {
         resolve(stdout);
       }

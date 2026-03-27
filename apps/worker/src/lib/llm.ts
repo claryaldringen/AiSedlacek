@@ -5,11 +5,12 @@
  * This is useful for local testing without API credits.
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import { writeFile, unlink } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import { getAnthropicClient } from './anthropic';
-
-const execFileAsync = promisify(execFile);
 
 export interface LlmResponse {
   text: string;
@@ -62,6 +63,10 @@ async function createMessageApi(params: {
   };
 }
 
+/**
+ * Spawn `claude` CLI and pipe the prompt via a temp file to avoid ARG_MAX limits.
+ * System prompt uses --system-prompt-file for the same reason.
+ */
 async function createMessageCli(params: {
   model: string;
   maxTokens: number;
@@ -71,36 +76,92 @@ async function createMessageCli(params: {
   const userMessage = params.messages.filter((m) => m.role === 'user').pop();
   if (!userMessage) throw new Error('No user message provided');
 
-  const args = ['--bare', '-p', userMessage.content, '--output-format', 'json', '--max-turns', '1'];
+  const tmpFiles: string[] = [];
+  try {
+    const args = ['--output-format', 'json', '--max-turns', '1'];
 
-  if (params.system) {
-    args.push('--system-prompt', params.system);
+    // Write system prompt to file to avoid arg length issues
+    if (params.system) {
+      const sysFile = join(tmpdir(), `llm-sys-${randomUUID()}.txt`);
+      await writeFile(sysFile, params.system);
+      tmpFiles.push(sysFile);
+      args.push('--system-prompt-file', sysFile);
+    }
+
+    // Write user prompt to file and pipe via stdin
+    const promptFile = join(tmpdir(), `llm-prompt-${randomUUID()}.txt`);
+    await writeFile(promptFile, userMessage.content);
+    tmpFiles.push(promptFile);
+
+    console.log('[CLI] Calling claude CLI...');
+    const stdout = await spawnClaude(args, promptFile);
+
+    const parsed = JSON.parse(stdout) as {
+      result?: string;
+      cost_usd?: number;
+      duration_ms?: number;
+      num_turns?: number;
+    };
+
+    console.log('[CLI] Done:', {
+      cost_usd: parsed.cost_usd,
+      duration_ms: parsed.duration_ms,
+      num_turns: parsed.num_turns,
+    });
+
+    return {
+      text: parsed.result ?? '',
+      model: 'claude-cli',
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  } finally {
+    await Promise.all(tmpFiles.map((f) => unlink(f).catch(() => {})));
   }
+}
 
-  console.log('[CLI] Calling claude CLI...');
-  const { stdout } = await execFileAsync('claude', args, {
-    timeout: 300_000,
-    maxBuffer: 10 * 1024 * 1024,
-    env: { ...process.env },
+/**
+ * Spawn claude CLI, piping the prompt file content via stdin.
+ * Returns stdout. Rejects on non-zero exit or timeout.
+ */
+export function spawnClaude(args: string[], promptFile: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Use shell to pipe the prompt file: cat promptFile | claude args
+    const fullCmd = `cat "${promptFile}" | claude ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
+
+    const child = spawn('sh', ['-c', fullCmd], {
+      env: { ...process.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('claude CLI timed out after 5 minutes'));
+    }, 300_000);
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        const detail = stderr.trim() || stdout.slice(0, 500);
+        reject(new Error(`claude CLI exited with code ${code}: ${detail}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
-
-  const parsed = JSON.parse(stdout) as {
-    result?: string;
-    cost_usd?: number;
-    duration_ms?: number;
-    num_turns?: number;
-  };
-
-  console.log('[CLI] Done:', {
-    cost_usd: parsed.cost_usd,
-    duration_ms: parsed.duration_ms,
-    num_turns: parsed.num_turns,
-  });
-
-  return {
-    text: parsed.result ?? '',
-    model: 'claude-cli',
-    inputTokens: 0,
-    outputTokens: 0,
-  };
 }
