@@ -167,6 +167,14 @@ async function handleImport(
   const lastSegment = pathParts[pathParts.length - 1] ?? '';
   const ext = lastSegment.match(/\.[a-zA-Z0-9]+$/)?.[0] ?? '.jpg';
 
+  // IIIF Image API: {prefix}/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
+  // Detect by finding the region segment (full, square, or pixel coordinates)
+  const iiifRegionIdx = pathParts.findIndex(
+    (seg) => seg === 'full' || seg === 'square' || /^\d+,\d+,\d+,\d+$/.test(seg),
+  );
+  const iiifIdentifier =
+    iiifRegionIdx > 0 ? decodeURIComponent(pathParts[iiifRegionIdx - 1]!) : null;
+
   // Prefer the actual filename (last segment) if it contains a number
   const filenameHasNumber = /\d/.test(lastSegment) && /\.[a-z0-9]{2,4}$/i.test(lastSegment);
   const pageIdSegment = filenameHasNumber
@@ -183,6 +191,9 @@ async function handleImport(
   let urlFilename: string;
   if (cdFilename) {
     urlFilename = cdFilename;
+  } else if (iiifIdentifier) {
+    // Use IIIF identifier, stripping any original extension (e.g. .JP2)
+    urlFilename = iiifIdentifier.replace(/\.[^.]+$/, '') + ext;
   } else if (filenameHasNumber) {
     urlFilename = decodeURIComponent(lastSegment);
   } else if (pageIdSegment) {
