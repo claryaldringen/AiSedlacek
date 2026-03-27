@@ -136,5 +136,6 @@ export async function GET(): Promise<Response> {
     completedPages: runningJob.completedPages,
     currentStep: runningJob.currentStep,
     errors: runningJob.errors,
+    pageIds: runningJob.pageIds,
   });
 }
