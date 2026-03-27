@@ -1,8 +1,10 @@
 /**
  * CLI-based OCR processing using `claude` command.
  *
- * For local testing without API credits. Processes one image at a time
- * (no batch optimization) using Claude CLI with Read tool for image access.
+ * Pure transport adapter — uses the same prompts and message structure
+ * as the API version (process.ts), only changes how messages are delivered.
+ *
+ * For local testing without API credits.
  */
 
 import { execFile } from 'child_process';
@@ -11,27 +13,12 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-import { TRANSLATE_ONLY_SYSTEM_PROMPT } from '@ai-sedlacek/shared';
+import { TRANSLATE_ONLY_SYSTEM_PROMPT, BATCH_OCR_INSTRUCTION } from '@ai-sedlacek/shared';
 import { parseOcrJson } from './parse';
+import { SYSTEM_PROMPT } from './process';
 import type { ProcessingMode, StructuredOcrResult } from './types';
 
 const execFileAsync = promisify(execFile);
-
-const SYSTEM_PROMPT = `You are an expert in paleography and historical manuscripts. Transcribe the text from this manuscript. Use your knowledge of historical orthography to disambiguate unclear characters (e.g. long ſ looks like f — always transcribe it as s). Then translate the transcribed text fully into the modern standard form of the language the user writes in. Do not summarize — translate the complete text. Preserve all references and citations. Use square brackets to clarify archaic terms or add context a modern reader would need. Then add a brief contextual explanation and a glossary. Respond in the user's language.
-
-IMPORTANT: Return your response as valid JSON with this exact structure:
-{
-  "transcription": "the transcribed original text in markdown (preserve line breaks, use headings, bold for initials etc.)",
-  "detectedLanguage": "ISO language code of the original, e.g. cs-old, de-old, la",
-  "translation": "full translation in markdown (preserve structure, headings, line breaks matching the original)",
-  "translationLanguage": "ISO code of translation language, e.g. cs, en, de",
-  "context": "page-specific context only: identify biblical quotes, literary references, named persons, places, or events mentioned on THIS page. Do NOT repeat general information about the work (author, date, genre) — that is already known from the collection context. Focus on what helps the reader understand this specific page.",
-  "glossary": [
-    {"term": "term", "definition": "definition"}
-  ]
-}
-
-Use \\n for newlines inside JSON strings. Return ONLY the JSON object, no markdown fences, no extra text.`;
 
 const OCR_JSON_SCHEMA = JSON.stringify({
   type: 'object',
@@ -63,6 +50,80 @@ const OCR_JSON_SCHEMA = JSON.stringify({
   ],
 });
 
+/**
+ * Call claude CLI with given system prompt and user prompt.
+ * Image is passed as a temp file path — CLI reads it via the Read tool.
+ */
+async function callCli(
+  systemPrompt: string,
+  userPrompt: string,
+  imagePath: string,
+): Promise<{ result: StructuredOcrResult; rawResponse: string }> {
+  // Prepend image read instruction — this is the only CLI-specific part
+  const prompt = `First, read the image file at ${imagePath}. Then:\n\n${userPrompt}`;
+
+  const args = [
+    '--bare',
+    '-p',
+    prompt,
+    '--output-format',
+    'json',
+    '--json-schema',
+    OCR_JSON_SCHEMA,
+    '--system-prompt',
+    systemPrompt,
+    '--allowedTools',
+    'Read',
+    '--max-turns',
+    '3',
+  ];
+
+  console.log(`[CLI:OCR] Processing image...`);
+
+  const { stdout } = await execFileAsync('claude', args, {
+    timeout: 600_000,
+    maxBuffer: 10 * 1024 * 1024,
+    env: { ...process.env },
+  });
+
+  const parsed = JSON.parse(stdout) as {
+    result?: string;
+    structured_output?: StructuredOcrResult;
+    cost_usd?: number;
+    duration_ms?: number;
+  };
+
+  console.log('[CLI:OCR] Done:', {
+    cost_usd: parsed.cost_usd,
+    duration_ms: parsed.duration_ms,
+  });
+
+  let result: StructuredOcrResult;
+  if (parsed.structured_output) {
+    result = parsed.structured_output;
+  } else if (parsed.result) {
+    result = parseOcrJson(parsed.result);
+  } else {
+    throw new Error('CLI returned no result');
+  }
+
+  return { result, rawResponse: JSON.stringify(result) };
+}
+
+/**
+ * Save buffer to a temp file and return the path.
+ */
+async function saveTempImage(image: Buffer): Promise<string> {
+  const ext = detectExtension(image);
+  const tmpPath = join(tmpdir(), `ocr-${randomUUID()}.${ext}`);
+  await writeFile(tmpPath, image);
+  return tmpPath;
+}
+
+/**
+ * Single-image OCR via CLI. Same interface as processWithClaude().
+ * Uses the same system prompt and user message construction.
+ */
 export async function processWithClaudeCli(
   image: Buffer,
   userPrompt: string,
@@ -80,77 +141,28 @@ export async function processWithClaudeCli(
 }> {
   const startTime = Date.now();
   const estimated = estimatedOutputTokens ?? 1500;
-
-  // Save image to temp file so CLI can read it
-  const ext = detectExtension(image);
-  const tmpPath = join(tmpdir(), `ocr-${randomUUID()}.${ext}`);
-  await writeFile(tmpPath, image);
+  const tmpPath = await saveTempImage(image);
 
   try {
-    // Build prompt that instructs CLI to read the image
-    let prompt = `First, read the image file at ${tmpPath}. Then analyze the historical manuscript in the image.\n\n`;
-
+    // Build user prompt — same structure as process.ts
+    let fullPrompt = '';
     if (previousContext) {
-      prompt += `Context from previous manuscript pages:\n${previousContext}\n\n`;
+      fullPrompt += `Kontext z předchozích stránek rukopisu:\n${previousContext}\n\n`;
     }
+    fullPrompt += userPrompt;
 
-    prompt += userPrompt;
-
+    // Same system prompt selection as process.ts
     const systemPrompt = mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
-    const args = [
-      '--bare',
-      '-p',
-      prompt,
-      '--output-format',
-      'json',
-      '--json-schema',
-      OCR_JSON_SCHEMA,
-      '--system-prompt',
-      systemPrompt,
-      '--allowedTools',
-      'Read',
-      '--max-turns',
-      '3',
-    ];
-
     onProgress?.(0, estimated);
-    console.log(`[CLI:OCR] Processing image (${(image.length / 1024).toFixed(0)} KB)...`);
 
-    const { stdout } = await execFileAsync('claude', args, {
-      timeout: 600_000,
-      maxBuffer: 10 * 1024 * 1024,
-      env: { ...process.env },
-    });
-
-    const parsed = JSON.parse(stdout) as {
-      result?: string;
-      structured_output?: StructuredOcrResult;
-      cost_usd?: number;
-      duration_ms?: number;
-    };
-
-    console.log('[CLI:OCR] Done:', {
-      cost_usd: parsed.cost_usd,
-      duration_ms: parsed.duration_ms,
-    });
-
-    // structured_output is set when --json-schema is used
-    let result: StructuredOcrResult;
-    if (parsed.structured_output) {
-      result = parsed.structured_output;
-    } else if (parsed.result) {
-      // Fallback: parse the text result
-      result = parseOcrJson(parsed.result);
-    } else {
-      throw new Error('CLI returned no result');
-    }
+    const { result, rawResponse } = await callCli(systemPrompt, fullPrompt, tmpPath);
 
     onProgress?.(estimated, estimated);
 
     return {
       result,
-      rawResponse: JSON.stringify(result),
+      rawResponse,
       processingTimeMs: Date.now() - startTime,
       model: 'claude-cli',
       inputTokens: 0,
@@ -162,8 +174,8 @@ export async function processWithClaudeCli(
 }
 
 /**
- * CLI batch processing — processes images one at a time in sequence.
- * No actual batching (unlike the API version), but maintains the same interface.
+ * Batch OCR via CLI — processes images one at a time (sequential).
+ * Same interface as processWithClaudeBatch(). Uses same prompt construction.
  */
 export async function processWithClaudeBatchCli(
   images: { buffer: Buffer; pageId: string; index: number }[],
@@ -190,25 +202,32 @@ export async function processWithClaudeBatchCli(
   let completedTokens = 0;
 
   for (const img of images) {
-    // Include collection context in the prompt for each image
-    let fullPrompt = userPrompt;
-    if (options?.collectionContext) {
-      fullPrompt = `Context of the work:\n${options.collectionContext}\n\n---\n\n${userPrompt}`;
+    // Build user prompt — same text blocks as process.ts batch version
+    let fullPrompt = '';
+    if (options?.previousContext) {
+      fullPrompt += `Kontext z předchozích stránek rukopisu:\n${options.previousContext}\n\n`;
     }
+    if (options?.collectionContext) {
+      fullPrompt += `Kontext díla (použij pro lepší porozumění dokumentu):\n${options.collectionContext}\n\n`;
+    }
+    fullPrompt += userPrompt;
 
-    const { result } = await processWithClaudeCli(
-      img.buffer,
-      fullPrompt,
-      (current) => {
-        options?.onProgress?.(completedTokens + current, totalEstimated);
-      },
-      perImageEstimated,
-      options?.previousContext,
-      options?.mode,
-    );
+    // Same system prompt as batch API version (includes BATCH_OCR_INSTRUCTION
+    // for consistency, though with single image it's not strictly needed)
+    const systemPrompt =
+      (options?.mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) +
+      '\n\n' +
+      BATCH_OCR_INSTRUCTION;
 
-    results.push({ index: img.index, result });
-    completedTokens += perImageEstimated;
+    const tmpPath = await saveTempImage(img.buffer);
+    try {
+      const { result } = await callCli(systemPrompt, fullPrompt, tmpPath);
+      results.push({ index: img.index, result });
+      completedTokens += perImageEstimated;
+      options?.onProgress?.(completedTokens, totalEstimated);
+    } finally {
+      await unlink(tmpPath).catch(() => {});
+    }
   }
 
   return {
