@@ -78,7 +78,8 @@ async function createMessageCli(params: {
 
   const tmpFiles: string[] = [];
   try {
-    const args = ['--output-format', 'json', '--max-turns', '1'];
+    // CLAUDE_CODE_SIMPLE=1 in env skips hooks/CLAUDE.md/MCP but keeps OAuth
+    const args = ['--output-format', 'json', '--max-turns', '2'];
 
     // Write system prompt to file to avoid arg length issues
     if (params.system) {
@@ -130,7 +131,7 @@ export function spawnClaude(args: string[], promptFile: string): Promise<string>
     const fullCmd = `cat "${promptFile}" | claude ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
 
     const child = spawn('sh', ['-c', fullCmd], {
-      env: { ...process.env },
+      env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

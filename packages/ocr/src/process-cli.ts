@@ -64,6 +64,7 @@ async function callCli(
 
   const tmpFiles: string[] = [];
   try {
+    // CLAUDE_CODE_SIMPLE=1 in env skips hooks/CLAUDE.md/MCP but keeps OAuth
     // --max-turns 5: Read tool for image (1-2 turns) + structured output via tool_use (1 turn) + buffer
     const args = [
       '--output-format',
@@ -128,7 +129,7 @@ function spawnCli(args: string[], promptFile: string): Promise<string> {
     const fullCmd = `cat "${promptFile}" | claude ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
 
     const child = spawn('sh', ['-c', fullCmd], {
-      env: { ...process.env },
+      env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
