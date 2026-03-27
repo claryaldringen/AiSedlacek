@@ -2,7 +2,7 @@
  * Worker handler for fixing document-level contexts against collection context.
  */
 
-import { getAnthropicClient } from '../lib/anthropic';
+import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
@@ -56,7 +56,6 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
     },
   });
 
-  const client = getAnthropicClient();
   let completed = 0;
   const errors: string[] = [];
 
@@ -69,9 +68,9 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
     });
 
     try {
-      const response = await client.messages.create({
+      const response = await createMessage({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        maxTokens: 2048,
         messages: [
           {
             role: 'user',
@@ -99,7 +98,7 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         ],
       });
 
-      const newContext = response.content[0]?.type === 'text' ? response.content[0].text : '';
+      const newContext = response.text;
 
       if (newContext && newContext !== doc.context) {
         await createVersion(doc.id, 'context', doc.context, 'ai_regenerate', response.model);
@@ -112,8 +111,8 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       // Deduct tokens
       await deductTokensIfSufficient(
         userId,
-        response.usage.input_tokens,
-        response.usage.output_tokens,
+        response.inputTokens,
+        response.outputTokens,
         `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
         `fix-context:${doc.id}:${Date.now()}`,
       ).catch((err) => {

@@ -5,11 +5,11 @@
  * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
-import { getAnthropicClient } from '../lib/anthropic';
 import { LANGUAGE_NAMES } from '../lib/languages';
+import { createMessage, isCliMode } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { processWithClaudeBatch } from '@ai-sedlacek/ocr';
+import { processWithClaudeBatch, processWithClaudeBatchCli } from '@ai-sedlacek/ocr';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
@@ -336,8 +336,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const estimatedTotal = avgOutputPerPage * batch.length;
     let lastProgressUpdate = 0;
 
+    const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
     const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
-      await processWithClaudeBatch(images, userPrompt, {
+      await processBatch(images, userPrompt, {
         collectionContext: batchCollectionContext ?? undefined,
         previousContext,
         estimatedOutputTokens: estimatedTotal,
@@ -551,15 +552,14 @@ ${glossaryText || '(empty)'}
 
 Return ONLY the JSON object, no markdown fences, no extra text.`;
 
-  const client = getAnthropicClient();
-  const response = await client.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+    maxTokens: 8192,
     temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const text = response.text;
 
   let parsed: {
     translation: string;
@@ -581,8 +581,8 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
       context: parsed.context || null,
       glossaryJson: parsed.glossary?.length > 0 ? JSON.stringify(parsed.glossary) : null,
       model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
     },
     create: {
       documentId: doc.id,
@@ -591,16 +591,16 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
       context: parsed.context || null,
       glossaryJson: parsed.glossary?.length > 0 ? JSON.stringify(parsed.glossary) : null,
       model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
     },
   });
 
   // Deduct tokens
   await deductTokensIfSufficient(
     userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
+    response.inputTokens,
+    response.outputTokens,
     `Překlad dokumentu ${doc.id}${collectionLabel}`,
     `translate-doc-${doc.id}-${targetLanguage}-${Date.now()}`,
   ).catch(() => {});

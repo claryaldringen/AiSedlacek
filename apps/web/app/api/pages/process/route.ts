@@ -113,9 +113,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
 // ── GET: Check for running job (for reconnect support) ───────
 
-export async function GET(request: NextRequest): Promise<Response> {
-  const t = await getApiTranslations(request, 'api');
-
+export async function GET(): Promise<Response> {
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;

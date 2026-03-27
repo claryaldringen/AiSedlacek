@@ -2,7 +2,7 @@
  * Worker handler for translating collection context to another language.
  */
 
-import { getAnthropicClient } from '../lib/anthropic';
+import { createMessage } from '../lib/llm';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
@@ -37,10 +37,9 @@ export async function handleTranslateContext(
     LANGUAGE_NAMES[collection.contextLanguage ?? 'cs'] ?? collection.contextLanguage ?? 'Czech';
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
-  const client = getAnthropicClient();
-  const response = await client.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    maxTokens: 4096,
     messages: [
       {
         role: 'user',
@@ -51,7 +50,7 @@ ${collection.context}`,
     ],
   });
 
-  const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const context = response.text;
 
   await prisma.collection.update({
     where: { id: collectionId },
@@ -61,8 +60,8 @@ ${collection.context}`,
   // Deduct tokens
   await deductTokensIfSufficient(
     userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
+    response.inputTokens,
+    response.outputTokens,
     `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
     `translate-context:${collectionId}:${Date.now()}`,
   ).catch((err) => {

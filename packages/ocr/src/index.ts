@@ -2,3 +2,4 @@ export type { StructuredOcrResult, ProcessingMode, ImageMediaType } from './type
 export { detectMediaType, parseOcrJson, parseOcrJsonBatch } from './parse';
 export { prepareImage } from './prepare-image';
 export { processWithClaude, processWithClaudeBatch } from './process';
+export { processWithClaudeCli, processWithClaudeBatchCli } from './process-cli';

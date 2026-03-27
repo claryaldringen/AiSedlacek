@@ -2,7 +2,7 @@
  * Worker handler for generating collection context from transcriptions.
  */
 
-import { getAnthropicClient } from '../lib/anthropic';
+import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 
@@ -90,14 +90,13 @@ Přepisy stránek:
 ${concatenated}`;
 
   // Call Claude Sonnet
-  const client = getAnthropicClient();
-  const response = await client.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    maxTokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const context = response.text;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -118,9 +117,9 @@ ${concatenated}`;
   } | null = null;
 
   try {
-    const metadataResponse = await client.messages.create({
+    const metadataResponse = await createMessage({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      maxTokens: 1024,
       messages: [
         {
           role: 'user',
@@ -142,8 +141,7 @@ ${context}`,
       ],
     });
 
-    const metadataText =
-      metadataResponse.content[0]?.type === 'text' ? metadataResponse.content[0].text : '';
+    const metadataText = metadataResponse.text;
 
     if (metadataText) {
       const parsed = JSON.parse(metadataText) as Record<string, unknown>;
@@ -161,8 +159,8 @@ ${context}`,
     // Deduct tokens for metadata call too
     await deductTokensIfSufficient(
       userId,
-      metadataResponse.usage.input_tokens,
-      metadataResponse.usage.output_tokens,
+      metadataResponse.inputTokens,
+      metadataResponse.outputTokens,
       `Metadata kontextu svazku ${collection.name}`,
       `generate-context-meta:${collectionId}:${Date.now()}`,
     ).catch((err) => {
@@ -197,8 +195,8 @@ ${context}`,
   // Deduct tokens for main context call
   await deductTokensIfSufficient(
     userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
+    response.inputTokens,
+    response.outputTokens,
     `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
     `generate-context:${collectionId}:${Date.now()}`,
   ).catch((err) => {

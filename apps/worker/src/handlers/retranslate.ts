@@ -2,7 +2,7 @@
  * Worker handler for retranslation jobs.
  */
 
-import { getAnthropicClient } from '../lib/anthropic';
+import { createMessage } from '../lib/llm';
 import { LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
@@ -62,15 +62,14 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
     prompt = `Přelož tento historický přepis do moderní ${LANGUAGE_NAMES_CS_GENITIVE[targetLang] ?? targetLang}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`;
   }
 
-  const client = getAnthropicClient();
-  const response = await client.messages.create({
+  const response = await createMessage({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+    maxTokens: 8192,
     temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  const translatedText = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const translatedText = response.text;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -80,8 +79,8 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
   // Atomically check balance and deduct tokens
   const deductResult = await deductTokensIfSufficient(
     userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
+    response.inputTokens,
+    response.outputTokens,
     `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
     `retranslate-${documentId}-${Date.now()}`,
   );
@@ -108,16 +107,16 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
     update: {
       text: translatedText,
       model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
     },
     create: {
       documentId,
       language: targetLang,
       text: translatedText,
       model: response.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
     },
   });
 
