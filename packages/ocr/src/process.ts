@@ -8,9 +8,9 @@ export const SYSTEM_PROMPT = `You are an expert in paleography and historical ma
 
 IMPORTANT: Return your response as valid JSON with this exact structure:
 {
-  "transcription": "the transcribed original text in markdown (preserve line breaks, use headings, bold for initials etc.)",
+  "transcription": "the transcribed original text in markdown (use headings, bold for initials etc.). Rejoin words broken by line-end hyphens (e.g. 'prá-\\nvem' → 'právem'). Use paragraph breaks, not line-for-line breaks from the source layout.",
   "detectedLanguage": "ISO language code of the original, e.g. cs-old, de-old, la",
-  "translation": "full translation in markdown (preserve structure, headings, line breaks matching the original)",
+  "translation": "full translation in markdown (preserve structure and headings, use paragraph breaks, not line-for-line breaks)",
   "translationLanguage": "ISO code of translation language, e.g. cs, en, de",
   "context": "page-specific context only: identify biblical quotes, literary references, named persons, places, or events mentioned on THIS page. Do NOT repeat general information about the work (author, date, genre) — that is already known from the collection context. Focus on what helps the reader understand this specific page.",
   "glossary": [
