@@ -64,7 +64,6 @@ async function callCli(
 
   const tmpFiles: string[] = [];
   try {
-    // CLAUDE_CODE_SIMPLE=1 in env skips hooks/CLAUDE.md/MCP but keeps OAuth
     // --max-turns 5: Read tool for image (1-2 turns) + structured output via tool_use (1 turn) + buffer
     const args = [
       '--output-format',
@@ -107,7 +106,7 @@ async function callCli(
 
     let result: StructuredOcrResult;
     if (parsed.structured_output) {
-      result = parsed.structured_output;
+      result = unescapeNewlines(parsed.structured_output);
     } else if (parsed.result) {
       result = parseOcrJson(parsed.result);
     } else {
@@ -128,8 +127,10 @@ function spawnCli(args: string[], promptFile: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const fullCmd = `cat "${promptFile}" | claude ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
 
+    // Run from /tmp so CLI doesn't discover project's CLAUDE.md
     const child = spawn('sh', ['-c', fullCmd], {
-      env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' },
+      env: { ...process.env },
+      cwd: tmpdir(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -292,6 +293,20 @@ export async function processWithClaudeBatchCli(
     model: 'claude-cli',
     inputTokens: 0,
     outputTokens: 0,
+  };
+}
+
+/** CLI structured_output has literal \n in strings — convert to real newlines */
+function unescapeNewlines(obj: StructuredOcrResult): StructuredOcrResult {
+  return {
+    ...obj,
+    transcription: obj.transcription?.replace(/\\n/g, '\n'),
+    translation: obj.translation?.replace(/\\n/g, '\n'),
+    context: obj.context?.replace(/\\n/g, '\n'),
+    glossary: obj.glossary?.map((g) => ({
+      term: g.term?.replace(/\\n/g, '\n'),
+      definition: g.definition?.replace(/\\n/g, '\n'),
+    })),
   };
 }
 

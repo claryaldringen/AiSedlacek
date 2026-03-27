@@ -78,7 +78,6 @@ async function createMessageCli(params: {
 
   const tmpFiles: string[] = [];
   try {
-    // CLAUDE_CODE_SIMPLE=1 in env skips hooks/CLAUDE.md/MCP but keeps OAuth
     const args = ['--output-format', 'json', '--max-turns', '2'];
 
     // Write system prompt to file to avoid arg length issues
@@ -130,8 +129,10 @@ export function spawnClaude(args: string[], promptFile: string): Promise<string>
     // Use shell to pipe the prompt file: cat promptFile | claude args
     const fullCmd = `cat "${promptFile}" | claude ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
 
+    // Run from /tmp so CLI doesn't discover project's CLAUDE.md
     const child = spawn('sh', ['-c', fullCmd], {
-      env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' },
+      env: { ...process.env },
+      cwd: tmpdir(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
