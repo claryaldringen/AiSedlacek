@@ -518,6 +518,7 @@
     "urlLabel": "URL obrázku",
     "urlPlaceholder": "https://… (přímý odkaz na obrázek)",
     "searchingPages": "Hledám další stránky…",
+    "stopDiscovery": "Zastavit",
     "foundPages": "Nalezené stránky ({count})",
     "selectAll": "Vše",
     "selectNone": "Nic",

@@ -518,6 +518,7 @@
     "urlLabel": "Image URL",
     "urlPlaceholder": "https://… (direct link to image)",
     "searchingPages": "Looking for more pages…",
+    "stopDiscovery": "Stop",
     "foundPages": "Found pages ({count})",
     "selectAll": "All",
     "selectNone": "None",

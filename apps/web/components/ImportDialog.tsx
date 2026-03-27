@@ -599,6 +599,12 @@ export function ImportDialog({
                     />
                   </svg>
                   {t('searchingPages')}
+                  <button
+                    onClick={() => discoverAbortRef.current?.abort()}
+                    className="ml-2 rounded px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700"
+                  >
+                    {t('stopDiscovery')}
+                  </button>
                 </div>
               )}
 
