@@ -62,6 +62,8 @@ interface FileGridProps {
   onToggleBlank?: (pageIds: string[], blank: boolean) => void;
   /** Open share dialog for a page or collection */
   onShareItem?: (id: string, type: 'page' | 'collection') => void;
+  /** Reorder pages via drag and drop */
+  onReorderPages?: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
 }
 
 function cleanFilename(raw: string): string {
@@ -335,6 +337,10 @@ interface PageCardProps {
   onPageDoubleClick: (page: PageItem) => void;
   onContextMenu: (e: React.MouseEvent, type: 'page', item: PageItem) => void;
   onDragStart: (e: React.DragEvent<HTMLDivElement>, page: PageItem, isSelected: boolean) => void;
+  onDragOver: (e: React.DragEvent, pageId: string) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent, pageId: string) => void;
+  dropIndicatorPosition: 'before' | 'after' | null;
   onTouchStart: (id: string) => void;
   onTouchEnd: () => void;
   onTouchMove: () => void;
@@ -351,6 +357,10 @@ const PageCard = memo(function PageCard({
   onPageDoubleClick,
   onContextMenu,
   onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  dropIndicatorPosition,
   onTouchStart,
   onTouchEnd,
   onTouchMove,
@@ -362,6 +372,9 @@ const PageCard = memo(function PageCard({
       ref={(el) => registerRef(page.id, el)}
       draggable
       onDragStart={(e) => onDragStart(e, page, isSelected)}
+      onDragOver={(e) => onDragOver(e, page.id)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(e, page.id)}
       onClick={(e) => {
         e.stopPropagation();
         if (selectionModeTouch) {
@@ -391,6 +404,14 @@ const PageCard = memo(function PageCard({
       ].join(' ')}
       style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
     >
+      {/* Drop indicator */}
+      {dropIndicatorPosition === 'before' && (
+        <div className="absolute -left-[3px] bottom-0 top-0 z-10 w-[3px] rounded-full bg-blue-500" />
+      )}
+      {dropIndicatorPosition === 'after' && (
+        <div className="absolute -right-[3px] bottom-0 top-0 z-10 w-[3px] rounded-full bg-blue-500" />
+      )}
+
       {/* Thumbnail */}
       <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-slate-100">
         <img
@@ -546,9 +567,14 @@ export function FileGrid({
   onColumnsChange,
   onToggleBlank,
   onShareItem,
+  onReorderPages,
 }: FileGridProps): React.JSX.Element {
   const t = useTranslations('fileGrid');
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{
+    pageId: string;
+    position: 'before' | 'after';
+  } | null>(null);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -940,6 +966,46 @@ export function FileGrid({
     };
   }, []);
 
+  // ---- Reorder DnD handlers ----
+  const handlePageReorderDragOver = useCallback(
+    (e: React.DragEvent, targetPageId: string): void => {
+      if (!e.dataTransfer.types.includes('application/x-page-ids')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const position: 'before' | 'after' = e.clientX < midX ? 'before' : 'after';
+      setDropIndicator((prev) =>
+        prev?.pageId === targetPageId && prev.position === position
+          ? prev
+          : { pageId: targetPageId, position },
+      );
+    },
+    [],
+  );
+
+  const handlePageReorderDragLeave = useCallback((): void => {
+    setDropIndicator(null);
+  }, []);
+
+  const handlePageReorderDrop = useCallback(
+    (e: React.DragEvent, targetPageId: string): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDropIndicator(null);
+      const raw = e.dataTransfer.getData('application/x-page-ids');
+      if (!raw) return;
+      const ids = JSON.parse(raw) as string[];
+      if (ids.length === 0) return;
+      if (ids.length === 1 && ids[0] === targetPageId) return;
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const position: 'before' | 'after' = e.clientX < midX ? 'before' : 'after';
+      onReorderPages?.(ids, targetPageId, position);
+    },
+    [onReorderPages],
+  );
+
   // Stable drag handler for PageCard
   const handlePageDragStart = useCallback(
     (e: React.DragEvent<HTMLDivElement>, page: PageItem, isPageSelected: boolean): void => {
@@ -949,6 +1015,11 @@ export function FileGrid({
       const ids = isPageSelected ? Array.from(selected) : [page.id];
       e.dataTransfer.setData('application/x-page-ids', JSON.stringify(ids));
       e.dataTransfer.effectAllowed = 'move';
+      const onDragEnd = (): void => {
+        setDropIndicator(null);
+        e.currentTarget.removeEventListener('dragend', onDragEnd);
+      };
+      e.currentTarget.addEventListener('dragend', onDragEnd);
       if (ids.length > 1) {
         const ghost = document.createElement('div');
         ghost.textContent = `${ids.length.toString()} stranek`;
@@ -1113,6 +1184,12 @@ export function FileGrid({
                 onPageDoubleClick={onPageDoubleClick}
                 onContextMenu={handleContextMenu}
                 onDragStart={handlePageDragStart}
+                onDragOver={handlePageReorderDragOver}
+                onDragLeave={handlePageReorderDragLeave}
+                onDrop={handlePageReorderDrop}
+                dropIndicatorPosition={
+                  dropIndicator?.pageId === page.id ? dropIndicator.position : null
+                }
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
                 onTouchMove={handleTouchMove}

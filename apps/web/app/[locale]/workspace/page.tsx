@@ -592,6 +592,47 @@ function WorkspaceContent(): React.JSX.Element {
     [selectedCollectionId, loadCollections, loadPages],
   );
 
+  // ---- Reorder pages via DnD ----
+  const handleReorderPages = useCallback(
+    async (draggedIds: string[], targetPageId: string, position: 'before' | 'after') => {
+      const draggedSet = new Set(draggedIds);
+      const remaining = pages.filter((p) => !draggedSet.has(p.id));
+      const dragged = pages.filter((p) => draggedSet.has(p.id));
+      const targetIndex = remaining.findIndex((p) => p.id === targetPageId);
+      if (targetIndex === -1) return;
+
+      const insertAt = position === 'before' ? targetIndex : targetIndex + 1;
+      const reordered = [
+        ...remaining.slice(0, insertAt),
+        ...dragged,
+        ...remaining.slice(insertAt),
+      ];
+
+      // Optimistic update
+      const withOrder = reordered.map((p, i) => ({ ...p, order: i }));
+      setPages(withOrder);
+
+      // Persist only changed pages
+      const orderMap = new Map(pages.map((p) => [p.id, p.order]));
+      const changed = withOrder.filter((p) => orderMap.get(p.id) !== p.order);
+
+      try {
+        await Promise.all(
+          changed.map((p) =>
+            apiFetch(`/api/pages/${p.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ order: p.order }),
+            }),
+          ),
+        );
+      } catch {
+        void loadPages(selectedCollectionId);
+      }
+    },
+    [pages, selectedCollectionId, loadPages],
+  );
+
   // ---- Delete ----
   const handleDeletePage = useCallback(
     async (pageId: string): Promise<void> => {
@@ -1315,6 +1356,7 @@ function WorkspaceContent(): React.JSX.Element {
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
             onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
+            onReorderPages={(ids, targetId, pos) => void handleReorderPages(ids, targetId, pos)}
             onSetSelected={setSelected}
             onSelectAll={handleSelectAll}
             onDeselectAll={handleDeselectAll}
