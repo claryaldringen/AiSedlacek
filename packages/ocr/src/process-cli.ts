@@ -64,13 +64,14 @@ async function callCli(
 
   const tmpFiles: string[] = [];
   try {
+    // --max-turns 5: Read tool for image (1-2 turns) + structured output via tool_use (1 turn) + buffer
     const args = [
       '--output-format',
       'json',
       '--allowedTools',
       'Read',
       '--max-turns',
-      '3',
+      '5',
     ];
 
     // Write system prompt to temp file
