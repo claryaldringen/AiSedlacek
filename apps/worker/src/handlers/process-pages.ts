@@ -207,12 +207,47 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         );
       }
 
+      // Check if copied document has translation in target language
+      const hasTargetTranslation = existingByHash.translations.some(
+        (t: { language: string }) => t.language === language,
+      );
+
+      if (!hasTargetTranslation) {
+        const sourceTranslation = existingByHash.translations[0] as
+          | { language: string; text: string }
+          | undefined;
+        if (sourceTranslation) {
+          try {
+            await translateExistingDocument(
+              jobId,
+              userId,
+              {
+                id: copiedDoc.id,
+                context: existingByHash.context,
+                glossary: existingByHash.glossary,
+              },
+              sourceTranslation,
+              language,
+              collectionLabel,
+            );
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Chyba překladu';
+            errors.push(msg);
+          }
+        }
+      }
+
       await prisma.page.update({
         where: { id: pageId },
         data: { status: 'done', errorMessage: null },
       });
 
       skippedCount.deduped++;
+      completed++;
+      await prisma.processingJob.update({
+        where: { id: jobId },
+        data: { completedPages: completed },
+      });
       continue;
     }
 
