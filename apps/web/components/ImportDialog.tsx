@@ -63,12 +63,12 @@ export function ImportDialog({
   const [discovered, setDiscovered] = useState<DiscoveredImage[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isImportingDiscovered, setIsImportingDiscovered] = useState(false);
-  const [hasMoreForward, setHasMoreForward] = useState(false);
-  const [hasMoreBackward, setHasMoreBackward] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [forwardOffset, setForwardOffset] = useState(0);
   const [backwardOffset, setBackwardOffset] = useState(0);
-  const [pageLimit, setPageLimit] = useState(20);
+  const [forwardExhausted, setForwardExhausted] = useState(false);
+  const [backwardExhausted, setBackwardExhausted] = useState(false);
+  const [urlValidated, setUrlValidated] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -79,11 +79,12 @@ export function ImportDialog({
       setUrlError(null);
       setUrlSuccess(null);
       setDiscovered([]);
-      setHasMoreForward(false);
-      setHasMoreBackward(false);
       setIsLoadingMore(false);
       setForwardOffset(0);
       setBackwardOffset(0);
+      setForwardExhausted(false);
+      setBackwardExhausted(false);
+      setUrlValidated(false);
     }
   }, [isOpen]);
 
@@ -211,35 +212,24 @@ export function ImportDialog({
 
   const discoverAbortRef = useRef<AbortController | null>(null);
 
-  const pageLimitRef = useRef(pageLimit);
-  pageLimitRef.current = pageLimit;
-
-  const discoverRelated = useCallback(
-    async (baseUrl: string, direction?: 'forward' | 'backward', offset?: number) => {
-      // Abort any previous discovery
+  const discoverPages = useCallback(
+    async (baseUrl: string, direction: 'forward' | 'backward', offset: number, limit: number) => {
       discoverAbortRef.current?.abort();
       const abortController = new AbortController();
       discoverAbortRef.current = abortController;
 
-      if (direction) {
-        setIsLoadingMore(true);
-        if (direction === 'forward') setHasMoreForward(false);
-        else setHasMoreBackward(false);
-      } else {
-        setIsDiscovering(true);
-        setHasMoreForward(false);
-        setHasMoreBackward(false);
-        setForwardOffset(0);
-        setBackwardOffset(0);
-      }
+      setIsDiscovering(true);
+      setIsLoadingMore(true);
+      let foundCount = 0;
+
       try {
         const res = await apiFetch('/api/pages/discover-urls', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             url: baseUrl,
-            direction: direction ?? 'both',
-            limit: pageLimitRef.current,
+            direction,
+            limit,
             ...(offset ? { offset } : {}),
           }),
           signal: abortController.signal,
@@ -249,7 +239,6 @@ export function ImportDialog({
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        const prefetchBatch: string[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
@@ -274,20 +263,14 @@ export function ImportDialog({
 
             if (data.type === 'source' && data.label && data.thumbnailUrl) {
               setDiscovered((prev) =>
-                prev.map((d, i) =>
-                  i === 0 ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! } : d,
+                prev.map((d) =>
+                  d.url === baseUrl
+                    ? { ...d, label: data.label!, thumbnailUrl: data.thumbnailUrl! }
+                    : d,
                 ),
               );
             } else if (data.type === 'found' && data.url && data.label && data.thumbnailUrl) {
-              prefetchBatch.push(data.url);
-              // Trigger prefetch every 10 URLs
-              if (prefetchBatch.length >= 10) {
-                void apiFetch('/api/pages/prefetch', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ urls: prefetchBatch.splice(0) }),
-                });
-              }
+              foundCount++;
               setDiscovered((prev) => {
                 if (prev.some((d) => d.url === data.url)) return prev;
                 return [
@@ -302,29 +285,27 @@ export function ImportDialog({
                 ];
               });
             } else if (data.type === 'has_more') {
-              if (!direction || direction === 'forward') {
-                setHasMoreForward(data.forward ?? false);
-                if (data.forwardTotal != null) setForwardOffset(data.forwardTotal);
+              if (direction === 'forward' && data.forwardTotal != null) {
+                setForwardOffset(data.forwardTotal);
               }
-              if (!direction || direction === 'backward') {
-                setHasMoreBackward(data.backward ?? false);
-                if (data.backwardTotal != null) setBackwardOffset(data.backwardTotal);
+              if (direction === 'backward' && data.backwardTotal != null) {
+                setBackwardOffset(data.backwardTotal);
               }
             }
           }
         }
-        // Flush remaining prefetch batch
-        if (prefetchBatch.length > 0) {
-          void apiFetch('/api/pages/prefetch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls: prefetchBatch.splice(0) }),
-          });
-        }
       } catch (err) {
         if ((err as Error).name === 'AbortError') return;
-        // Discovery is best-effort
       } finally {
+        // If we found fewer than requested, there are no more pages in this direction
+        if (foundCount < limit) {
+          if (direction === 'forward') setForwardExhausted(true);
+          else setBackwardExhausted(true);
+        } else {
+          // Advance offset for next click
+          if (direction === 'forward') setForwardOffset((prev) => prev + foundCount);
+          else setBackwardOffset((prev) => prev + foundCount);
+        }
         setIsDiscovering(false);
         setIsLoadingMore(false);
       }
@@ -332,13 +313,16 @@ export function ImportDialog({
     [],
   );
 
-  // Trigger discovery as soon as URL is entered (debounced)
-  const discoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Validate URL and show preview (no auto-discovery)
   useEffect(() => {
-    if (discoverTimeoutRef.current) clearTimeout(discoverTimeoutRef.current);
-    discoverAbortRef.current?.abort();
     setDiscovered([]);
-    setIsDiscovering(false);
+    setUrlValidated(false);
+    setForwardOffset(0);
+    setBackwardOffset(0);
+    setForwardExhausted(false);
+    setBackwardExhausted(false);
+    discoverAbortRef.current?.abort();
+
     const url = urlInput.trim();
     if (!url) return;
     try {
@@ -346,7 +330,8 @@ export function ImportDialog({
     } catch {
       return;
     }
-    // Extract a reasonable label — for query-param URLs use the numeric value
+
+    // Extract a reasonable label
     let enteredFilename: string;
     try {
       const parsed = new URL(url);
@@ -362,17 +347,12 @@ export function ImportDialog({
     } catch {
       enteredFilename = decodeURIComponent(url.split('/').pop() ?? 'unknown');
     }
+
     setDiscovered([
       { url, label: enteredFilename, thumbnailUrl: url, selected: true, state: 'pending' },
     ]);
-    discoverTimeoutRef.current = setTimeout(() => {
-      void discoverRelated(url);
-    }, 500);
-    return () => {
-      if (discoverTimeoutRef.current) clearTimeout(discoverTimeoutRef.current);
-      discoverAbortRef.current?.abort();
-    };
-  }, [urlInput, discoverRelated]);
+    setUrlValidated(true);
+  }, [urlInput]);
 
   const handleImportDiscovered = useCallback(async () => {
     const toImport = discovered.filter((d) => d.selected && d.state === 'pending');
@@ -437,7 +417,7 @@ export function ImportDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
+      <div className="w-full max-w-4xl rounded-xl bg-white shadow-2xl">
         {/* Header with tabs */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
           <div className="flex items-center gap-4">
@@ -580,223 +560,218 @@ export function ImportDialog({
                 {urlSuccess && <p className="text-sm text-green-600">{urlSuccess}</p>}
               </div>
 
-              {/* Discovered related pages */}
-              {isDiscovering && (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  {t('searchingPages')}
-                  <button
-                    onClick={() => discoverAbortRef.current?.abort()}
-                    className="ml-2 rounded px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700"
-                  >
-                    {t('stopDiscovery')}
-                  </button>
-                </div>
-              )}
-
-              {discovered.length > 0 && (
+              {/* Discovery buttons + discovered pages */}
+              {urlValidated && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-slate-700">
-                      {t('foundPages', { count: discovered.length })}
-                    </p>
-                    <div className="flex gap-2">
+                  {/* Discovery buttons */}
+                  <div className="flex items-center justify-center gap-2">
+                    {[100, 50, 10].map((count) => (
                       <button
-                        onClick={() =>
-                          setDiscovered((prev) => prev.map((d) => ({ ...d, selected: true })))
-                        }
-                        className="text-xs text-blue-600 hover:underline"
+                        key={`back-${count}`}
+                        onClick={() => {
+                          const url = urlInput.trim();
+                          if (url) void discoverPages(url, 'backward', backwardOffset, count);
+                        }}
+                        disabled={isLoadingMore || backwardExhausted}
+                        className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        {t('selectAll')}
+                        <svg
+                          className="h-3 w-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M15.75 19.5 8.25 12l7.5-7.5"
+                          />
+                        </svg>
+                        {t('discoverBefore', { count })}
                       </button>
+                    ))}
+                    <div className="mx-1 h-4 w-px bg-slate-300" />
+                    {[10, 50, 100].map((count) => (
                       <button
-                        onClick={() =>
-                          setDiscovered((prev) => prev.map((d) => ({ ...d, selected: false })))
-                        }
-                        className="text-xs text-slate-400 hover:underline"
+                        key={`fwd-${count}`}
+                        onClick={() => {
+                          const url = urlInput.trim();
+                          if (url) void discoverPages(url, 'forward', forwardOffset, count);
+                        }}
+                        disabled={isLoadingMore || forwardExhausted}
+                        className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        {t('selectNone')}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid max-h-96 grid-cols-5 gap-2 overflow-y-auto">
-                    {discovered.map((d) => (
-                      <button
-                        key={d.url}
-                        onClick={() =>
-                          d.state === 'pending' &&
-                          setDiscovered((prev) =>
-                            prev.map((x) =>
-                              x.url === d.url ? { ...x, selected: !x.selected } : x,
-                            ),
-                          )
-                        }
-                        disabled={d.state !== 'pending'}
-                        className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
-                          d.state === 'done'
-                            ? 'border-green-400 opacity-60'
-                            : d.state === 'error'
-                              ? 'border-red-300 opacity-60'
-                              : d.selected
-                                ? 'border-blue-500 ring-1 ring-blue-300'
-                                : 'border-slate-200 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <img
-                          src={d.thumbnailUrl}
-                          alt={d.label}
-                          className="aspect-[3/4] w-full object-cover"
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-1">
-                          <span className="text-[10px] font-bold text-white">{d.label}</span>
-                        </div>
-                        {d.state === 'pending' && d.selected && (
-                          <div className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500">
-                            <svg
-                              className="h-2.5 w-2.5 text-white"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={3}
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="m4.5 12.75 6 6 9-13.5"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                        {d.state === 'importing' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <svg
-                              className="h-5 w-5 animate-spin text-white"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                            >
-                              <circle
-                                className="opacity-25"
-                                cx="12"
-                                cy="12"
-                                r="10"
-                                stroke="currentColor"
-                                strokeWidth="4"
-                              />
-                              <path
-                                className="opacity-75"
-                                fill="currentColor"
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                        {d.state === 'done' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-green-500/20">
-                            <svg
-                              className="h-6 w-6 text-green-600"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={2.5}
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="m4.5 12.75 6 6 9-13.5"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                        {d.state === 'error' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
-                            <span className="rounded bg-red-600 px-1 text-[9px] text-white">
-                              {t('error')}
-                            </span>
-                          </div>
-                        )}
+                        {t('discoverAfter', { count })}
+                        <svg
+                          className="h-3 w-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                          />
+                        </svg>
                       </button>
                     ))}
                   </div>
-                  {/* Pagination buttons */}
-                  {(hasMoreBackward || hasMoreForward) && !isDiscovering && (
-                    <div className="flex items-center justify-center gap-2">
-                      {hasMoreBackward && (
-                        <button
-                          onClick={() => {
-                            const url = urlInput.trim();
-                            if (url) void discoverRelated(url, 'backward', backwardOffset);
-                          }}
-                          disabled={isLoadingMore}
-                          className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          <svg
-                            className="h-3 w-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15.75 19.5 8.25 12l7.5-7.5"
-                            />
-                          </svg>
-                          {isLoadingMore ? t('loading') : t('loadPrevious')}
-                        </button>
-                      )}
-                      <select
-                        value={pageLimit}
-                        onChange={(e) => setPageLimit(Number(e.target.value))}
-                        className="rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-600 outline-none focus:border-blue-400"
+
+                  {isDiscovering && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                      {t('searchingPages')}
+                      <button
+                        onClick={() => discoverAbortRef.current?.abort()}
+                        className="ml-2 rounded px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-700"
                       >
-                        <option value={20}>20</option>
-                        <option value={50}>50</option>
-                        <option value={100}>100</option>
-                        <option value={200}>200</option>
-                        <option value={500}>500</option>
-                      </select>
-                      {hasMoreForward && (
-                        <button
-                          onClick={() => {
-                            const url = urlInput.trim();
-                            if (url) void discoverRelated(url, 'forward', forwardOffset);
-                          }}
-                          disabled={isLoadingMore}
-                          className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {isLoadingMore ? t('loading') : t('loadNext')}
-                          <svg
-                            className="h-3 w-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="m8.25 4.5 7.5 7.5-7.5 7.5"
-                            />
-                          </svg>
-                        </button>
-                      )}
+                        {t('stopDiscovery')}
+                      </button>
                     </div>
+                  )}
+
+                  {discovered.length > 0 && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-slate-700">
+                          {t('foundPages', { count: discovered.length })}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              setDiscovered((prev) => prev.map((d) => ({ ...d, selected: true })))
+                            }
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            {t('selectAll')}
+                          </button>
+                          <button
+                            onClick={() =>
+                              setDiscovered((prev) => prev.map((d) => ({ ...d, selected: false })))
+                            }
+                            className="text-xs text-slate-400 hover:underline"
+                          >
+                            {t('selectNone')}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid max-h-96 grid-cols-5 gap-2 overflow-y-auto">
+                        {discovered.map((d) => (
+                          <button
+                            key={d.url}
+                            onClick={() =>
+                              d.state === 'pending' &&
+                              setDiscovered((prev) =>
+                                prev.map((x) =>
+                                  x.url === d.url ? { ...x, selected: !x.selected } : x,
+                                ),
+                              )
+                            }
+                            disabled={d.state !== 'pending'}
+                            className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
+                              d.state === 'done'
+                                ? 'border-green-400 opacity-60'
+                                : d.state === 'error'
+                                  ? 'border-red-300 opacity-60'
+                                  : d.selected
+                                    ? 'border-blue-500 ring-1 ring-blue-300'
+                                    : 'border-slate-200 opacity-60 hover:opacity-100'
+                            }`}
+                          >
+                            <img
+                              src={d.thumbnailUrl}
+                              alt={d.label}
+                              className="aspect-[3/4] w-full object-cover"
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-1">
+                              <span className="text-[10px] font-bold text-white">{d.label}</span>
+                            </div>
+                            {d.state === 'pending' && d.selected && (
+                              <div className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500">
+                                <svg
+                                  className="h-2.5 w-2.5 text-white"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={3}
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="m4.5 12.75 6 6 9-13.5"
+                                  />
+                                </svg>
+                              </div>
+                            )}
+                            {d.state === 'importing' && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                <svg
+                                  className="h-5 w-5 animate-spin text-white"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                  />
+                                </svg>
+                              </div>
+                            )}
+                            {d.state === 'done' && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-green-500/20">
+                                <svg
+                                  className="h-6 w-6 text-green-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2.5}
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="m4.5 12.75 6 6 9-13.5"
+                                  />
+                                </svg>
+                              </div>
+                            )}
+                            {d.state === 'error' && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
+                                <span className="rounded bg-red-600 px-1 text-[9px] text-white">
+                                  {t('error')}
+                                </span>
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
 
                   {discovered.some((d) => d.selected && d.state === 'pending') && (

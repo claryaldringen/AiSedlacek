@@ -528,6 +528,8 @@
     "loading": "Načítám…",
     "loadPrevious": "Načíst předchozí",
     "loadNext": "Načíst další",
+    "discoverBefore": "{count} stran před",
+    "discoverAfter": "{count} stran po",
     "close": "Zavřít",
     "uploading": "Nahrávám…",
     "uploadDone": "Hotovo – {count} nahráno",

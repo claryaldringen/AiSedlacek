@@ -528,6 +528,8 @@
     "loading": "Loading…",
     "loadPrevious": "Load previous",
     "loadNext": "Load next",
+    "discoverBefore": "{count} pages before",
+    "discoverAfter": "{count} pages after",
     "close": "Close",
     "uploading": "Uploading…",
     "uploadDone": "Done – {count} uploaded",
