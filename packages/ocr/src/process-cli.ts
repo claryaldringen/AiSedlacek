@@ -187,6 +187,7 @@ export async function processWithClaudeCli(
   estimatedOutputTokens?: number,
   previousContext?: string,
   mode: ProcessingMode = 'transcribe+translate',
+  language?: string,
 ): Promise<{
   result: StructuredOcrResult;
   rawResponse: string;
@@ -203,7 +204,11 @@ export async function processWithClaudeCli(
     // Build user prompt — same structure as process.ts
     let fullPrompt = '';
     if (previousContext) {
-      fullPrompt += `Kontext z předchozích stránek rukopisu:\n${previousContext}\n\n`;
+      const prefix =
+        language === 'en'
+          ? 'Context from previous pages of the manuscript:'
+          : 'Kontext z předchozích stránek rukopisu:';
+      fullPrompt += `${prefix}\n${previousContext}\n\n`;
     }
     fullPrompt += userPrompt;
 
@@ -237,11 +242,11 @@ export async function processWithClaudeBatchCli(
   images: { buffer: Buffer; pageId: string; index: number }[],
   userPrompt: string,
   options?: {
-    collectionContext?: string;
     previousContext?: string;
     onProgress?: (outputTokens: number, estimatedTotal: number) => void;
     estimatedOutputTokens?: number;
     mode?: ProcessingMode;
+    language?: string;
   },
 ): Promise<{
   results: { index: number; result: StructuredOcrResult }[];
@@ -261,10 +266,11 @@ export async function processWithClaudeBatchCli(
     // Build user prompt — same text blocks as process.ts batch version
     let fullPrompt = '';
     if (options?.previousContext) {
-      fullPrompt += `Kontext z předchozích stránek rukopisu:\n${options.previousContext}\n\n`;
-    }
-    if (options?.collectionContext) {
-      fullPrompt += `Kontext díla (použij pro lepší porozumění dokumentu):\n${options.collectionContext}\n\n`;
+      const prefix =
+        options?.language === 'en'
+          ? 'Context from previous pages of the manuscript:'
+          : 'Kontext z předchozích stránek rukopisu:';
+      fullPrompt += `${prefix}\n${options.previousContext}\n\n`;
     }
     fullPrompt += userPrompt;
 

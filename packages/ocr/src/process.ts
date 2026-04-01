@@ -27,6 +27,7 @@ export async function processWithClaude(
   estimatedOutputTokens?: number,
   previousContext?: string,
   mode: ProcessingMode = 'transcribe+translate',
+  language?: string,
 ): Promise<{
   result: StructuredOcrResult;
   rawResponse: string;
@@ -63,7 +64,7 @@ export async function processWithClaude(
             ? [
                 {
                   type: 'text' as const,
-                  text: `Kontext z předchozích stránek rukopisu:\n${previousContext}`,
+                  text: `${language === 'en' ? 'Context from previous pages of the manuscript:' : 'Kontext z předchozích stránek rukopisu:'}\n${previousContext}`,
                 },
               ]
             : []),
@@ -113,11 +114,11 @@ export async function processWithClaudeBatch(
   images: { buffer: Buffer; pageId: string; index: number }[],
   userPrompt: string,
   options?: {
-    collectionContext?: string;
     previousContext?: string;
     onProgress?: (outputTokens: number, estimatedTotal: number) => void;
     estimatedOutputTokens?: number;
     mode?: ProcessingMode;
+    language?: string;
   },
 ): Promise<{
   results: { index: number; result: StructuredOcrResult }[];
@@ -156,16 +157,13 @@ export async function processWithClaudeBatch(
   }
 
   if (options?.previousContext) {
+    const prefix =
+      options?.language === 'en'
+        ? 'Context from previous pages of the manuscript:'
+        : 'Kontext z předchozích stránek rukopisu:';
     content.push({
       type: 'text',
-      text: `Kontext z předchozích stránek rukopisu:\n${options.previousContext}`,
-    });
-  }
-
-  if (options?.collectionContext) {
-    content.push({
-      type: 'text',
-      text: `Kontext díla (použij pro lepší porozumění dokumentu):\n${options.collectionContext}`,
+      text: `${prefix}\n${options.previousContext}`,
     });
   }
 

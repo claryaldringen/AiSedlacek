@@ -374,10 +374,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
     const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
       await processBatch(images, userPrompt, {
-        collectionContext: batchCollectionContext ?? undefined,
         previousContext,
         estimatedOutputTokens: estimatedTotal,
         mode,
+        language,
         onProgress: (currentTokens, estimated) => {
           const now = Date.now();
           if (now - lastProgressUpdate < 2000) return;

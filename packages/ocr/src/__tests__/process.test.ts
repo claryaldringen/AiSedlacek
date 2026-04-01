@@ -103,7 +103,6 @@ describe('processWithClaudeBatch', () => {
     const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
 
     await processWithClaudeBatch(images, 'Přepiš text.', {
-      collectionContext: 'Jenský Kodex, 15. století',
       previousContext: '[Stránka 1]\nPředchozí text...',
     });
 
@@ -114,8 +113,59 @@ describe('processWithClaudeBatch', () => {
     const texts = textBlocks.map((b) => b.text).join('\n');
     expect(texts).toContain('Kontext z předchozích stránek');
     expect(texts).toContain('Předchozí text...');
-    expect(texts).toContain('Kontext díla');
-    expect(texts).toContain('Jenský Kodex');
+  });
+
+  it('uses English context prefix when language is en', async () => {
+    const result0 = {
+      imageIndex: 0,
+      transcription: 'text0',
+      detectedLanguage: 'la',
+      translation: 'tr0',
+      translationLanguage: 'en',
+      context: '',
+      glossary: [],
+    };
+    setupMockStream(JSON.stringify(result0));
+
+    const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
+
+    await processWithClaudeBatch(images, 'Transcribe the text.', {
+      previousContext: '[Page 1]\nPrevious text...',
+      language: 'en',
+    });
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
+    const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];
+    const textBlocks = messages[0]!.content.filter((b) => b.type === 'text');
+    const texts = textBlocks.map((b) => b.text).join('\n');
+    expect(texts).toContain('Context from previous pages of the manuscript:');
+    expect(texts).not.toContain('Kontext z předchozích stránek');
+  });
+
+  it('uses Czech context prefix by default', async () => {
+    const result0 = {
+      imageIndex: 0,
+      transcription: 'text0',
+      detectedLanguage: 'la',
+      translation: 'tr0',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
+    setupMockStream(JSON.stringify(result0));
+
+    const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
+
+    await processWithClaudeBatch(images, 'Přepiš text.', {
+      previousContext: '[Stránka 1]\nPředchozí text...',
+    });
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
+    const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];
+    const textBlocks = messages[0]!.content.filter((b) => b.type === 'text');
+    const texts = textBlocks.map((b) => b.text).join('\n');
+    expect(texts).toContain('Kontext z předchozích stránek');
+    expect(texts).not.toContain('Context from previous pages');
   });
 
   it('returns empty results for completely unparseable output', async () => {
@@ -157,6 +207,35 @@ describe('processWithClaude with previousContext', () => {
     const texts = textBlocks.map((b) => b.text).join('\n');
     expect(texts).toContain('Kontext z předchozích stránek');
     expect(texts).toContain('Předchozí transkripce...');
+  });
+
+  it('uses English context prefix when language is en', async () => {
+    const singleResult = {
+      transcription: 'text',
+      detectedLanguage: 'la',
+      translation: 'tr',
+      translationLanguage: 'en',
+      context: '',
+      glossary: [],
+    };
+    setupMockStream(JSON.stringify(singleResult));
+
+    await processWithClaude(
+      Buffer.from([0xff, 0xd8, 0x00]),
+      'Transcribe the text.',
+      undefined,
+      undefined,
+      '[Page 1]\nPrevious transcription...',
+      'transcribe+translate',
+      'en',
+    );
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as Record<string, unknown>;
+    const messages = apiCall.messages as { content: { type: string; text?: string }[] }[];
+    const textBlocks = messages[0]!.content.filter((b) => b.type === 'text');
+    const texts = textBlocks.map((b) => b.text).join('\n');
+    expect(texts).toContain('Context from previous pages of the manuscript:');
+    expect(texts).not.toContain('Kontext z předchozích stránek');
   });
 
   it('does not include previousContext when not provided', async () => {
