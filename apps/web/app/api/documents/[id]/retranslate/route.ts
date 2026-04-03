@@ -62,7 +62,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
       totalPages: 1,
       completedPages: 0,
       pageIds: [],
-      currentStep: 'Ve frontě — čeká na retranslaci…',
+      currentStep: targetLang === 'cs' ? 'Ve frontě — čeká na retranslaci…' : 'Queued — waiting for retranslation…',
     },
   });
 

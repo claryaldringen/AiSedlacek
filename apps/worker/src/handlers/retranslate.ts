@@ -3,10 +3,26 @@
  */
 
 import { createMessage } from '../lib/llm';
-import { LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
+import { LANGUAGE_NAMES, LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+
+const STEPS_CS = {
+  loading: 'Načítám dokument…',
+  calling: 'Volám model pro retranslaci…',
+  saving: 'Ukládám překlad…',
+  done: 'Hotovo',
+};
+const STEPS_EN = {
+  loading: 'Loading document…',
+  calling: 'Calling translation model…',
+  saving: 'Saving translation…',
+  done: 'Done',
+};
+function getSteps(lang: string) {
+  return lang === 'cs' ? STEPS_CS : STEPS_EN;
+}
 
 export interface RetranslateJobData {
   documentId: string;
@@ -18,10 +34,11 @@ export interface RetranslateJobData {
 export async function handleRetranslate(jobId: string, data: RetranslateJobData): Promise<void> {
   const { documentId, language, userId, previousTranslation } = data;
   const targetLang = language || 'cs';
+  const s = getSteps(targetLang);
 
   await prisma.processingJob.update({
     where: { id: jobId },
-    data: { currentStep: 'Načítám dokument…' },
+    data: { currentStep: s.loading },
   });
 
   const doc = await prisma.document.findUnique({
@@ -44,12 +61,14 @@ export async function handleRetranslate(jobId: string, data: RetranslateJobData)
 
   await prisma.processingJob.update({
     where: { id: jobId },
-    data: { currentStep: 'Volám model pro retranslaci…' },
+    data: { currentStep: s.calling },
   });
 
   let prompt: string;
   if (existingTranslation) {
-    prompt = `Transkripce historického textu byla upravena. Aktualizuj existující překlad tak, aby odpovídal změnám v transkripci. Měň JEN ta místa, která se změnila – zbytek překladu ponech beze změny.
+    prompt =
+      targetLang === 'cs'
+        ? `Transkripce historického textu byla upravena. Aktualizuj existující překlad tak, aby odpovídal změnám v transkripci. Měň JEN ta místa, která se změnila – zbytek překladu ponech beze změny.
 
 UPRAVENÁ TRANSKRIPCE:
 ${doc.transcription}
@@ -57,9 +76,23 @@ ${doc.transcription}
 STÁVAJÍCÍ PŘEKLAD (uprav jen změněná místa):
 ${existingTranslation}
 
-Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
+Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`
+        : `The transcription of a historical text has been edited. Update the existing translation to match the changes in the transcription. Change ONLY the parts that were modified — keep the rest of the translation unchanged.
+
+UPDATED TRANSCRIPTION:
+${doc.transcription}
+
+EXISTING TRANSLATION (update only changed parts):
+${existingTranslation}
+
+Return ONLY the updated translation in markdown, nothing else.`;
   } else {
-    prompt = `Přelož tento historický přepis do moderní ${LANGUAGE_NAMES_CS_GENITIVE[targetLang] ?? targetLang}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`;
+    const langName = LANGUAGE_NAMES[targetLang] ?? targetLang;
+    const langNameCs = LANGUAGE_NAMES_CS_GENITIVE[targetLang] ?? targetLang;
+    prompt =
+      targetLang === 'cs'
+        ? `Přelož tento historický přepis do moderní ${langNameCs}. Zachovej strukturu, všechny reference a citace. Hranaté závorky použij pro vysvětlení archaických pojmů. Formátuj jako markdown.\n\n${doc.transcription}`
+        : `Translate this historical transcription into modern ${langName}. Preserve structure, all references and citations. Use square brackets to explain archaic terms. Format as markdown.\n\n${doc.transcription}`;
   }
 
   const response = await createMessage({
@@ -73,7 +106,7 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
 
   await prisma.processingJob.update({
     where: { id: jobId },
-    data: { currentStep: 'Ukládám překlad…' },
+    data: { currentStep: s.saving },
   });
 
   // Atomically check balance and deduct tokens
@@ -125,7 +158,7 @@ Vrať POUZE aktualizovaný překlad v markdown, nic dalšího.`;
     where: { id: jobId },
     data: {
       status: 'completed',
-      currentStep: 'Hotovo',
+      currentStep: s.done,
       completedPages: 1,
     },
   });
