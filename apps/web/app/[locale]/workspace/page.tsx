@@ -797,11 +797,21 @@ function WorkspaceContent(): React.JSX.Element {
                   if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
                 },
               });
-              // Reload document with new translation
-              const reloadDoc = await apiFetch(`/api/documents/${page.document.id}`);
-              if (reloadDoc.ok) {
-                const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
-                setPanelResult(mapDocToResult(updatedDoc, page, locale, false));
+              // Reload page and document with new translation
+              const pageRes = await apiFetch(`/api/pages/${pageId}`);
+              if (pageRes.ok) {
+                const updatedPage = (await pageRes.json()) as PageItem;
+                setPanelPage(updatedPage);
+                setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+                if (updatedPage.document) {
+                  const reloadDoc = await apiFetch(
+                    `/api/documents/${updatedPage.document.id}`,
+                  );
+                  if (reloadDoc.ok) {
+                    const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
+                    setPanelResult(mapDocToResult(updatedDoc, updatedPage, locale, false));
+                  }
+                }
               }
               return;
             }
