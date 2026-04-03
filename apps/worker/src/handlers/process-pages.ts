@@ -102,7 +102,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         collection: { select: { id: true, context: true } },
         document: {
           include: {
-            translations: { select: { language: true } },
+            translations: { select: { language: true, text: true } },
             glossary: true,
           },
         },
