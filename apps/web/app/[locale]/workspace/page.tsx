@@ -62,8 +62,9 @@ function mapDocToResult(
   },
   locale: string,
   cached: boolean,
-): DocumentResult {
-  const translation = doc.translations.find((tr) => tr.language === locale) ?? doc.translations[0];
+): DocumentResult | null {
+  const translation = doc.translations.find((tr) => tr.language === locale);
+  if (!translation) return null;
   const context = translation?.context || doc.context;
   const glossary: { term: string; definition: string }[] = translation?.glossaryJson
     ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
@@ -767,9 +768,49 @@ function WorkspaceContent(): React.JSX.Element {
       setRegenerateProgress(0);
       setPanelResult(null);
       try {
-        // Try re-parsing from stored rawResponse first (free, no API call)
         const page = pages.find((p) => p.id === pageId);
+
+        // Document exists but missing translation for current locale → retranslate only
         if (page?.document) {
+          const docRes = await apiFetch(`/api/documents/${page.document.id}`);
+          if (docRes.ok) {
+            const doc = (await docRes.json()) as DocApiResponse;
+            const hasLocaleTranslation = doc.translations.some((tr) => tr.language === locale);
+            if (!hasLocaleTranslation && doc.transcription) {
+              setRegenerateStep(t('callingModel'));
+              const retransRes = await apiFetch(
+                `/api/documents/${page.document.id}/retranslate`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ language: locale }),
+                },
+              );
+              if (!retransRes.ok) {
+                const errData = (await retransRes.json()) as { error?: string };
+                throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
+              }
+              const { jobId } = (await retransRes.json()) as { jobId: string };
+              await pollJob(jobId, {
+                onStep: (step) => setRegenerateStep(step),
+                onProgress: (completed, total) => {
+                  if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
+                },
+              });
+              // Reload document with new translation
+              const reloadDoc = await apiFetch(`/api/documents/${page.document.id}`);
+              if (reloadDoc.ok) {
+                const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
+                setPanelResult(mapDocToResult(updatedDoc, page, locale, false));
+              }
+              return;
+            }
+          }
+        }
+
+        // No document at all → full processing
+        if (page?.document) {
+          // Try re-parsing from stored rawResponse first (free, no API call)
           setRegenerateStep(t('tryingToFixParsing'));
           const reparseRes = await apiFetch(`/api/documents/${page.document.id}/reparse`, {
             method: 'POST',

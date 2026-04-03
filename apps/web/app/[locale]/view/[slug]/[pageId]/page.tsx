@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getTranslations } from 'next-intl/server';
+import { getTranslations, getLocale } from 'next-intl/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { PublicPageLayout } from '@/components/PublicPageLayout';
 import { NavArrow } from '@/components/NavArrow';
@@ -66,13 +66,18 @@ export default async function PublicCollectionPageView({
   const prevPage = currentIndex > 0 ? allPages[currentIndex - 1] : null;
   const nextPage = currentIndex < allPages.length - 1 ? allPages[currentIndex + 1] : null;
 
+  // Only show document if it has a translation for the current locale
+  const locale = await getLocale();
+  const hasLocaleTranslation = page.document?.translations.some((tr) => tr.language === locale);
+  const documentForLocale = hasLocaleTranslation ? page.document : null;
+
   return (
     <PublicPageLayout
       backHref={`/view/${slug}`}
       backLabel={collection.name}
       title={displayName}
       imageUrl={page.imageUrl}
-      document={page.document}
+      document={documentForLocale}
       navigation={
         <>
           <NavArrow
