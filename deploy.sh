@@ -22,6 +22,7 @@ npx turbo build --filter=@ai-sedlacek/web
 echo "=== Copying static assets to standalone ==="
 cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 cp -r apps/web/public apps/web/.next/standalone/apps/web/public 2>/dev/null || true
+cp -r apps/web/.next/standalone/node_modules apps/web/.next/standalone/apps/web/node_modules 2>/dev/null || true
 
 echo "=== Restarting PM2 processes ==="
 pm2 restart ecosystem.config.cjs

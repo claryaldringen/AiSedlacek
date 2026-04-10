@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'ai-sedlacek-web',
       cwd: '/opt/AiSedlacek',
-      script: 'apps/web/.next/standalone/server.js',
+      script: 'apps/web/.next/standalone/apps/web/server.js',
       env: {
         PORT: 3003,
         HOSTNAME: '0.0.0.0',
