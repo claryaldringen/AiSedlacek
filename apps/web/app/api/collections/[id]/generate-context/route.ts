@@ -4,8 +4,6 @@ import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance } from '@/lib/infrastructure/billing';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-export const maxDuration = 10;
-
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**

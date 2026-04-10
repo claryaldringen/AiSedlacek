@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 10;
 import { prisma } from '@/lib/infrastructure/db';
 import { checkBalance } from '@/lib/infrastructure/billing';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';

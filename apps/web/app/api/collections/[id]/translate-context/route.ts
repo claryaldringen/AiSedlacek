@@ -3,8 +3,6 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-export const maxDuration = 10;
-
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**

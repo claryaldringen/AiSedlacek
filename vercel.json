@@ -1,5 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx turbo build --filter=@ai-sedlacek/web",
-  "installCommand": "npm install && npx prisma generate --schema=apps/web/prisma/schema.prisma"
-}

@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createTransaction, czkToTokens } from '@/lib/infrastructure/billing';
 
-export const runtime = 'nodejs';
-
 export async function POST(request: Request): Promise<NextResponse> {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const body = await request.text();
