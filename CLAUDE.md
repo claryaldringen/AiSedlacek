@@ -17,11 +17,12 @@ Primární jazyky zdrojových textů: **stará horní němčina**, **staročešt
 ## Technologický stack
 
 - **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS v4
-- **Backend:** Next.js API Routes (serverless na Vercelu)
+- **Backend:** Next.js API Routes (standalone na Hetzner VPS)
 - **Databáze:** PostgreSQL + Prisma ORM
 - **OCR + překlad:** Claude Opus 4.6 (multimodální – obrázek + prompt → transkripce + překlad + kontext + glosář v jednom volání)
 - **Retranslace:** Claude Sonnet 4.6 (inkrementální aktualizace překladu po editaci transkripce)
-- **Úložiště souborů:** Lokální filesystem (`tmp/uploads/`) – plánovaná migrace na Vercel Blob
+- **Úložiště souborů:** Lokální filesystem (`/opt/AiSedlacek/uploads/` v produkci, `tmp/uploads/` v dev)
+- **Deployment:** PM2 + Caddy reverse proxy na Hetzner VPS
 - **Preprocessing obrázků:** Sharp (resize pro API limit 5 MB)
 - **Komunikace:** REST API + Server-Sent Events (SSE) pro streaming průběhu zpracování
 - **Monorepo:** Turborepo (apps/web + packages/shared)
@@ -154,7 +155,7 @@ Collection  1──N  Page  1──1  Document  1──N  Translation
 │           └── index.ts                 # Barrel export
 │
 ├── apps/
-│   └── web/                             # Next.js → Vercel
+│   └── web/                             # Next.js → Hetzner VPS
 │       ├── app/
 │       │   ├── page.tsx                 # Hlavní stránka – správa kolekcí + stránek
 │       │   ├── layout.tsx               # Root layout
@@ -220,14 +221,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 # --- Přepínání providerů ---
 # LLM_PROVIDER=ollama                   # dev (default pokud ANTHROPIC_API_KEY chybí)
 # LLM_PROVIDER=claude                   # produkce
-# STORAGE_PROVIDER=local                # dev (default pokud BLOB_READ_WRITE_TOKEN chybí)
-# STORAGE_PROVIDER=vercel-blob          # produkce (plánováno)
+
+# --- Úložiště souborů ---
+# UPLOAD_DIR=/opt/AiSedlacek/uploads    # produkce (default: tmp/uploads v dev)
 
 # --- Volitelné ---
 MAX_FILE_SIZE_MB=20
 ```
 
-### Logika výběru provideru
+### Logika výběru LLM provideru
 
 V `container.ts`:
 
@@ -235,6 +237,8 @@ V `container.ts`:
 2. Pokud není nastavena a `ANTHROPIC_API_KEY` existuje → `claude`
 3. Pokud není nastavena a `ANTHROPIC_API_KEY` neexistuje → `ollama`
 4. Pokud `LLM_PROVIDER=claude` ale `ANTHROPIC_API_KEY` chybí → chyba při startu
+
+Storage provider je vždy lokální filesystem (`local-storage.ts`).
 
 ---
 
@@ -254,7 +258,7 @@ npx turbo typecheck && npx turbo lint && npx turbo format:check && npx turbo tes
 
 # === Deployment ===
 
-vercel --prod                            # Nebo automaticky z Git push
+ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh  # Deploy na Hetzner VPS
 ```
 
 ---
@@ -321,7 +325,6 @@ na VPS pro segmentaci stránky na řádky.
 
 ### Další plánovaná vylepšení
 
-- **Vercel Blob storage** – nahrazení lokálního filesystemu
 - **Ollama dev mode** – lokální LLM pro vývoj bez API klíče
 - **Export** – PDF/DOCX s paralelním zobrazením originálu a překladu
 - **Vlastní Transkribus/Kraken modely** – trénování na specifických rukopisech
