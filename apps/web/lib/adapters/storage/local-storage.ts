@@ -4,16 +4,19 @@ import path from 'path';
 import crypto from 'crypto';
 
 export class LocalStorageProvider implements IStorageProvider {
-  constructor(private readonly uploadDir: string = 'tmp/uploads') {}
+  private readonly uploadDir: string;
+
+  constructor(uploadDir?: string) {
+    this.uploadDir = uploadDir ?? process.env['UPLOAD_DIR'] ?? 'tmp/uploads';
+  }
 
   async upload(file: Buffer, filename: string): Promise<StorageResult> {
     await fs.mkdir(this.uploadDir, { recursive: true });
-    // Sanitize filename — decoded IIIF identifiers can contain slashes (e.g. bbb/Mss-hh-I0002)
     const safeName = filename.replace(/[/\\]/g, '_');
     const uniqueName = `${crypto.randomUUID()}-${safeName}`;
     const filePath = path.join(this.uploadDir, uniqueName);
     await fs.writeFile(filePath, file);
-    return { url: `/api/images/${uniqueName}`, path: uniqueName };
+    return { url: `/uploads/${uniqueName}`, path: uniqueName };
   }
 
   async read(filePath: string): Promise<Buffer> {
@@ -21,7 +24,7 @@ export class LocalStorageProvider implements IStorageProvider {
   }
 
   getUrl(filePath: string): string {
-    return `/api/images/${filePath}`;
+    return `/uploads/${filePath}`;
   }
 
   async delete(filePath: string): Promise<void> {

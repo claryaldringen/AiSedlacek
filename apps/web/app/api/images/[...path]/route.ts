@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { getStorage, isRemoteStorage } from '@/lib/adapters/storage';
+import { getStorage } from '@/lib/adapters/storage';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ): Promise<NextResponse> {
-  // In Vercel Blob mode, images are served directly from CDN – this route is not used.
-  if (isRemoteStorage()) {
-    return NextResponse.json({ error: 'Obrázky jsou servírovány přímo z R2 CDN' }, { status: 404 });
-  }
-
   const segments = (await params).path;
   const filePath = segments.join('/');
 
