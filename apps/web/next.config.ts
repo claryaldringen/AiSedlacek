@@ -13,6 +13,7 @@ const gitHash = (() => {
 })();
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   transpilePackages: ['@ai-sedlacek/shared', '@ai-sedlacek/ocr'],
   serverExternalPackages: ['sharp', 'tesseract.js'],
   env: {
