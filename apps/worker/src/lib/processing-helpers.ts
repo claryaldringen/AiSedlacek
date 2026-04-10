@@ -187,9 +187,12 @@ export async function loadImageAndHash(
   imageUrl: string,
 ): Promise<{ imageBuffer: Buffer; imageHash: string }> {
   const storage = getStorage();
-  const storagePath = imageUrl.startsWith('/api/images/')
-    ? imageUrl.replace('/api/images/', '')
-    : imageUrl;
+  let storagePath = imageUrl;
+  if (storagePath.startsWith('/api/images/')) {
+    storagePath = storagePath.replace('/api/images/', '');
+  } else if (storagePath.startsWith('/uploads/')) {
+    storagePath = storagePath.replace('/uploads/', '');
+  }
   const imageBuffer = await storage.read(storagePath);
   const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
   return { imageBuffer, imageHash };

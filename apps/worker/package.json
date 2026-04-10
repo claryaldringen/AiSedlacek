@@ -17,7 +17,6 @@
     "@ai-sedlacek/ocr": "*",
     "@ai-sedlacek/shared": "*",
     "@anthropic-ai/sdk": "^0.78.0",
-    "@aws-sdk/client-s3": "^3.1013.0",
     "sharp": "^0.33"
   },
   "devDependencies": {
