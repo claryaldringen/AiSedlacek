@@ -150,6 +150,14 @@ async function pollForJobs(): Promise<void> {
       }
     } catch (err) {
       console.error('[Worker] Poll error:', err instanceof Error ? err.message : err);
+      // Reconnect on connection loss
+      try {
+        await prisma.$disconnect();
+        await prisma.$connect();
+        console.log('[Worker] Reconnected to database');
+      } catch {
+        console.error('[Worker] Failed to reconnect, will retry next poll');
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
