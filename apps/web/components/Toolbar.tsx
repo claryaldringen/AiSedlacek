@@ -35,10 +35,10 @@ interface ToolbarProps {
 }
 
 const btnBase =
-  'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors';
-const btnDefault = `${btnBase} text-slate-700 hover:bg-slate-100`;
-const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700`;
-const btnDanger = `${btnBase} text-red-600 hover:bg-red-50`;
+  'flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors border';
+const btnDefault = `${btnBase} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`;
+const btnPrimary = `${btnBase} border-blue-600 bg-blue-600 text-white hover:bg-blue-700 hover:border-blue-700`;
+const btnDanger = `${btnBase} border-red-200 bg-white text-red-600 hover:bg-red-50`;
 const btnDisabled = 'disabled:cursor-not-allowed disabled:opacity-40';
 const divider = 'mx-1 h-5 w-px bg-slate-200';
 
@@ -140,7 +140,9 @@ export function Toolbar({
               onClick={onShareCollection}
               title={isCollectionPublic ? t('share') : t('share')}
               className={
-                isCollectionPublic ? `${btnBase} text-blue-500 hover:bg-blue-50` : btnDefault
+                isCollectionPublic
+                  ? `${btnBase} border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100`
+                  : btnDefault
               }
             >
               <svg
