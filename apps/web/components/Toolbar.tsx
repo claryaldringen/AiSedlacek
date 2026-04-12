@@ -36,7 +36,7 @@ interface ToolbarProps {
 
 const ico = 'h-5 w-5 shrink-0';
 const btnBase =
-  'flex flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[10px] font-medium leading-tight transition-colors min-w-[3.5rem]';
+  'flex flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[10px] font-medium leading-tight transition-colors min-w-[3rem] text-center';
 const btnDefault = `${btnBase} text-slate-600 hover:bg-slate-100`;
 const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700`;
 const btnDanger = `${btnBase} text-red-600 hover:bg-red-50`;
