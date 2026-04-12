@@ -34,13 +34,25 @@ interface ToolbarProps {
   onRenameCollection?: () => void;
 }
 
+const ico = 'h-5 w-5 shrink-0';
 const btnBase =
-  'flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors border';
-const btnDefault = `${btnBase} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`;
-const btnPrimary = `${btnBase} border-blue-600 bg-blue-600 text-white hover:bg-blue-700 hover:border-blue-700`;
-const btnDanger = `${btnBase} border-red-200 bg-white text-red-600 hover:bg-red-50`;
+  'flex flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[10px] font-medium leading-tight transition-colors min-w-[3.5rem]';
+const btnDefault = `${btnBase} text-slate-600 hover:bg-slate-100`;
+const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700`;
+const btnDanger = `${btnBase} text-red-600 hover:bg-red-50`;
 const btnDisabled = 'disabled:cursor-not-allowed disabled:opacity-40';
-const divider = 'mx-1 h-5 w-px bg-slate-200';
+const divider = 'mx-0.5 h-10 w-px bg-slate-200';
+
+const spinnerIcon = (
+  <svg className={`${ico} animate-spin`} fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path
+      className="opacity-75"
+      fill="currentColor"
+      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+    />
+  </svg>
+);
 
 export function Toolbar({
   totalCount,
@@ -76,17 +88,11 @@ export function Toolbar({
   return (
     <div className="flex flex-col border-b border-slate-200 bg-white">
       {/* Main toolbar row */}
-      <div className="flex items-center gap-2 px-4 py-2">
+      <div className="flex items-end gap-1 px-3 py-1.5">
         {/* Group 1: Content */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-end gap-1">
           <button onClick={onImportClick} className={btnPrimary}>
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
+            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             {t('insert')}
@@ -94,13 +100,7 @@ export function Toolbar({
 
           {onCreateCollection && (
             <button onClick={onCreateCollection} className={btnDefault}>
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
+              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -115,16 +115,10 @@ export function Toolbar({
         <div className={divider} />
 
         {/* Group 2: Tools */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-end gap-1">
           {hasCollection && onEditContext && (
             <button onClick={onEditContext} title={t('contextTitle')} className={btnDefault}>
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
+              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -138,20 +132,14 @@ export function Toolbar({
           {onShareCollection && (
             <button
               onClick={onShareCollection}
-              title={isCollectionPublic ? t('share') : t('share')}
+              title={t('share')}
               className={
                 isCollectionPublic
-                  ? `${btnBase} border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100`
+                  ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100`
                   : btnDefault
               }
             >
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
+              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -164,13 +152,7 @@ export function Toolbar({
 
           {onSortByName && (
             <button onClick={onSortByName} title={t('sortTitle')} className={btnDefault}>
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
+              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -189,29 +171,9 @@ export function Toolbar({
               className={`${btnDefault} ${btnDisabled}`}
             >
               {detectingBlank ? (
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
+                spinnerIcon
               ) : (
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
+                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -228,29 +190,25 @@ export function Toolbar({
         {selectedCount > 0 && (
           <>
             <div className={divider} />
-            <div className="flex items-center gap-1">
+            <div className="flex items-end gap-1">
               <button
                 onClick={onProcessSelected}
                 disabled={pendingSelectedCount === 0 || isProcessing}
                 className={`${btnDefault} ${btnDisabled}`}
               >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
+                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"
                   />
                 </svg>
-                {t('process')}
-                {pendingSelectedCount > 0 && (
-                  <span className="text-slate-400">({pendingSelectedCount})</span>
-                )}
+                <span>
+                  {t('process')}
+                  {pendingSelectedCount > 0 && (
+                    <span className="opacity-50"> ({pendingSelectedCount})</span>
+                  )}
+                </span>
               </button>
 
               {onGenerateContext && (doneSelectedCount ?? 0) > 0 && (
@@ -260,29 +218,9 @@ export function Toolbar({
                   className={`${btnDefault} ${btnDisabled}`}
                 >
                   {generatingContext ? (
-                    <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                      />
-                    </svg>
+                    spinnerIcon
                   ) : (
-                    <svg
-                      className="h-3.5 w-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
+                    <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -298,13 +236,7 @@ export function Toolbar({
 
               {onRenameCollection && (
                 <button onClick={onRenameCollection} className={btnDefault}>
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
+                  <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -315,14 +247,8 @@ export function Toolbar({
                 </button>
               )}
 
-              <button onClick={onDeleteSelected} className={`${btnDanger}`}>
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
+              <button onClick={onDeleteSelected} className={btnDanger}>
+                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -339,7 +265,7 @@ export function Toolbar({
         <div className="flex-1" />
 
         {/* Stats */}
-        <span className="text-xs text-slate-500">
+        <span className="self-center text-xs text-slate-500">
           {t('items', { count: totalCount })}
           {doneCount > 0 && (
             <span className="ml-1 text-slate-400">
@@ -355,8 +281,8 @@ export function Toolbar({
 
         <div className={divider} />
 
-        {/* Group 4: View */}
-        <div className="flex overflow-hidden rounded-md border border-slate-200">
+        {/* Group 4: View toggle */}
+        <div className="flex self-center overflow-hidden rounded-md border border-slate-200">
           <button
             onClick={() => onViewModeChange('grid')}
             title={t('gridView')}
@@ -367,13 +293,7 @@ export function Toolbar({
                 : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600',
             ].join(' ')}
           >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
+            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -391,13 +311,7 @@ export function Toolbar({
                 : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600',
             ].join(' ')}
           >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
+            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -452,13 +366,12 @@ export function Toolbar({
                 {Math.round(processingProgress)}%
               </span>
             )}
-            {/* Pause / Resume button */}
             {isPaused
               ? onResumeProcessing && (
                   <button
                     onClick={onResumeProcessing}
                     title={t('resumeTitle')}
-                    className={`${btnBase} border border-blue-200 bg-white text-blue-600 hover:bg-blue-50`}
+                    className="flex items-center gap-1.5 rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50"
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
@@ -470,7 +383,7 @@ export function Toolbar({
                   <button
                     onClick={onPauseProcessing}
                     title={t('pauseTitle')}
-                    className={`${btnBase} border border-amber-200 bg-white text-amber-600 hover:bg-amber-50`}
+                    className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-50"
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
@@ -478,12 +391,11 @@ export function Toolbar({
                     {t('pause')}
                   </button>
                 )}
-            {/* Stop / Cancel button */}
             {onCancelProcessing && (
               <button
                 onClick={onCancelProcessing}
                 title={t('cancelTitle')}
-                className={`${btnBase} border border-red-200 bg-white text-red-600 hover:bg-red-50`}
+                className="flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M6 6h12v12H6V6z" />
