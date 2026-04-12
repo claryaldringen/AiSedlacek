@@ -18,6 +18,7 @@ interface UseWorkspaceKeyboardOptions {
   onCollectionSelect: (id: string) => void;
   onPageOpen: (page: PageItem) => void;
   onDeleteSelected: () => void;
+  isPanelOpen?: boolean;
 }
 
 interface UseWorkspaceKeyboardReturn {
@@ -40,6 +41,7 @@ export function useWorkspaceKeyboard({
   onCollectionSelect,
   onPageOpen,
   onDeleteSelected,
+  isPanelOpen,
 }: UseWorkspaceKeyboardOptions): UseWorkspaceKeyboardReturn {
   // Keyboard focus cursor (independent from selection anchor)
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
@@ -72,6 +74,8 @@ export function useWorkspaceKeyboard({
   collectionsRef.current = collections;
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
+  const isPanelOpenRef = useRef(isPanelOpen);
+  isPanelOpenRef.current = isPanelOpen;
 
   // ---- Keyboard shortcuts (Ctrl+A, Escape, Arrow keys, Home/End, Enter, Delete) ----
   useEffect(() => {
@@ -80,6 +84,9 @@ export function useWorkspaceKeyboard({
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.target as HTMLElement).isContentEditable) return;
+
+      // When document panel is open, let it handle arrows and Escape
+      if (isPanelOpenRef.current) return;
 
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
         e.preventDefault();

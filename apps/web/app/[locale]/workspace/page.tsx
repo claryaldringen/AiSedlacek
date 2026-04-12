@@ -758,6 +758,7 @@ function WorkspaceContent(): React.JSX.Element {
     onDeleteSelected: () => {
       void handleDeleteSelected();
     },
+    isPanelOpen: panelPage !== null,
   });
 
   // ---- Regenerate document ----
