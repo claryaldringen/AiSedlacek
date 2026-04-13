@@ -1491,6 +1491,7 @@ function WorkspaceContent(): React.JSX.Element {
             onColumnsChange={setColumnsCount}
             onToggleBlank={(ids, blank) => void handleToggleBlank(ids, blank)}
             onShareItem={handleShareItem}
+            searchMatchIds={searchMatchIds}
           />
         ) : (
           <FileList
@@ -1512,6 +1513,7 @@ function WorkspaceContent(): React.JSX.Element {
             onDelete={(id) => void handleDeletePage(id)}
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
+            searchMatchIds={searchMatchIds}
           />
         )}
 

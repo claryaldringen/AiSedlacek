@@ -64,6 +64,7 @@ interface FileGridProps {
   onShareItem?: (id: string, type: 'page' | 'collection') => void;
   /** Reorder pages via drag and drop */
   onReorderPages?: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
+  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionName: string | null }> | null;
 }
 
 function cleanFilename(raw: string): string {
@@ -345,6 +346,9 @@ interface PageCardProps {
   onTouchEnd: () => void;
   onTouchMove: () => void;
   registerRef: (id: string, el: HTMLElement | null) => void;
+  isSearchActive: boolean;
+  isMatch: boolean;
+  matchCount: number | undefined;
 }
 
 const PageCard = memo(function PageCard({
@@ -365,6 +369,9 @@ const PageCard = memo(function PageCard({
   onTouchEnd,
   onTouchMove,
   registerRef,
+  isSearchActive,
+  isMatch,
+  matchCount,
 }: PageCardProps): React.JSX.Element {
   const t = useTranslations('fileGrid');
   return (
@@ -401,6 +408,7 @@ const PageCard = memo(function PageCard({
           : 'border-transparent hover:border-slate-300 hover:shadow-sm',
         'dragging:opacity-50',
         isFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
+        isSearchActive && !isMatch ? 'opacity-20' : '',
       ].join(' ')}
       style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
     >
@@ -490,6 +498,13 @@ const PageCard = memo(function PageCard({
           </div>
         )}
 
+        {/* Search match badge (top-left) */}
+        {isSearchActive && isMatch && matchCount != null && (
+          <div className="absolute left-1 top-1 rounded-full bg-yellow-400 px-1.5 py-0.5 text-[9px] font-bold text-yellow-900">
+            {matchCount}×
+          </div>
+        )}
+
         {/* Status badge (bottom-right) */}
         <div className="absolute bottom-1.5 right-1.5">
           <StatusBadge status={effectiveStatus} />
@@ -568,6 +583,7 @@ export function FileGrid({
   onToggleBlank,
   onShareItem,
   onReorderPages,
+  searchMatchIds,
 }: FileGridProps): React.JSX.Element {
   const t = useTranslations('fileGrid');
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
@@ -1172,30 +1188,38 @@ export function FileGrid({
             ref={pagesGridRef}
             className="filegrid-bg grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
           >
-            {pages.map((page) => (
-              <PageCard
-                key={page.id}
-                page={page}
-                isSelected={selected.has(page.id)}
-                isFocused={focusedItemId === page.id}
-                effectiveStatus={processingPageIds.has(page.id) ? 'processing' : page.status}
-                selectionModeTouch={selectionModeTouch}
-                onItemClick={onItemClick}
-                onPageDoubleClick={onPageDoubleClick}
-                onContextMenu={handleContextMenu}
-                onDragStart={handlePageDragStart}
-                onDragOver={handlePageReorderDragOver}
-                onDragLeave={handlePageReorderDragLeave}
-                onDrop={handlePageReorderDrop}
-                dropIndicatorPosition={
-                  dropIndicator?.pageId === page.id ? dropIndicator.position : null
-                }
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-                onTouchMove={handleTouchMove}
-                registerRef={registerItemRef}
-              />
-            ))}
+            {pages.map((page) => {
+              const isSearchActive = searchMatchIds != null;
+              const isMatch = searchMatchIds?.has(page.id) ?? false;
+              const matchCount = searchMatchIds?.get(page.id)?.matches;
+              return (
+                <PageCard
+                  key={page.id}
+                  page={page}
+                  isSelected={selected.has(page.id)}
+                  isFocused={focusedItemId === page.id}
+                  effectiveStatus={processingPageIds.has(page.id) ? 'processing' : page.status}
+                  selectionModeTouch={selectionModeTouch}
+                  onItemClick={onItemClick}
+                  onPageDoubleClick={onPageDoubleClick}
+                  onContextMenu={handleContextMenu}
+                  onDragStart={handlePageDragStart}
+                  onDragOver={handlePageReorderDragOver}
+                  onDragLeave={handlePageReorderDragLeave}
+                  onDrop={handlePageReorderDrop}
+                  dropIndicatorPosition={
+                    dropIndicator?.pageId === page.id ? dropIndicator.position : null
+                  }
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                  onTouchMove={handleTouchMove}
+                  registerRef={registerItemRef}
+                  isSearchActive={isSearchActive}
+                  isMatch={isMatch}
+                  matchCount={matchCount}
+                />
+              );
+            })}
           </div>
         </div>
       )}
