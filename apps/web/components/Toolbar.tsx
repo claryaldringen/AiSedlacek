@@ -36,8 +36,6 @@ interface ToolbarProps {
   onSearchToggle?: () => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
-  searchScope?: 'collection' | 'all';
-  onSearchScopeChange?: (scope: 'collection' | 'all') => void;
   searchResultCount?: number;
 }
 
@@ -94,8 +92,6 @@ export function Toolbar({
   onSearchToggle,
   searchQuery,
   onSearchChange,
-  searchScope,
-  onSearchScopeChange,
   searchResultCount,
 }: ToolbarProps): React.JSX.Element {
   const t = useTranslations('toolbar');
@@ -240,17 +236,6 @@ export function Toolbar({
                   </button>
                 )}
               </div>
-              {hasCollection && (
-                <label className="flex items-center gap-1 text-[10px] text-slate-500 whitespace-nowrap">
-                  <input
-                    type="checkbox"
-                    checked={searchScope === 'all'}
-                    onChange={(e) => onSearchScopeChange?.(e.target.checked ? 'all' : 'collection')}
-                    className="h-3 w-3 rounded border-slate-300"
-                  />
-                  {t('searchAllCollections')}
-                </label>
-              )}
               {searchResultCount != null && (searchQuery?.length ?? 0) >= 2 && (
                 <span className="text-[10px] text-slate-400 whitespace-nowrap">
                   {searchResultCount > 0

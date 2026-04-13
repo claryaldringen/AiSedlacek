@@ -64,7 +64,8 @@ interface FileGridProps {
   onShareItem?: (id: string, type: 'page' | 'collection') => void;
   /** Reorder pages via drag and drop */
   onReorderPages?: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
-  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionName: string | null }> | null;
+  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }> | null;
+  searchMatchCollectionIds?: Map<string, number> | null;
 }
 
 function cleanFilename(raw: string): string {
@@ -584,6 +585,7 @@ export function FileGrid({
   onShareItem,
   onReorderPages,
   searchMatchIds,
+  searchMatchCollectionIds,
 }: FileGridProps): React.JSX.Element {
   const t = useTranslations('fileGrid');
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
@@ -1097,6 +1099,9 @@ export function FileGrid({
             {collections.map((col) => {
               const isColSelected = selected.has(col.id);
               const isColFocused = focusedItemId === col.id;
+              const isColSearchActive = searchMatchCollectionIds != null;
+              const isColMatch = searchMatchCollectionIds?.has(col.id) ?? false;
+              const colMatchCount = searchMatchCollectionIds?.get(col.id);
               return (
                 <div
                   key={col.id}
@@ -1133,6 +1138,7 @@ export function FileGrid({
                         ? 'border-blue-500 bg-blue-50 shadow-md'
                         : 'border-transparent hover:border-slate-300 hover:shadow-sm',
                     isColFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
+                    isColSearchActive && !isColMatch ? 'opacity-20' : '',
                   ].join(' ')}
                 >
                   <div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-md bg-amber-50">
@@ -1146,6 +1152,11 @@ export function FileGrid({
                     <span className="absolute bottom-2 right-2 rounded bg-white/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 shadow-sm">
                       {col._count.pages} str.
                     </span>
+                    {isColSearchActive && isColMatch && colMatchCount != null && (
+                      <div className="absolute left-1 top-1 rounded-full bg-yellow-400 px-1.5 py-0.5 text-[9px] font-bold text-yellow-900">
+                        {colMatchCount}×
+                      </div>
+                    )}
                     {col.isPublic && (
                       <div className="absolute right-1.5 top-1.5" title={t('publiclyShared')}>
                         <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/90 shadow">

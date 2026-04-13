@@ -160,8 +160,7 @@ function WorkspaceContent(): React.JSX.Element {
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchScope, setSearchScope] = useState<'collection' | 'all'>('collection');
-  const [searchResults, setSearchResults] = useState<Map<string, { matches: number; snippet: string; collectionName: string | null }>>(new Map());
+  const [searchResults, setSearchResults] = useState<Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>>(new Map());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Document panel
@@ -187,16 +186,16 @@ function WorkspaceContent(): React.JSX.Element {
 
     searchTimeoutRef.current = setTimeout(async () => {
       const params = new URLSearchParams({ q: searchQuery });
-      if (searchScope === 'collection' && selectedCollectionId) {
+      if (selectedCollectionId) {
         params.set('collectionId', selectedCollectionId);
       }
       try {
         const res = await apiFetch(`/api/pages/search?${params}`);
         if (!res.ok) return;
         const data = await res.json();
-        const map = new Map<string, { matches: number; snippet: string; collectionName: string | null }>();
+        const map = new Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>();
         for (const r of data.results) {
-          map.set(r.pageId, { matches: r.matches, snippet: r.snippet, collectionName: r.collectionName });
+          map.set(r.pageId, { matches: r.matches, snippet: r.snippet, collectionId: r.collectionId, collectionName: r.collectionName });
         }
         setSearchResults(map);
       } catch {
@@ -207,7 +206,7 @@ function WorkspaceContent(): React.JSX.Element {
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  }, [searchQuery, searchScope, isSearchOpen, selectedCollectionId]);
+  }, [searchQuery, isSearchOpen, selectedCollectionId]);
 
   // Collections visible only in "all" view (no specific collection selected)
   const visibleCollections = selectedCollectionId === null ? collections : [];
@@ -1050,6 +1049,18 @@ function WorkspaceContent(): React.JSX.Element {
 
   const searchMatchIds = isSearchOpen && searchQuery.length >= 2 ? searchResults : null;
 
+  // At root level, compute which collections have matching pages
+  const searchMatchCollectionIds = useMemo(() => {
+    if (!searchMatchIds || selectedCollectionId) return null;
+    const collectionMatches = new Map<string, number>();
+    for (const [, result] of searchMatchIds) {
+      if (result.collectionId) {
+        collectionMatches.set(result.collectionId, (collectionMatches.get(result.collectionId) ?? 0) + result.matches);
+      }
+    }
+    return collectionMatches;
+  }, [searchMatchIds, selectedCollectionId]);
+
   return (
     <AppShell
       workspaces={workspaces}
@@ -1126,8 +1137,6 @@ function WorkspaceContent(): React.JSX.Element {
         onSearchToggle={handleSearchToggle}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        searchScope={searchScope}
-        onSearchScopeChange={setSearchScope}
         searchResultCount={searchResults.size}
       />
 
@@ -1492,6 +1501,7 @@ function WorkspaceContent(): React.JSX.Element {
             onToggleBlank={(ids, blank) => void handleToggleBlank(ids, blank)}
             onShareItem={handleShareItem}
             searchMatchIds={searchMatchIds}
+            searchMatchCollectionIds={searchMatchCollectionIds}
           />
         ) : (
           <FileList
