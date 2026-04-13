@@ -21,6 +21,7 @@ interface DocumentPanelProps {
   onNext?: () => void;
   hasPrevious?: boolean;
   hasNext?: boolean;
+  highlightQuery?: string;
 }
 
 function cleanFilename(raw: string): string {
@@ -47,6 +48,7 @@ export function DocumentPanel({
   onNext,
   hasPrevious,
   hasNext,
+  highlightQuery,
 }: DocumentPanelProps): React.JSX.Element | null {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -348,7 +350,7 @@ export function DocumentPanel({
               </div>
             ) : status === 'done' && result ? (
               <div className="flex flex-1 flex-col overflow-y-auto">
-                <ResultViewer result={result} onUpdate={onResultUpdate} />
+                <ResultViewer result={result} onUpdate={onResultUpdate} highlightQuery={highlightQuery} />
                 {/* Chat */}
                 <div className="border-t border-slate-200">
                   <DocumentChat

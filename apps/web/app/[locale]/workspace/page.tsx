@@ -1629,6 +1629,7 @@ function WorkspaceContent(): React.JSX.Element {
           const idx = pages.findIndex((p) => p.id === panelPage.id);
           if (idx >= 0 && idx < pages.length - 1) void handlePageDoubleClick(pages[idx + 1]!);
         }}
+        highlightQuery={isSearchOpen ? searchQuery : undefined}
       />
     </AppShell>
   );
