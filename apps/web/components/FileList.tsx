@@ -16,6 +16,7 @@ interface FileListProps {
   onDelete: (id: string) => void;
   processingPageIds: Set<string>;
   showCollections?: boolean;
+  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionName: string | null }> | null;
 }
 
 function cleanFilename(raw: string): string {
@@ -82,6 +83,7 @@ export function FileList({
   onDelete,
   processingPageIds,
   showCollections = true,
+  searchMatchIds,
 }: FileListProps): React.JSX.Element {
   const t = useTranslations('fileList');
   const allItems = pages;
@@ -177,6 +179,9 @@ export function FileList({
             const isSelected = selected.has(page.id);
             const effectiveStatus = processingPageIds.has(page.id) ? 'processing' : page.status;
             const isDone = page.status === 'done';
+            const isSearchActive = searchMatchIds != null;
+            const isMatch = searchMatchIds?.has(page.id) ?? false;
+            const matchCount = searchMatchIds?.get(page.id)?.matches;
 
             return (
               <tr
@@ -185,6 +190,7 @@ export function FileList({
                   'border-b border-slate-100 transition-colors',
                   isSelected ? 'bg-blue-50' : 'hover:bg-slate-50',
                   isDone ? 'cursor-pointer' : '',
+                  isSearchActive && !isMatch ? 'opacity-20' : '',
                 ].join(' ')}
                 onClick={() => isDone && onPageClick(page)}
               >
@@ -213,6 +219,11 @@ export function FileList({
                 {/* Name */}
                 <td className="px-2 py-2">
                   <span className="text-slate-800">{cleanFilename(page.filename)}</span>
+                  {isSearchActive && isMatch && matchCount != null && (
+                    <span className="ml-1 rounded bg-yellow-100 px-1 text-[10px] font-medium text-yellow-700">
+                      {matchCount}×
+                    </span>
+                  )}
                 </td>
 
                 {/* Status */}
