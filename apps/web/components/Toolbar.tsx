@@ -32,6 +32,13 @@ interface ToolbarProps {
   generatingContext?: boolean;
   doneSelectedCount?: number;
   onRenameCollection?: () => void;
+  isSearchOpen?: boolean;
+  onSearchToggle?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  searchScope?: 'collection' | 'all';
+  onSearchScopeChange?: (scope: 'collection' | 'all') => void;
+  searchResultCount?: number;
 }
 
 const ico = 'h-5 w-5 shrink-0';
@@ -83,6 +90,13 @@ export function Toolbar({
   generatingContext,
   doneSelectedCount,
   onRenameCollection,
+  isSearchOpen,
+  onSearchToggle,
+  searchQuery,
+  onSearchChange,
+  searchScope,
+  onSearchScopeChange,
+  searchResultCount,
 }: ToolbarProps): React.JSX.Element {
   const t = useTranslations('toolbar');
   return (
@@ -183,6 +197,68 @@ export function Toolbar({
               )}
               {t('detectBlank')}
             </button>
+          )}
+        </div>
+
+        {/* Search */}
+        <div className={divider} />
+        <div className="flex items-end gap-1">
+          <button
+            onClick={onSearchToggle}
+            className={isSearchOpen ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100` : btnDefault}
+          >
+            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            {t('search')}
+          </button>
+          {isSearchOpen && (
+            <div className="flex items-center gap-2 self-center">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery ?? ''}
+                  onChange={(e) => onSearchChange?.(e.target.value)}
+                  placeholder={t('searchPlaceholder')}
+                  autoFocus
+                  className="w-48 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      onSearchToggle?.();
+                      e.stopPropagation();
+                    }
+                  }}
+                />
+                {(searchQuery?.length ?? 0) > 0 && (
+                  <button
+                    onClick={() => onSearchChange?.('')}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {hasCollection && (
+                <label className="flex items-center gap-1 text-[10px] text-slate-500 whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={searchScope === 'all'}
+                    onChange={(e) => onSearchScopeChange?.(e.target.checked ? 'all' : 'collection')}
+                    className="h-3 w-3 rounded border-slate-300"
+                  />
+                  {t('searchAllCollections')}
+                </label>
+              )}
+              {searchResultCount != null && (searchQuery?.length ?? 0) >= 2 && (
+                <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                  {searchResultCount > 0
+                    ? t('searchResults', { count: searchResultCount })
+                    : t('searchNoResults')}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
