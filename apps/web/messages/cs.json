@@ -441,7 +441,13 @@
     "pause": "Pozastavit",
     "pauseTitle": "Pozastavit zpracování",
     "cancel": "Zrušit",
-    "cancelTitle": "Zrušit zpracování"
+    "cancelTitle": "Zrušit zpracování",
+    "search": "Hledat",
+    "searchPlaceholder": "Hledat v textech…",
+    "searchAllCollections": "Hledat ve všech svazcích",
+    "searchResults": "{count, plural, one {# výsledek} few {# výsledky} other {# výsledků}}",
+    "searchNoResults": "Nic nenalezeno",
+    "searchMatches": "{count}×"
   },
   "sidebar": {
     "loading": "Načítám...",

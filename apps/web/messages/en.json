@@ -441,7 +441,13 @@
     "pause": "Pause",
     "pauseTitle": "Pause processing",
     "cancel": "Cancel",
-    "cancelTitle": "Cancel processing"
+    "cancelTitle": "Cancel processing",
+    "search": "Search",
+    "searchPlaceholder": "Search in texts…",
+    "searchAllCollections": "Search all volumes",
+    "searchResults": "{count, plural, one {# result} other {# results}}",
+    "searchNoResults": "No results found",
+    "searchMatches": "{count}×"
   },
   "sidebar": {
     "loading": "Loading...",
