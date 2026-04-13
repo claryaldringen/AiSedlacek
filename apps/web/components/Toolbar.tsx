@@ -41,12 +41,12 @@ interface ToolbarProps {
 
 const ico = 'h-5 w-5 shrink-0';
 const btnBase =
-  'flex flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-[10px] font-medium leading-tight transition-colors min-w-[3rem] text-center';
+  'flex flex-col items-center justify-center gap-0.5 rounded-lg px-3 py-1.5 text-[10px] font-medium leading-tight transition-colors min-w-[3.5rem] h-[3.5rem] text-center';
 const btnDefault = `${btnBase} text-slate-600 hover:bg-slate-100`;
 const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700`;
 const btnDanger = `${btnBase} text-red-600 hover:bg-red-50`;
 const btnDisabled = 'disabled:cursor-not-allowed disabled:opacity-40';
-const divider = 'mx-0.5 h-10 w-px bg-slate-200';
+const divider = 'mx-0.5 h-[2.5rem] w-px bg-slate-200 self-center';
 
 const spinnerIcon = (
   <svg className={`${ico} animate-spin`} fill="none" viewBox="0 0 24 24">
@@ -209,7 +209,7 @@ export function Toolbar({
             {t('search')}
           </button>
           {isSearchOpen && (
-            <div className="flex items-center gap-2 self-center">
+            <div className="flex flex-col gap-0.5 self-center">
               <div className="relative">
                 <input
                   type="text"
