@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -45,6 +45,48 @@ export interface DocumentResult {
 interface ResultViewerProps {
   result: DocumentResult;
   onUpdate?: (updated: DocumentResult) => void;
+  highlightQuery?: string;
+}
+
+function processChildren(
+  children: React.ReactNode,
+  transform: (text: string) => React.ReactNode,
+): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child === 'string') return transform(child);
+    return child;
+  });
+}
+
+function HighlightedMarkdown({ content, query }: { content: string; query?: string }): React.JSX.Element {
+  if (!query || query.length < 2) {
+    return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+  }
+
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+
+  const highlightText = (text: string): React.ReactNode => {
+    const parts = text.split(regex);
+    if (parts.length <= 1) return text;
+    return parts.map((part, i) =>
+      regex.test(part) ? <mark key={i} className="bg-yellow-200 rounded px-0.5">{part}</mark> : part
+    );
+  };
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children, ...props }) => <p {...props}>{processChildren(children, highlightText)}</p>,
+        li: ({ children, ...props }) => <li {...props}>{processChildren(children, highlightText)}</li>,
+        td: ({ children, ...props }) => <td {...props}>{processChildren(children, highlightText)}</td>,
+        th: ({ children, ...props }) => <th {...props}>{processChildren(children, highlightText)}</th>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function EditableSection({
@@ -53,12 +95,14 @@ function EditableSection({
   content,
   onSave,
   saving,
+  highlightQuery,
 }: {
   title: string;
   subtitle?: string;
   content: string;
   onSave: (newContent: string) => void;
   saving?: boolean;
+  highlightQuery?: string;
 }): React.JSX.Element {
   const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
@@ -118,14 +162,14 @@ function EditableSection({
         </div>
       ) : (
         <div className="prose prose-stone prose-sm max-w-none p-4">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <HighlightedMarkdown content={content} query={highlightQuery} />
         </div>
       )}
     </div>
   );
 }
 
-export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX.Element {
+export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
@@ -274,6 +318,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
             content={result.transcription}
             onSave={(text) => void handleTranscriptionSave(text)}
             saving={saving}
+            highlightQuery={highlightQuery}
           />
         </div>
         <div className="flex flex-col">
@@ -283,6 +328,7 @@ export function ResultViewer({ result, onUpdate }: ResultViewerProps): React.JSX
             content={result.translation}
             onSave={(text) => void saveField('translation', text)}
             saving={saving}
+            highlightQuery={highlightQuery}
           />
         </div>
       </div>
