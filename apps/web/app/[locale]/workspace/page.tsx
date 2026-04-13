@@ -157,6 +157,13 @@ function WorkspaceContent(): React.JSX.Element {
   // Create workspace dialog
   const [createWorkspaceDialogOpen, setCreateWorkspaceDialogOpen] = useState(false);
 
+  // Search
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<'collection' | 'all'>('collection');
+  const [searchResults, setSearchResults] = useState<Map<string, { matches: number; snippet: string; collectionName: string | null }>>(new Map());
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
@@ -168,6 +175,39 @@ function WorkspaceContent(): React.JSX.Element {
   // Drag-over for whole content area
   const [contentDragOver, setContentDragOver] = useState(false);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+
+  // Search — debounced API call
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    if (!isSearchOpen || searchQuery.length < 2) {
+      setSearchResults(new Map());
+      return;
+    }
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      const params = new URLSearchParams({ q: searchQuery });
+      if (searchScope === 'collection' && selectedCollectionId) {
+        params.set('collectionId', selectedCollectionId);
+      }
+      try {
+        const res = await apiFetch(`/api/pages/search?${params}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const map = new Map<string, { matches: number; snippet: string; collectionName: string | null }>();
+        for (const r of data.results) {
+          map.set(r.pageId, { matches: r.matches, snippet: r.snippet, collectionName: r.collectionName });
+        }
+        setSearchResults(map);
+      } catch {
+        // ignore
+      }
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [searchQuery, searchScope, isSearchOpen, selectedCollectionId]);
 
   // Collections visible only in "all" view (no specific collection selected)
   const visibleCollections = selectedCollectionId === null ? collections : [];
@@ -566,6 +606,29 @@ function WorkspaceContent(): React.JSX.Element {
       // ignore
     }
   }, [selectedCollectionId, selectedGridCollection, collections]);
+
+  // ---- Search toggle ----
+  const handleSearchToggle = useCallback(() => {
+    setIsSearchOpen((prev) => {
+      if (prev) {
+        setSearchQuery('');
+        setSearchResults(new Map());
+      }
+      return !prev;
+    });
+  }, []);
+
+  // Ctrl+F shortcut to open search
+  useEffect(() => {
+    const handleCtrlF = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !panelPage) {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handleCtrlF);
+    return () => document.removeEventListener('keydown', handleCtrlF);
+  }, [panelPage]);
 
   // ---- Move pages (drag & drop) ----
   const handleMovePages = useCallback(
@@ -985,6 +1048,8 @@ function WorkspaceContent(): React.JSX.Element {
     [shareTarget],
   );
 
+  const searchMatchIds = isSearchOpen && searchQuery.length >= 2 ? searchResults : null;
+
   return (
     <AppShell
       workspaces={workspaces}
@@ -1057,6 +1122,13 @@ function WorkspaceContent(): React.JSX.Element {
             ? () => void handleRenameCollection()
             : undefined
         }
+        isSearchOpen={isSearchOpen}
+        onSearchToggle={handleSearchToggle}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchScope={searchScope}
+        onSearchScopeChange={setSearchScope}
+        searchResultCount={searchResults.size}
       />
 
       {/* Generating context banner */}
