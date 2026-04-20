@@ -16,6 +16,7 @@ import { resolveUserFromToken } from '../api-auth';
 describe('resolveUserFromToken', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockUpdate.mockResolvedValue({} as any);
   });
 

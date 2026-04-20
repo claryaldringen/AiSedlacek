@@ -3,13 +3,13 @@
 import { useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
 
-function CliAuthContent() {
+function CliAuthContent(): React.ReactElement {
   const searchParams = useSearchParams();
   const state = searchParams.get('state');
   const redirect = searchParams.get('redirect');
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
 
-  async function handleAuthorize() {
+  async function handleAuthorize(): Promise<void> {
     setStatus('loading');
     try {
       const res = await fetch('/api/auth/cli/token', { method: 'POST' });
@@ -70,7 +70,7 @@ function CliAuthContent() {
   );
 }
 
-export default function CliAuthPage() {
+export default function CliAuthPage(): React.ReactElement {
   return (
     <Suspense fallback={<div className="p-8 text-center">Načítám...</div>}>
       <CliAuthContent />

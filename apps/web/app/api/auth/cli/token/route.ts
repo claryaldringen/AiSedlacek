@@ -5,6 +5,7 @@ import { hashToken, resolveUserFromToken } from '@/lib/infrastructure/api-auth';
 import { requireUserId } from '@/lib/auth';
 
 // POST: Exchange session auth for API token (called after OAuth consent)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function POST(_request: NextRequest): Promise<NextResponse> {
   try {
     const userId = await requireUserId();
