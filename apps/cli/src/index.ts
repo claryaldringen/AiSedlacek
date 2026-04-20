@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { loginCommand } from './commands/login.js';
 import { logoutCommand } from './commands/logout.js';
 import { whoamiCommand } from './commands/whoami.js';
+import { uploadCommand } from './commands/upload.js';
 
 export const program = new Command()
   .name('ais')
@@ -11,3 +12,4 @@ export const program = new Command()
 program.addCommand(loginCommand);
 program.addCommand(logoutCommand);
 program.addCommand(whoamiCommand);
+program.addCommand(uploadCommand);
