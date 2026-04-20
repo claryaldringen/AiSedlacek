@@ -2,9 +2,7 @@ import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ora from 'ora';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import * as output from '../lib/output.js';
 
 export const uploadCommand = new Command('upload')
@@ -12,19 +10,10 @@ export const uploadCommand = new Command('upload')
   .argument('<sources...>', 'URL adresy, lokální soubory, nebo .txt soubor se seznamem URL')
   .option('-c, --collection <id>', 'ID kolekce')
   .action(async (sources: string[], options: { collection?: string }) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
+    const { api } = requireAuth();
 
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
-
-    // Expand sources: .txt files contain one URL per line
     const expanded = expandSources(sources);
 
-    // Separate URLs from local files
     const urls: string[] = [];
     const localFiles: string[] = [];
 
@@ -42,7 +31,6 @@ export const uploadCommand = new Command('upload')
     let totalPages = 0;
     let totalErrors = 0;
 
-    // Upload URLs
     if (urls.length > 0) {
       spinner.text = `Nahrávám ${urls.length} URL...`;
       try {
@@ -63,14 +51,13 @@ export const uploadCommand = new Command('upload')
           output.error(`  ${err.url}: ${err.error}`);
           spinner.start();
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         spinner.stop();
-        output.error(e.message);
+        output.error((e as Error).message);
         process.exit(1);
       }
     }
 
-    // Upload local files
     for (const filePath of localFiles) {
       spinner.text = `Nahrávám ${path.basename(filePath)}...`;
       try {
@@ -98,9 +85,9 @@ export const uploadCommand = new Command('upload')
             spinner.start();
           }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         spinner.stop();
-        output.error(`  ${filePath}: ${e.message}`);
+        output.error(`  ${filePath}: ${(e as Error).message}`);
         spinner.start();
         totalErrors++;
       }

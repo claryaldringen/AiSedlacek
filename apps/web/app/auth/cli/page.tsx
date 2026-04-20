@@ -30,6 +30,20 @@ function CliAuthContent() {
     return <div className="p-8 text-center">Neplatný požadavek.</div>;
   }
 
+  // Validate redirect is localhost only (prevent open redirect)
+  let redirectValid = false;
+  try {
+    const parsed = new URL(redirect);
+    redirectValid =
+      parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]';
+  } catch {
+    redirectValid = false;
+  }
+
+  if (!redirectValid) {
+    return <div className="p-8 text-center text-red-600">Neplatný redirect — pouze localhost je povolen.</div>;
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="mx-4 w-full max-w-md rounded-lg bg-white p-8 shadow-md">

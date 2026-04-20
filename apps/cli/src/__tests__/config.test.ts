@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getConfigDir, loadConfig, saveConfig } from '../lib/config.js';
+import { getConfigDir, loadConfig } from '../lib/config.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
@@ -17,9 +17,7 @@ describe('config', () => {
 
   it('loads config from file', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ server: 'https://sedlacek.ai' }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ server: 'https://sedlacek.ai' }));
     const config = loadConfig();
     expect(config.server).toBe('https://sedlacek.ai');
   });

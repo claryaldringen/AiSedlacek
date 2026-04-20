@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import ora from 'ora';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import {
   listWorkspacePages,
   getChangedFiles,
@@ -16,15 +14,8 @@ export const pushCommand = new Command('push')
   .description('Odeslat lokální změny na server')
   .argument('[pageIds...]', 'ID stránek (výchozí: všechny změněné)')
   .option('-f, --force', 'Přepsat i při konfliktu')
-  .action(async (pageIds: string[], _options) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+  .action(async (pageIds: string[], options) => {
+    const { api } = requireAuth();
 
     const ids = pageIds.length > 0 ? pageIds : listWorkspacePages();
 
@@ -46,11 +37,39 @@ export const pushCommand = new Command('push')
       const files = readPageFiles(pageId);
       if (!files) continue;
 
-      spinner.text = `Odesílám ${pageId} (${changed.length} změn)...`;
+      // Check for glossary changes (not pushable)
+      const glossaryChanged = changed.some((c) => c.file === 'glossary.md');
+      if (glossaryChanged) {
+        spinner.stop();
+        output.warn(
+          `  ${pageId}: glossary.md byl změněn lokálně, ale glosář nelze pushovat (pouze read-only)`,
+        );
+        spinner.start();
+      }
+
+      const pushableChanges = changed.filter((c) => c.file !== 'glossary.md');
+      if (pushableChanges.length === 0) continue;
+
+      spinner.text = `Odesílám ${pageId} (${pushableChanges.length} změn)...`;
 
       try {
+        // Conflict detection: check if server version changed since pull
+        if (meta.serverUpdatedAt && !options.force) {
+          const currentPage = await api.get(`/api/pages/${pageId}`);
+          const serverUpdatedAt = currentPage.document?.updatedAt;
+          if (serverUpdatedAt && serverUpdatedAt !== meta.serverUpdatedAt) {
+            spinner.stop();
+            output.error(
+              `  ${pageId}: konflikt — dokument byl změněn na serveru od posledního pull`,
+            );
+            output.info(`    Použijte --force pro přepsání, nebo pull pro aktualizaci`);
+            spinner.start();
+            continue;
+          }
+        }
+
         const patch: Record<string, string> = {};
-        for (const c of changed) {
+        for (const c of pushableChanges) {
           if (c.file === 'transcription.md') patch.transcription = files['transcription.md'];
           if (c.file === 'translation.md') patch.translation = files['translation.md'];
           if (c.file === 'context.md') patch.context = files['context.md'];
@@ -65,6 +84,7 @@ export const pushCommand = new Command('push')
         const doc = page.document;
         const translation = doc.translations?.[0];
         const glossaryText = (doc.glossary ?? [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((g: any) => `**${g.term}**: ${g.definition}`)
           .join('\n');
 
@@ -75,15 +95,16 @@ export const pushCommand = new Command('push')
           translation: translation?.text ?? '',
           context: doc.context ?? '',
           glossary: glossaryText,
+          serverUpdatedAt: doc.updatedAt,
         });
 
         spinner.stop();
-        output.success(`  ${pageId}: ${changed.map((c) => c.file).join(', ')}`);
+        output.success(`  ${pageId}: ${pushableChanges.map((c) => c.file).join(', ')}`);
         spinner.start();
         pushed++;
-      } catch (e: any) {
+      } catch (e: unknown) {
         spinner.stop();
-        output.error(`  ${pageId}: ${e.message}`);
+        output.error(`  ${pageId}: ${(e as Error).message}`);
         spinner.start();
       }
     }

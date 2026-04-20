@@ -40,14 +40,14 @@ describe('workspace', () => {
 
     // 4 content files + 1 meta file = 5 writes
     expect(writeSpy).toHaveBeenCalledTimes(5);
-    expect(mkdirSpy).toHaveBeenCalledWith(
-      expect.stringContaining('/.ais-workspace/42'),
-      { recursive: true },
-    );
+    expect(mkdirSpy).toHaveBeenCalledWith(expect.stringContaining('/.ais-workspace/42'), {
+      recursive: true,
+    });
   });
 
   it('detects changed files', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(fs.readFileSync).mockImplementation((filePath: any) => {
       if (filePath.toString().endsWith('.meta.json')) {
         return JSON.stringify({

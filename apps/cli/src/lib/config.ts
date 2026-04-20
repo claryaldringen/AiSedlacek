@@ -26,8 +26,5 @@ export function loadConfig(): CliConfig {
 export function saveConfig(config: CliConfig): void {
   const dir = getConfigDir();
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'config.json'),
-    JSON.stringify(config, null, 2),
-  );
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config, null, 2));
 }

@@ -1,21 +1,12 @@
 import { Command } from 'commander';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import * as output from '../lib/output.js';
 
 export const listCommand = new Command('list')
   .description('Zobrazit seznam stránek')
   .option('-c, --collection <id>', 'Filtrovat podle kolekce')
   .action(async (options) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     try {
       let url = '/api/pages';
@@ -30,6 +21,7 @@ export const listCommand = new Command('list')
 
       output.table(
         ['ID', 'Soubor', 'Status', 'Kolekce', 'Vytvořeno'],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         pages.map((p: any) => [
           p.id.slice(0, 8),
           p.displayName ?? p.filename,
@@ -38,8 +30,8 @@ export const listCommand = new Command('list')
           new Date(p.createdAt).toLocaleDateString('cs'),
         ]),
       );
-    } catch (e: any) {
-      output.error(e.message);
+    } catch (e: unknown) {
+      output.error((e as Error).message);
       process.exit(1);
     }
   });

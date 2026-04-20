@@ -8,7 +8,20 @@ export class ApiError extends Error {
   }
 }
 
-export function createApiClient(serverUrl: string, token: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ApiResponse = any;
+
+export type ApiClient = {
+  get(path: string): Promise<ApiResponse>;
+  postJson(path: string, data: unknown): Promise<ApiResponse>;
+  patchJson(path: string, data: unknown): Promise<ApiResponse>;
+  delete(path: string): Promise<ApiResponse>;
+  postFormData(path: string, formData: FormData): Promise<ApiResponse>;
+  getRaw(path: string): Promise<Response>;
+};
+
+export function createApiClient(serverUrl: string, token: string): ApiClient {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function request(path: string, init?: RequestInit): Promise<any> {
     const url = `${serverUrl}${path}`;
     const res = await fetch(url, {
@@ -74,5 +87,3 @@ export function createApiClient(serverUrl: string, token: string) {
     },
   };
 }
-
-export type ApiClient = ReturnType<typeof createApiClient>;

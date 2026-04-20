@@ -1,20 +1,11 @@
 import { Command } from 'commander';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import * as output from '../lib/output.js';
 
 export const collectionsCommand = new Command('collections')
   .description('Správa kolekcí')
   .action(async () => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     try {
       const data = await api.get('/api/collections');
@@ -27,6 +18,7 @@ export const collectionsCommand = new Command('collections')
 
       output.table(
         ['ID', 'Název', 'Stránek', 'Vytvořeno'],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         collections.map((c: any) => [
           c.id.slice(0, 8),
           c.name,
@@ -34,8 +26,8 @@ export const collectionsCommand = new Command('collections')
           new Date(c.createdAt).toLocaleDateString('cs'),
         ]),
       );
-    } catch (e: any) {
-      output.error(e.message);
+    } catch (e: unknown) {
+      output.error((e as Error).message);
       process.exit(1);
     }
   });
@@ -46,14 +38,7 @@ collectionsCommand
   .argument('<name>', 'Název kolekce')
   .option('-d, --description <text>', 'Popis kolekce')
   .action(async (name: string, options: { description?: string }) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     try {
       const collection = await api.postJson('/api/collections', {
@@ -61,8 +46,8 @@ collectionsCommand
         description: options.description,
       });
       output.success(`Kolekce vytvořena: ${collection.id} — ${collection.name}`);
-    } catch (e: any) {
-      output.error(e.message);
+    } catch (e: unknown) {
+      output.error((e as Error).message);
       process.exit(1);
     }
   });
@@ -72,20 +57,13 @@ collectionsCommand
   .description('Smazat kolekci')
   .argument('<id>', 'ID kolekce')
   .action(async (id: string) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     try {
       await api.delete(`/api/collections/${id}`);
       output.success(`Kolekce ${id} smazána.`);
-    } catch (e: any) {
-      output.error(e.message);
+    } catch (e: unknown) {
+      output.error((e as Error).message);
       process.exit(1);
     }
   });

@@ -17,10 +17,7 @@ export function warn(msg: string): void {
   console.log(chalk.yellow(msg));
 }
 
-export function table(
-  headers: string[],
-  rows: string[][],
-): void {
+export function table(headers: string[], rows: string[][]): void {
   const t = new Table({ head: headers.map((h) => chalk.bold(h)) });
   for (const row of rows) {
     t.push(row);

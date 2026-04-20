@@ -339,6 +339,66 @@ export default async function LandingPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
+      {/* CLI */}
+      <section className="border-t border-[#d4c5a9] bg-[#f5edd6] py-24">
+        <div className="mx-auto max-w-6xl px-6">
+          <p className="text-center font-serif text-sm font-semibold uppercase tracking-[0.15em] text-[#8b1a1a]">
+            {t('cliLabel')}
+          </p>
+          <h2 className="mt-2 text-center font-serif text-3xl font-bold text-[#3d2b1f]">
+            {t('cliHeading')}
+          </h2>
+          <p
+            className="mx-auto mt-4 max-w-2xl text-center text-sm leading-relaxed text-[#7a6652] [&_code]:rounded [&_code]:bg-[#e8dcc4] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[#3d2b1f]"
+            dangerouslySetInnerHTML={{ __html: t('cliBody') }}
+          />
+
+          <div className="mt-12 grid gap-8 sm:grid-cols-3">
+            {[
+              {
+                title: t('cliFeature01Title'),
+                desc: t('cliFeature01Desc'),
+                icon: 'M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z',
+              },
+              {
+                title: t('cliFeature02Title'),
+                desc: t('cliFeature02Desc'),
+                icon: 'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5',
+              },
+              {
+                title: t('cliFeature03Title'),
+                desc: t('cliFeature03Desc'),
+                icon: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z',
+              },
+            ].map((item) => (
+              <div key={item.title}>
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#8b1a1a]/10 text-[#8b1a1a]">
+                  <svg
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
+                  </svg>
+                </div>
+                <h3 className="mt-4 font-serif text-lg font-semibold text-[#3d2b1f]">
+                  {item.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#7a6652]">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-12 flex justify-center">
+            <div className="rounded-lg border border-[#d4c5a9] bg-[#e8dcc4] px-6 py-3">
+              <code className="font-mono text-sm text-[#3d2b1f]">{t('cliInstall')}</code>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Supported texts */}
       <section id="texts" className="border-t border-[#d4c5a9] bg-[#f5edd6] py-24">
         <div className="mx-auto max-w-6xl px-6">

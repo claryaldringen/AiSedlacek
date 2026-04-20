@@ -1,9 +1,7 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import { processWithClaudeCli, prepareImage } from '@ai-sedlacek/ocr';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import * as output from '../lib/output.js';
 
 export const processCommand = new Command('process')
@@ -13,24 +11,17 @@ export const processCommand = new Command('process')
   .option('-a, --all', 'Zpracovat všechny pending stránky')
   .option('-l, --language <lang>', 'Cílový jazyk překladu', 'cs')
   .action(async (pageIds: string[], options) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     // Resolve page IDs
     let ids = pageIds;
     if (options.collection) {
       const collection = await api.get(`/api/collections/${options.collection}`);
-      ids = collection.pages
-        .filter((p: any) => p.status === 'pending')
-        .map((p: any) => p.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ids = collection.pages.filter((p: any) => p.status === 'pending').map((p: any) => p.id);
     } else if (options.all) {
       const pages = await api.get('/api/pages?status=pending');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ids = (pages.pages ?? pages).map((p: any) => p.id);
     }
 
@@ -86,8 +77,8 @@ export const processCommand = new Command('process')
         spinner.succeed(
           `[${i + 1}/${ids.length}] ${page.filename} — hotovo (${result.detectedLanguage} → ${result.translationLanguage})`,
         );
-      } catch (e: any) {
-        spinner.fail(`[${i + 1}/${ids.length}] Stránka ${pageId} — ${e.message}`);
+      } catch (e: unknown) {
+        spinner.fail(`[${i + 1}/${ids.length}] Stránka ${pageId} — ${(e as Error).message}`);
       }
     }
 

@@ -28,14 +28,22 @@ export const loginCommand = new Command('login')
       await open(authUrl);
       spinner.text = 'Čekám na autorizaci v prohlížeči...';
 
-      const token = await tokenPromise;
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('Timeout — autorizace nebyla dokončena do 5 minut')),
+          5 * 60 * 1000,
+        );
+      });
+      const token = await Promise.race([tokenPromise, timeout]);
+      clearTimeout(timeoutId!);
       saveToken(token);
 
       spinner.stop();
       output.success('Přihlášení úspěšné!');
-    } catch (e: any) {
+    } catch (e: unknown) {
       spinner.stop();
-      output.error(e.message ?? 'Přihlášení selhalo');
+      output.error((e as Error).message ?? 'Přihlášení selhalo');
       process.exit(1);
     } finally {
       server.close();
@@ -79,7 +87,9 @@ function startCallbackServer(
       }
 
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<html><body><h1>Přihlášení úspěšné!</h1><p>Můžete zavřít tuto stránku.</p></body></html>');
+      res.end(
+        '<html><body><h1>Přihlášení úspěšné!</h1><p>Můžete zavřít tuto stránku.</p></body></html>',
+      );
       resolveToken(token);
     });
 

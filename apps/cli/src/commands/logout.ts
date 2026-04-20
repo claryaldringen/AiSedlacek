@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { loadConfig } from '../lib/config.js';
 import { getToken, deleteToken } from '../lib/auth.js';
+import { loadConfig } from '../lib/config.js';
 import { createApiClient } from '../lib/api-client.js';
 import * as output from '../lib/output.js';
 

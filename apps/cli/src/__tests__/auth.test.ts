@@ -18,9 +18,7 @@ describe('auth', () => {
 
   it('reads token from file', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ token: 'test-token-123' }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ token: 'test-token-123' }));
     expect(getToken()).toBe('test-token-123');
   });
 
@@ -30,6 +28,7 @@ describe('auth', () => {
     expect(writeSpy).toHaveBeenCalledWith(
       '/home/test/.config/ai-sedlacek/auth.json',
       JSON.stringify({ token: 'new-token' }, null, 2),
+      { mode: 0o600 },
     );
   });
 

@@ -1,22 +1,13 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import * as output from '../lib/output.js';
 
 export const showCommand = new Command('show')
   .description('Zobrazit detail stránky')
   .argument('<pageId>', 'ID stránky')
   .action(async (pageId: string) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     try {
       const page = await api.get(`/api/pages/${pageId}`);
@@ -60,8 +51,8 @@ export const showCommand = new Command('show')
         }
         console.log();
       }
-    } catch (e: any) {
-      output.error(e.message);
+    } catch (e: unknown) {
+      output.error((e as Error).message);
       process.exit(1);
     }
   });

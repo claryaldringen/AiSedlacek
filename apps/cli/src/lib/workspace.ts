@@ -14,12 +14,14 @@ export interface PageData {
   translation: string;
   context: string;
   glossary: string;
+  serverUpdatedAt?: string;
 }
 
 export interface PageMeta {
   documentId: string;
   pageId: string;
   pulledAt: string;
+  serverUpdatedAt?: string;
   hashes: Record<string, string>;
 }
 
@@ -57,6 +59,7 @@ export function writePageFiles(data: PageData): void {
     documentId: data.documentId,
     pageId: data.pageId,
     pulledAt: new Date().toISOString(),
+    serverUpdatedAt: data.serverUpdatedAt,
     hashes,
   };
   fs.writeFileSync(path.join(dir, '.meta.json'), JSON.stringify(meta, null, 2));

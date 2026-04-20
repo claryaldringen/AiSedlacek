@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import ora from 'ora';
-import { loadConfig } from '../lib/config.js';
-import { getToken } from '../lib/auth.js';
-import { createApiClient } from '../lib/api-client.js';
+import { requireAuth } from '../lib/require-auth.js';
 import { writePageFiles } from '../lib/workspace.js';
 import * as output from '../lib/output.js';
 
@@ -11,18 +9,12 @@ export const pullCommand = new Command('pull')
   .argument('[pageIds...]', 'ID stránek')
   .option('-c, --collection <id>', 'Stáhnout celou kolekci')
   .action(async (pageIds: string[], options) => {
-    const token = getToken();
-    if (!token) {
-      output.error('Nejste přihlášen. Spusťte `ais login`.');
-      process.exit(1);
-    }
-
-    const config = loadConfig();
-    const api = createApiClient(config.server, token);
+    const { api } = requireAuth();
 
     let ids = pageIds;
     if (options.collection) {
       const collection = await api.get(`/api/collections/${options.collection}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ids = collection.pages.filter((p: any) => p.status === 'done').map((p: any) => p.id);
     }
 
@@ -50,6 +42,7 @@ export const pullCommand = new Command('pull')
         const translation = doc.translations?.[0];
 
         const glossaryText = (doc.glossary ?? [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((g: any) => `**${g.term}**: ${g.definition}`)
           .join('\n');
 
@@ -60,14 +53,17 @@ export const pullCommand = new Command('pull')
           translation: translation?.text ?? '',
           context: doc.context ?? '',
           glossary: glossaryText,
+          serverUpdatedAt: doc.updatedAt,
         });
 
         spinner.stop();
-        output.success(`  ${page.displayName ?? page.filename ?? pageId} → .ais-workspace/${pageId}/`);
+        output.success(
+          `  ${page.displayName ?? page.filename ?? pageId} → .ais-workspace/${pageId}/`,
+        );
         spinner.start();
-      } catch (e: any) {
+      } catch (e: unknown) {
         spinner.stop();
-        output.error(`  ${pageId}: ${e.message}`);
+        output.error(`  ${pageId}: ${(e as Error).message}`);
         spinner.start();
       }
     }
