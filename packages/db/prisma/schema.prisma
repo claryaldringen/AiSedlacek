@@ -29,6 +29,7 @@ model User {
   processingJobs ProcessingJob[]
   workspaces           Workspace[]
   workspaceMemberships WorkspaceMember[]
+  apiTokens            ApiToken[]
 }
 
 model Account {
@@ -292,6 +293,18 @@ model WorkspaceMember {
   joinedAt    DateTime  @default(now())
 
   @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  name       String    @default("CLI")
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
   @@index([userId])
 }
 
