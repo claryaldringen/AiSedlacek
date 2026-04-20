@@ -29,6 +29,7 @@ model User {
   processingJobs ProcessingJob[]
   workspaces           Workspace[]
   workspaceMemberships WorkspaceMember[]
+  apiTokens            ApiToken[]
 }
 
 model Account {
@@ -310,4 +311,18 @@ model WorkspaceItem {
   @@index([workspaceId])
   @@index([collectionId])
   @@index([pageId])
+}
+
+// ---- CLI Authentication ----
+
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  name       String    @default("CLI")
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
 }
