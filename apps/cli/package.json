@@ -1,0 +1,35 @@
+{
+  "name": "@ai-sedlacek/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ais": "./dist/bin.js"
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "format:check": "prettier --check src/",
+    "format": "prettier --write src/",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sedlacek/ocr": "*",
+    "@ai-sedlacek/shared": "*",
+    "chalk": "^5",
+    "cli-table3": "^0.6",
+    "commander": "^13",
+    "open": "^10",
+    "ora": "^8"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "prettier": "^3",
+    "tsup": "^8",
+    "typescript": "^5",
+    "typescript-eslint": "^8",
+    "vitest": "^3"
+  }
+}
