@@ -6,6 +6,9 @@ import { uploadCommand } from './commands/upload.js';
 import { processCommand } from './commands/process.js';
 import { listCommand } from './commands/list.js';
 import { showCommand } from './commands/show.js';
+import { pullCommand } from './commands/pull.js';
+import { pushCommand } from './commands/push.js';
+import { diffCommand } from './commands/diff.js';
 
 export const program = new Command()
   .name('ais')
@@ -19,3 +22,6 @@ program.addCommand(uploadCommand);
 program.addCommand(processCommand);
 program.addCommand(listCommand);
 program.addCommand(showCommand);
+program.addCommand(pullCommand);
+program.addCommand(pushCommand);
+program.addCommand(diffCommand);
