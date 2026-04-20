@@ -4,6 +4,8 @@ import { logoutCommand } from './commands/logout.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { uploadCommand } from './commands/upload.js';
 import { processCommand } from './commands/process.js';
+import { listCommand } from './commands/list.js';
+import { showCommand } from './commands/show.js';
 
 export const program = new Command()
   .name('ais')
@@ -15,3 +17,5 @@ program.addCommand(logoutCommand);
 program.addCommand(whoamiCommand);
 program.addCommand(uploadCommand);
 program.addCommand(processCommand);
+program.addCommand(listCommand);
+program.addCommand(showCommand);
