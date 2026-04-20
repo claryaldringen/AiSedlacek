@@ -9,6 +9,7 @@ import { showCommand } from './commands/show.js';
 import { pullCommand } from './commands/pull.js';
 import { pushCommand } from './commands/push.js';
 import { diffCommand } from './commands/diff.js';
+import { collectionsCommand } from './commands/collections.js';
 
 export const program = new Command()
   .name('ais')
@@ -25,3 +26,4 @@ program.addCommand(showCommand);
 program.addCommand(pullCommand);
 program.addCommand(pushCommand);
 program.addCommand(diffCommand);
+program.addCommand(collectionsCommand);
