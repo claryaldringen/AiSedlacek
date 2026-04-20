@@ -3,7 +3,7 @@ import ora from 'ora';
 import { processWithClaudeCli, prepareImage } from '@ai-sedlacek/ocr';
 import { loadConfig } from '../lib/config.js';
 import { getToken } from '../lib/auth.js';
-import { createApiClient, type ApiClient } from '../lib/api-client.js';
+import { createApiClient } from '../lib/api-client.js';
 import * as output from '../lib/output.js';
 
 export const processCommand = new Command('process')

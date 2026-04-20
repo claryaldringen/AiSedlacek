@@ -12,3 +12,6 @@ coverage/
 .superpowers/
 .wrangler/
 .env*.local
+
+# CLI workspace
+.ais-workspace/

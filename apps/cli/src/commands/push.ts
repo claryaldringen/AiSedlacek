@@ -16,7 +16,7 @@ export const pushCommand = new Command('push')
   .description('Odeslat lokální změny na server')
   .argument('[pageIds...]', 'ID stránek (výchozí: všechny změněné)')
   .option('-f, --force', 'Přepsat i při konfliktu')
-  .action(async (pageIds: string[], options) => {
+  .action(async (pageIds: string[], _options) => {
     const token = getToken();
     if (!token) {
       output.error('Nejste přihlášen. Spusťte `ais login`.');
