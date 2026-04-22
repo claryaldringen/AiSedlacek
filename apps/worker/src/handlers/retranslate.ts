@@ -20,7 +20,7 @@ const STEPS_EN = {
   saving: 'Saving translation…',
   done: 'Done',
 };
-function getSteps(lang: string) {
+function getSteps(lang: string): typeof STEPS_CS {
   return lang === 'cs' ? STEPS_CS : STEPS_EN;
 }
 
