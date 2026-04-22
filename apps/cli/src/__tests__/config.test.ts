@@ -25,6 +25,6 @@ describe('config', () => {
   it('returns defaults when no config file', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const config = loadConfig();
-    expect(config.server).toBe('https://sedlacek.ai');
+    expect(config.server).toBe('https://aisedlacek.com');
   });
 });

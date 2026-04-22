@@ -7,7 +7,7 @@ export interface CliConfig {
 }
 
 const DEFAULT_CONFIG: CliConfig = {
-  server: 'https://sedlacek.ai',
+  server: 'https://aisedlacek.com',
 };
 
 export function getConfigDir(): string {
