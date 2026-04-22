@@ -1,13 +1,14 @@
 {
   "name": "ai-sedlacek-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI klient pro čtečku starých textů — stahování, úprava a nahrávání historických rukopisů",
   "type": "module",
   "bin": {
     "ais": "./dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "dev": "tsup --watch",
