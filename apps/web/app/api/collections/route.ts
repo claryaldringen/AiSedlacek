@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { computeCostFromTokens } from '@/lib/pricing';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 

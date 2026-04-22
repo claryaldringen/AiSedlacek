@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -14,7 +14,7 @@ const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 

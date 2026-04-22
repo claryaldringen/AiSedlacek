@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -10,7 +10,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
   try {
-    const auth = await getAuthenticatedUserId();
+    const auth = await resolveUserId(request);
     if (auth.error) return auth.error;
     const { userId } = auth;
 
@@ -263,7 +263,7 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 

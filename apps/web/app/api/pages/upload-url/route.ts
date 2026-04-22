@@ -4,22 +4,15 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
-import { resolveUserFromToken } from '@/lib/infrastructure/api-auth';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // Try API token first, then session
-  let userId: string | null = await resolveUserFromToken(
-    request.headers.get('authorization'),
-  );
-  if (!userId) {
-    const auth = await getAuthenticatedUserId();
-    if (auth.error) return auth.error;
-    userId = auth.userId;
-  }
+  const auth = await resolveUserId(request);
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   let body: { urls: string[]; collectionId?: string };
   try {

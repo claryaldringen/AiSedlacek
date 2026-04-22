@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
-import { resolveUserFromToken } from '@/lib/infrastructure/api-auth';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,15 +13,9 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id } = await params;
 
-  // Auth: API token or session
-  let userId: string | null = await resolveUserFromToken(
-    request.headers.get('authorization'),
-  );
-  if (!userId) {
-    const auth = await getAuthenticatedUserId();
-    if (auth.error) return auth.error;
-    userId = auth.userId;
-  }
+  const auth = await resolveUserId(request);
+  if (auth.error) return auth.error;
+  const { userId } = auth;
 
   // Verify page ownership
   const page = await prisma.page.findUnique({ where: { id } });

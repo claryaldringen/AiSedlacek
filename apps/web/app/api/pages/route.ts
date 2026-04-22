@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const auth = await getAuthenticatedUserId();
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 
