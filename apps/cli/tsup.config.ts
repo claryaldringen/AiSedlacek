@@ -7,6 +7,5 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   sourcemap: true,
-  noExternal: [/@ai-sedlacek\/.*/],
-  external: ['sharp', '@anthropic-ai/sdk'],
+  external: ['sharp'],
 });
