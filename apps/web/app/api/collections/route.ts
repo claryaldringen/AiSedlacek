@@ -10,31 +10,47 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { userId } = auth;
 
   const workspaceId = request.nextUrl.searchParams.get('workspaceId');
+  if (!workspaceId) {
+    return NextResponse.json({ error: 'workspaceId required' }, { status: 400 });
+  }
 
-  // Sync user's collections to workspace items (if home workspace)
-  if (workspaceId) {
-    const ws = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { type: true },
+  const ws = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { type: true },
+  });
+  if (!ws) {
+    return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
+  }
+
+  // Authorization: public workspaces are accessible to any signed-in user;
+  // home/shared workspaces require membership.
+  if (ws.type !== 'public') {
+    const member = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
     });
-    if (ws?.type === 'home') {
-      const userCollections = await prisma.collection.findMany({
-        where: { userId },
-        select: { id: true },
-      });
-      if (userCollections.length > 0) {
-        await prisma.workspaceItem.createMany({
-          data: userCollections.map((c) => ({ workspaceId, collectionId: c.id })),
-          skipDuplicates: true,
-        });
-      }
+    if (!member) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
   }
 
-  // For now, always return all user's collections
-  // (workspace filtering will be re-added once data integrity is confirmed)
+  // Sync user's collections to workspace items (home workspace only)
+  if (ws.type === 'home') {
+    const userCollections = await prisma.collection.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    if (userCollections.length > 0) {
+      await prisma.workspaceItem.createMany({
+        data: userCollections.map((c) => ({ workspaceId, collectionId: c.id })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
   const collections = await prisma.collection.findMany({
-    where: { userId },
+    where: {
+      workspaceItems: { some: { workspaceId } },
+    },
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { pages: true } },
