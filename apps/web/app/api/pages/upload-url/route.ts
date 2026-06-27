@@ -26,10 +26,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { urls, collectionId } = body;
 
   if (!Array.isArray(urls) || urls.length === 0) {
-    return NextResponse.json(
-      { error: 'Pole urls je povinné' },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'Pole urls je povinné' }, { status: 400 });
   }
 
   const resolvedCollectionId =
@@ -84,9 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       // Extract filename from URL
-      const filename = decodeURIComponent(
-        parsed.pathname.split('/').pop() || 'image.jpg',
-      );
+      const filename = decodeURIComponent(parsed.pathname.split('/').pop() || 'image.jpg');
 
       // Store
       const stored = await storage.upload(buffer, filename);

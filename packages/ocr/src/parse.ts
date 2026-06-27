@@ -82,7 +82,10 @@ export function parseOcrJsonBatch(
   let positionalIndex = 0;
 
   const indexIsUsable = (n: number): boolean =>
-    Number.isInteger(n) && n >= 0 && (maxResults === undefined || n < maxResults) && !usedIndices.has(n);
+    Number.isInteger(n) &&
+    n >= 0 &&
+    (maxResults === undefined || n < maxResults) &&
+    !usedIndices.has(n);
 
   for (const line of lines) {
     if (maxResults !== undefined && results.length >= maxResults) break;
@@ -127,8 +130,7 @@ export function parseOcrJsonBatch(
       arr.forEach((obj, i) => {
         if (maxResults !== undefined && results.length >= maxResults) return;
         const rawIdx = (obj as { imageIndex?: unknown })?.imageIndex;
-        const idx =
-          typeof rawIdx === 'number' && indexIsUsable(rawIdx) ? rawIdx : i;
+        const idx = typeof rawIdx === 'number' && indexIsUsable(rawIdx) ? rawIdx : i;
         usedIndices.add(idx);
         results.push({ index: idx, result: normalizeOcrResult(obj) });
       });

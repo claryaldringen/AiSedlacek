@@ -274,15 +274,14 @@ describe('billing', () => {
   describe('deductTokensIfSufficient', () => {
     beforeEach(() => {
       // Run the callback against a tx that delegates to the mocked tokenTransaction.
-      mockTransaction.mockImplementation(
-        async (cb: (tx: unknown) => unknown) =>
-          cb({
-            tokenTransaction: {
-              aggregate: mockAggregate,
-              findFirst: mockFindFirst,
-              create: mockCreate,
-            },
-          }),
+      mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
+        cb({
+          tokenTransaction: {
+            aggregate: mockAggregate,
+            findFirst: mockFindFirst,
+            create: mockCreate,
+          },
+        }),
       );
     });
 

@@ -4,10 +4,7 @@ const MAX_RETRIES = 5;
 
 function isUniqueViolation(e: unknown): boolean {
   return (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    (e as { code: unknown }).code === 'P2002'
+    typeof e === 'object' && e !== null && 'code' in e && (e as { code: unknown }).code === 'P2002'
   );
 }
 

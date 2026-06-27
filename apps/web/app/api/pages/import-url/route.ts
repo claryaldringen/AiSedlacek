@@ -104,10 +104,7 @@ async function handleImport(
 
     if (!response.ok) {
       // Don't echo upstream statusText — it can leak details of internal services.
-      return NextResponse.json(
-        { error: `Server vrátil ${response.status}` },
-        { status: 422 },
-      );
+      return NextResponse.json({ error: `Server vrátil ${response.status}` }, { status: 422 });
     }
 
     contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
