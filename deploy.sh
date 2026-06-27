@@ -8,7 +8,8 @@ echo "=== Pulling latest code ==="
 git pull origin main
 
 echo "=== Installing dependencies ==="
-npm install
+# npm ci zajišťuje reprodukovatelné buildy z package-lock.json (supply-chain bezpečnost)
+npm ci
 
 echo "=== Generating Prisma client ==="
 npx prisma generate --schema=packages/db/prisma/schema.prisma

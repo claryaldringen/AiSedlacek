@@ -11,6 +11,7 @@ module.exports = {
       node_args: '--env-file=/opt/AiSedlacek/.env',
       max_memory_restart: '500M',
     },
+    // TODO(CR): v produkci spouštět zkompilovaný JS místo tsx (devDependency)
     {
       name: 'ai-sedlacek-worker',
       cwd: '/opt/AiSedlacek',
