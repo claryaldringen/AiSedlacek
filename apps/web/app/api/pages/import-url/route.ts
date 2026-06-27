@@ -6,6 +6,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
+import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -92,7 +93,7 @@ async function handleImport(
   } else {
     let response: Response;
     try {
-      response = await fetch(parsedUrl.toString(), {
+      response = await safeFetch(parsedUrl.toString(), {
         headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
         signal: AbortSignal.timeout(60000),
       });
@@ -102,16 +103,23 @@ async function handleImport(
     }
 
     if (!response.ok) {
+      // Don't echo upstream statusText — it can leak details of internal services.
       return NextResponse.json(
-        { error: `Server vrátil ${response.status} ${response.statusText}` },
+        { error: `Server vrátil ${response.status}` },
         { status: 422 },
       );
     }
 
     contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
     contentDisposition = response.headers.get('content-disposition') ?? '';
-    const arrayBuffer = await response.arrayBuffer();
-    buffer = Buffer.from(arrayBuffer);
+    try {
+      buffer = await readBodyWithLimit(response, MAX_SIZE_MB * 1024 * 1024);
+    } catch {
+      return NextResponse.json(
+        { error: t('imageTooLarge', { size: `>${MAX_SIZE_MB}`, max: MAX_SIZE_MB }) },
+        { status: 422 },
+      );
+    }
   }
 
   // Check content type

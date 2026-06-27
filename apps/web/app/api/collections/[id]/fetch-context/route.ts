@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+
+const MAX_FETCH_BYTES = 5 * 1024 * 1024; // 5 MB of HTML is plenty for context
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -38,20 +42,26 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
+  // Gate on token balance before spending money on Claude (this route bills the user).
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
+  }
+
   // Get new content — either from URL or from provided text
   let newContent: string;
   let sourceLabel: string;
 
   if (hasUrl) {
     try {
-      const res = await fetch(url!.trim(), {
+      const res = await safeFetch(url!.trim(), {
         headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
         signal: AbortSignal.timeout(30000),
       });
       if (!res.ok) {
         return NextResponse.json({ error: `Server vrátil ${res.status}` }, { status: 422 });
       }
-      const html = await res.text();
+      const html = (await readBodyWithLimit(res, MAX_FETCH_BYTES)).toString('utf8');
       newContent = html
         .replace(/<script[\s\S]*?<\/script>/gi, '')
         .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -143,6 +153,14 @@ ${newContent}`;
     return NextResponse.json({ error: `Extrakce kontextu selhala: ${message}` }, { status: 422 });
   }
 
+  // Bill the user for the context-extraction call.
+  await deductTokensIfSufficient(
+    userId,
+    response.usage.input_tokens,
+    response.usage.output_tokens,
+    'fetch-context',
+  );
+
   const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
   // Update URLs list only when a URL was provided
@@ -165,7 +183,7 @@ ${newContent}`;
   });
 
   // Extract structured metadata from context (fire-and-forget)
-  void extractMetadata(client, context, id);
+  void extractMetadata(client, context, id, userId);
 
   return NextResponse.json({
     context,
@@ -179,6 +197,7 @@ async function extractMetadata(
   client: Anthropic,
   context: string,
   collectionId: string,
+  userId: string,
 ): Promise<void> {
   try {
     const metaResponse = await client.messages.create({
@@ -205,10 +224,23 @@ ${context}`,
       ],
     });
 
+    // Bill for the metadata call too (previously this Claude call was free).
+    await deductTokensIfSufficient(
+      userId,
+      metaResponse.usage.input_tokens,
+      metaResponse.usage.output_tokens,
+      'fetch-context-metadata',
+    );
+
     const text = metaResponse.content[0]?.type === 'text' ? metaResponse.content[0].text : '';
     if (!text) return;
 
-    const parsed = JSON.parse(text) as Record<string, unknown>;
+    // Strip optional ```json code fences before parsing (LLM sometimes adds them).
+    const jsonText = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '');
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
     await prisma.collection.update({
       where: { id: collectionId },
       data: {

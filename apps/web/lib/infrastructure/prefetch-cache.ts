@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { safeFetch, readBodyWithLimit } from './safe-fetch';
 
 /**
  * In-memory prefetch cache for URL imports.
@@ -17,6 +18,23 @@ const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<CacheEntry | null>>();
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_ENTRY_BYTES = 25 * 1024 * 1024; // 25 MB per entry
+const MAX_TOTAL_BYTES = 200 * 1024 * 1024; // cap whole cache to bound memory
+
+function totalBytes(): number {
+  let sum = 0;
+  for (const entry of cache.values()) sum += entry.buffer.length;
+  return sum;
+}
+
+/** Evict oldest entries (insertion order) until under the global byte cap. */
+function enforceCapacity(): void {
+  while (totalBytes() > MAX_TOTAL_BYTES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
 
 function urlKey(url: string): string {
   return crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
@@ -44,7 +62,8 @@ export function prefetch(url: string): void {
 
   const promise = (async (): Promise<CacheEntry | null> => {
     try {
-      const response = await fetch(url, {
+      // safeFetch validates the URL (and every redirect) against SSRF ranges.
+      const response = await safeFetch(url, {
         headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
         signal: AbortSignal.timeout(60000),
       });
@@ -53,11 +72,13 @@ export function prefetch(url: string): void {
       const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
       if (!contentType.startsWith('image/')) return null;
 
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      // Don't cache files > 25 MB
-      if (buffer.length > 25 * 1024 * 1024) return null;
+      // Enforce the per-entry size cap while streaming (don't buffer the whole body first).
+      let buffer: Buffer;
+      try {
+        buffer = await readBodyWithLimit(response, MAX_ENTRY_BYTES);
+      } catch {
+        return null;
+      }
 
       const entry: CacheEntry = {
         buffer,
@@ -66,6 +87,7 @@ export function prefetch(url: string): void {
         timestamp: Date.now(),
       };
       cache.set(key, entry);
+      enforceCapacity();
       return entry;
     } catch {
       return null;

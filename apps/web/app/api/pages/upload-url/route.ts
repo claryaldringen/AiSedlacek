@@ -6,6 +6,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
+import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
@@ -43,15 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   for (const url of urls) {
     try {
-      // Validate URL
+      // Validate URL + download with SSRF protection and a streamed size cap.
       const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        errors.push({ url, error: 'Pouze HTTP/HTTPS URL jsou podporovány' });
-        continue;
-      }
 
-      // Download with timeout
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) {
@@ -66,13 +62,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      const buffer = Buffer.from(await res.arrayBuffer());
-
-      // Validate size
-      if (buffer.length > MAX_SIZE) {
+      let buffer: Buffer;
+      try {
+        buffer = await readBodyWithLimit(res, MAX_SIZE);
+      } catch {
         errors.push({
           url,
-          error: `Soubor je příliš velký (${Math.round(buffer.length / 1024 / 1024)} MB)`,
+          error: `Soubor je příliš velký (max ${Math.round(MAX_SIZE / 1024 / 1024)} MB)`,
         });
         continue;
       }

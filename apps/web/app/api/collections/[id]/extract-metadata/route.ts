@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -32,10 +33,18 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('collectionHasNoContext') }, { status: 400 });
   }
 
-  const locale =
+  // Gate on balance before spending money on Claude.
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
+  }
+
+  // Whitelist locale (it gets interpolated into the prompt) to avoid injection.
+  const rawLocale =
     request.headers.get('X-Locale') ||
     request.headers.get('Accept-Language')?.split(',')[0]?.split('-')[0] ||
     'cs';
+  const locale = rawLocale === 'cs' || rawLocale === 'en' ? rawLocale : 'cs';
 
   const prompt =
     locale === 'cs'
@@ -75,6 +84,14 @@ ${collection.context}`;
     messages: [{ role: 'user', content: prompt }],
   });
 
+  // Bill for the call regardless of how parsing goes below.
+  await deductTokensIfSufficient(
+    userId,
+    response.usage.input_tokens,
+    response.usage.output_tokens,
+    'extract-metadata',
+  );
+
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   if (!text) {
     return NextResponse.json({ error: t('aiNoResult') }, { status: 500 });
@@ -82,7 +99,12 @@ ${collection.context}`;
 
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(text) as Record<string, unknown>;
+    // Strip optional ```json code fences before parsing.
+    const jsonText = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '');
+    parsed = JSON.parse(jsonText) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: t('aiParseError') }, { status: 500 });
   }

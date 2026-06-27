@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prefetch } from '@/lib/infrastructure/prefetch-cache';
+import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 /**
@@ -8,6 +9,9 @@ import { getApiTranslations } from '@/lib/infrastructure/api-locale';
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
+
+  const auth = await resolveUserId(request);
+  if (auth.error) return auth.error;
 
   let body: unknown;
   try {

@@ -12,6 +12,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   const { getApiTranslations } = await import('@/lib/infrastructure/api-locale');
   const t = await getApiTranslations(request, 'api');
 
+  const { resolveUserId } = await import('@/lib/infrastructure/auth-utils');
+  const auth = await resolveUserId(request);
+  if (auth.error) return auth.error;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -25,8 +29,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: t('missingUrl') }, { status: 400 });
   }
   const scanDirection = direction === 'forward' || direction === 'backward' ? direction : 'both';
-  const pageLimit = typeof limit === 'number' && limit > 0 ? limit : 20;
-  const skipCount = typeof offset === 'number' && offset > 0 ? offset : 0;
+  // Clamp to bound the number of outbound HEAD probes (port-scan / amplification).
+  const pageLimit = typeof limit === 'number' && limit > 0 ? Math.min(limit, 50) : 20;
+  const skipCount = typeof offset === 'number' && offset > 0 ? Math.min(offset, 1000) : 0;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -666,7 +671,8 @@ function buildThumbnailUrl(fullUrl: string, parsed: URL, segments: string[]): st
 
 async function checkUrlExists(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, {
+    const { safeFetch } = await import('@/lib/infrastructure/safe-fetch');
+    const res = await safeFetch(url, {
       method: 'HEAD',
       headers: { 'User-Agent': 'AiSedlacek/1.0 (manuscript OCR tool)' },
       signal: AbortSignal.timeout(5000),
