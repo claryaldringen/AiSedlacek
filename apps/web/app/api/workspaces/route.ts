@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
-import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { getAuthenticatedUserId, resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { ensureWorkspaces, generateInviteCode } from '@/lib/infrastructure/workspace';
 
-export async function GET(): Promise<NextResponse> {
-  const auth = await getAuthenticatedUserId();
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  // Bearer (CLI) i session — aby CLI mohlo zjistit svůj home workspace.
+  const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 

@@ -4,11 +4,25 @@ import * as output from '../lib/output.js';
 
 export const collectionsCommand = new Command('collections')
   .description('Správa kolekcí')
-  .action(async () => {
+  .option('-w, --workspace <id>', 'ID workspace (jinak se použije home workspace)')
+  .action(async (options: { workspace?: string }) => {
     const { api } = requireAuth();
 
     try {
-      const data = await api.get('/api/collections');
+      // /api/collections vyžaduje workspaceId — když není zadán, vyřeš home workspace.
+      let workspaceId = options.workspace;
+      if (!workspaceId) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const workspaces: any[] = await api.get('/api/workspaces');
+        const home = workspaces.find((w) => w.type === 'home') ?? workspaces[0];
+        if (!home) {
+          output.error('Nenalezen žádný workspace.');
+          process.exit(1);
+        }
+        workspaceId = home.id;
+      }
+
+      const data = await api.get(`/api/collections?workspaceId=${workspaceId}`);
       const collections = data.collections ?? data;
 
       if (collections.length === 0) {

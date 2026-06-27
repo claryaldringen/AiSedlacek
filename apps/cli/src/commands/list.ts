@@ -5,6 +5,7 @@ import * as output from '../lib/output.js';
 export const listCommand = new Command('list')
   .description('Zobrazit seznam stránek')
   .option('-c, --collection <id>', 'Filtrovat podle kolekce')
+  .option('--json', 'Vypsat surová data jako JSON (plná ID — vhodné pro agenty/skripty)')
   .action(async (options) => {
     const { api } = requireAuth();
 
@@ -13,6 +14,11 @@ export const listCommand = new Command('list')
       if (options.collection) url += `?collectionId=${options.collection}`;
       const data = await api.get(url);
       const pages = data.pages ?? data;
+
+      if (options.json) {
+        console.log(JSON.stringify(pages, null, 2));
+        return;
+      }
 
       if (pages.length === 0) {
         output.info('Žádné stránky.');
