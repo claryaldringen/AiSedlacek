@@ -5,6 +5,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -28,6 +29,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const collectionId = formData.get('collectionId');
   const resolvedCollectionId =
     typeof collectionId === 'string' && collectionId.trim() !== '' ? collectionId.trim() : null;
+
+  // Verify collection ownership up front (covers both the create and the dedup
+  // "move existing page" branch below) to prevent cross-tenant injection.
+  if (resolvedCollectionId !== null && !(await getOwnedCollection(userId, resolvedCollectionId))) {
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
+  }
 
   const files = formData.getAll('files');
   if (files.length === 0) {
@@ -92,17 +99,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Detect blank pages (parchment without writing)
       const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
       const detectedBlank = await isBlankPage(buffer);
-
-      // Verify collection exists if provided
-      if (resolvedCollectionId !== null) {
-        const collection = await prisma.collection.findUnique({
-          where: { id: resolvedCollectionId },
-        });
-        if (!collection) {
-          errors.push({ filename, error: t('collectionNotFound') });
-          continue;
-        }
-      }
 
       // Extract image metadata
       let width: number | undefined;

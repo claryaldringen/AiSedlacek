@@ -3,6 +3,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { getStorage } from '@/lib/adapters/storage';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -143,6 +144,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
+  }
+
+  // Prevent cross-tenant IDOR: only allow moving the page into a collection the
+  // caller actually owns (verifying existence alone would let one inject pages
+  // into someone else's / a public collection).
+  if (typeof data.collectionId === 'string') {
+    if (!(await getOwnedCollection(userId, data.collectionId))) {
+      return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
+    }
   }
 
   try {

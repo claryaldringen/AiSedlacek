@@ -5,6 +5,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
@@ -28,6 +29,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { error: 'Pole urls je povinné' },
       { status: 400 },
     );
+  }
+
+  const resolvedCollectionId =
+    typeof collectionId === 'string' && collectionId.trim() !== '' ? collectionId.trim() : null;
+  if (resolvedCollectionId !== null && !(await getOwnedCollection(userId, resolvedCollectionId))) {
+    return NextResponse.json({ error: 'Svazek nenalezen' }, { status: 404 });
   }
 
   const storage = getStorage();
@@ -103,7 +110,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const page = await prisma.page.create({
         data: {
           userId,
-          collectionId: collectionId ?? null,
+          collectionId: resolvedCollectionId,
           filename,
           hash,
           imageUrl: stored.url,

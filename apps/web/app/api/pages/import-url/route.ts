@@ -5,6 +5,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
 import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -235,11 +236,8 @@ async function handleImport(
   // Validate collection
   const resolvedCollectionId =
     typeof collectionId === 'string' && collectionId.trim() !== '' ? collectionId.trim() : null;
-  if (resolvedCollectionId) {
-    const collection = await prisma.collection.findUnique({ where: { id: resolvedCollectionId } });
-    if (!collection) {
-      return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
-    }
+  if (resolvedCollectionId && !(await getOwnedCollection(userId, resolvedCollectionId))) {
+    return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
   // Determine next order value for the collection
