@@ -16,9 +16,20 @@ describe('LocalStorageProvider', () => {
     const buffer = Buffer.from('test image data');
     const result = await storage.upload(buffer, 'test.jpg');
     expect(result.path).toContain('test.jpg');
-    expect(result.url).toContain('/api/images/');
+    expect(result.url).toContain('/uploads/');
     const saved = await fs.readFile(path.join(TEST_DIR, result.path));
     expect(saved).toEqual(buffer);
+  });
+
+  it('rejects path traversal in read', async () => {
+    await expect(storage.read('../../etc/passwd')).rejects.toThrow();
+    await expect(storage.read('/etc/passwd')).rejects.toThrow();
+    await expect(storage.read('a/../../secret')).rejects.toThrow();
+  });
+
+  it('rejects path traversal in delete', async () => {
+    await expect(storage.delete('../../etc/passwd')).rejects.toThrow();
+    await expect(storage.delete('/etc/passwd')).rejects.toThrow();
   });
 
   it('generates unique filenames to avoid collisions', async () => {

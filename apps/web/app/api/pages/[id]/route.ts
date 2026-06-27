@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
-import { getStorage } from '@/lib/adapters/storage';
+import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
@@ -218,13 +218,19 @@ export async function DELETE(
       return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
     }
 
-    // Delete file from storage
+    // Delete file from storage. Skip when another page still references the same
+    // file (cross-user dedup reuses one stored file for an identical hash).
     const storage = getStorage();
-    const filename = page.imageUrl.replace('/api/images/', '');
-    try {
-      await storage.delete(filename);
-    } catch {
-      // File may already be missing – continue
+    const sharesFile = await prisma.page.count({
+      where: { imageUrl: page.imageUrl, id: { not: page.id } },
+    });
+    if (sharesFile === 0) {
+      const filename = storageKeyFromImageUrl(page.imageUrl);
+      try {
+        await storage.delete(filename);
+      } catch {
+        // File may already be missing – continue
+      }
     }
 
     await prisma.$transaction(async (tx) => {

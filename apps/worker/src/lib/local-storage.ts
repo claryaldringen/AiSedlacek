@@ -10,6 +10,16 @@ export class LocalStorageProvider implements IStorageProvider {
     this.uploadDir = uploadDir ?? process.env['UPLOAD_DIR'] ?? 'tmp/uploads';
   }
 
+  /** Resolve a relative path inside the upload dir, rejecting traversal. */
+  private resolveWithin(filePath: string): string {
+    const base = path.resolve(this.uploadDir);
+    const full = path.resolve(base, filePath);
+    if (full !== base && !full.startsWith(base + path.sep)) {
+      throw new Error('Path escapes upload directory');
+    }
+    return full;
+  }
+
   async upload(file: Buffer, filename: string): Promise<StorageResult> {
     await fs.mkdir(this.uploadDir, { recursive: true });
     const safeName = filename.replace(/[/\\]/g, '_');
@@ -20,7 +30,7 @@ export class LocalStorageProvider implements IStorageProvider {
   }
 
   async read(filePath: string): Promise<Buffer> {
-    return fs.readFile(path.join(this.uploadDir, filePath));
+    return fs.readFile(this.resolveWithin(filePath));
   }
 
   getUrl(filePath: string): string {
@@ -28,6 +38,6 @@ export class LocalStorageProvider implements IStorageProvider {
   }
 
   async delete(filePath: string): Promise<void> {
-    await fs.unlink(path.join(this.uploadDir, filePath));
+    await fs.unlink(this.resolveWithin(filePath));
   }
 }

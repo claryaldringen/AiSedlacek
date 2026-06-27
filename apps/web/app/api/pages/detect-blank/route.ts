@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { isBlankPage } from '@/lib/infrastructure/blank-detection';
-import { getStorage } from '@/lib/adapters/storage';
+import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -34,10 +34,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   for (const page of pages) {
     try {
       const storage = getStorage();
-      const storagePath = page.imageUrl.startsWith('/api/images/')
-        ? page.imageUrl.replace('/api/images/', '')
-        : page.imageUrl;
-      const buffer = await storage.read(storagePath);
+      const buffer = await storage.read(storageKeyFromImageUrl(page.imageUrl));
       const blank = await isBlankPage(buffer);
 
       if (blank) {

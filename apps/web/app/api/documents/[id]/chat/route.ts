@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
-import { getStorage } from '@/lib/adapters/storage';
+import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { detectMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
@@ -106,9 +106,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   // Load the image for multimodal context (resize if > 5 MB)
   const storage = getStorage();
-  const storagePath = doc.page.imageUrl.startsWith('/api/images/')
-    ? doc.page.imageUrl.replace('/api/images/', '')
-    : doc.page.imageUrl;
+  const storagePath = storageKeyFromImageUrl(doc.page.imageUrl);
   let imageBase64: string | null = null;
   let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg';
   try {
