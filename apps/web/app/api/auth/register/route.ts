@@ -31,26 +31,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: t('passwordTooShort') }, { status: 400 });
   }
 
-  // Check existing user
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    if (existing.emailVerified) {
-      return NextResponse.json({ error: t('userAlreadyExists') }, { status: 409 });
-    }
-    // Unverified — delete and re-create
-    await prisma.verificationToken.deleteMany({ where: { identifier: email } });
-    await prisma.user.delete({ where: { id: existing.id } });
-  }
-
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  await prisma.user.create({
-    data: {
-      name: name?.trim() || null,
-      email,
-      password: hashedPassword,
-    },
+  // Check existing user. NEVER delete an existing account here — this endpoint is
+  // unauthenticated, and prisma.user.delete cascades to Account/Session/Collection/
+  // Page/Workspace/ApiToken. A verified user, or any user with linked OAuth accounts
+  // (whose emailVerified may be null but must not be destroyed), is treated as a
+  // conflict. An unverified credentials-only account is re-registered in place via
+  // UPDATE so a pending sign-up can be retried without data loss.
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    include: { accounts: { select: { id: true } } },
   });
+  if (existing) {
+    if (existing.emailVerified || existing.accounts.length > 0) {
+      return NextResponse.json({ error: t('userAlreadyExists') }, { status: 409 });
+    }
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { name: name?.trim() || existing.name, password: hashedPassword },
+    });
+  } else {
+    await prisma.user.create({
+      data: {
+        name: name?.trim() || null,
+        email,
+        password: hashedPassword,
+      },
+    });
+  }
 
   try {
     await sendVerificationEmail(email, locale);
