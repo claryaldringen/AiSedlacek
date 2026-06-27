@@ -39,6 +39,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ received: true });
     }
 
+    // czkToTokens assumes CZK halíře — refuse to credit other currencies.
+    if (session.currency && session.currency.toLowerCase() !== 'czk') {
+      console.error('[stripe-webhook] Unexpected currency', {
+        sessionId: session.id,
+        currency: session.currency,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    // Only credit fully-paid sessions.
+    if (session.payment_status && session.payment_status !== 'paid') {
+      return NextResponse.json({ received: true });
+    }
+
     const tokens = czkToTokens(amountTotal);
 
     await createTransaction({
@@ -47,7 +61,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       amount: tokens,
       amountCzk: amountTotal,
       description: `Dobití kartou: ${(amountTotal / 100).toFixed(0)} Kč`,
-      referenceId: session.payment_intent as string,
+      // Use the checkout session id as the idempotency key — it is always present
+      // and stable across webhook retries (payment_intent can be null), so a
+      // redelivered event won't double-credit.
+      referenceId: session.id,
     });
   }
 

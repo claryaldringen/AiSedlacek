@@ -86,52 +86,72 @@ export async function deductTokensIfSufficient(
 ): Promise<{ success: boolean; balance: number; transaction?: { id: string; amount: number } }> {
   const amount = -Math.ceil((inputTokens + outputTokens) * TOKEN_MULTIPLIER);
 
-  return prisma.$transaction(
-    async (tx) => {
-      const result = await tx.tokenTransaction.aggregate({
-        where: { userId },
-        _sum: { amount: true },
-      });
-      const balance = result._sum.amount ?? 0;
+  const MAX_RETRIES = 3;
+  let lastError: unknown;
 
-      if (balance <= 0) {
-        return { success: false, balance };
-      }
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const result = await tx.tokenTransaction.aggregate({
+            where: { userId },
+            _sum: { amount: true },
+          });
+          const balance = result._sum.amount ?? 0;
 
-      // Handle idempotency: if referenceId already exists, return existing
-      if (referenceId) {
-        const existing = await tx.tokenTransaction.findFirst({
-          where: { userId, referenceId },
-        });
-        if (existing) {
+          if (balance <= 0) {
+            return { success: false, balance };
+          }
+
+          // Idempotency: if referenceId already exists, return existing. The
+          // aggregated balance already includes that transaction's amount, so it
+          // must NOT be added again (doing so previously reported a doubled deduction).
+          if (referenceId) {
+            const existing = await tx.tokenTransaction.findFirst({
+              where: { userId, referenceId },
+            });
+            if (existing) {
+              return {
+                success: true,
+                balance,
+                transaction: { id: existing.id, amount: existing.amount },
+              };
+            }
+          }
+
+          const transaction = await tx.tokenTransaction.create({
+            data: {
+              userId,
+              type: 'consumption',
+              amount,
+              description,
+              referenceId,
+            },
+          });
+
           return {
             success: true,
-            balance: balance + existing.amount,
-            transaction: { id: existing.id, amount: existing.amount },
+            balance: balance + amount,
+            transaction: { id: transaction.id, amount: transaction.amount },
           };
-        }
-      }
-
-      const transaction = await tx.tokenTransaction.create({
-        data: {
-          userId,
-          type: 'consumption',
-          amount,
-          description,
-          referenceId,
         },
-      });
-
-      return {
-        success: true,
-        balance: balance + amount,
-        transaction: { id: transaction.id, amount: transaction.amount },
-      };
-    },
-    {
-      isolationLevel: 'Serializable',
-    },
-  );
+        {
+          isolationLevel: 'Serializable',
+        },
+      );
+    } catch (e) {
+      // Serializable transactions can fail with a write conflict / serialization
+      // failure under concurrency (Prisma P2034) — retry a few times before giving up.
+      lastError = e;
+      const code =
+        typeof e === 'object' && e !== null && 'code' in e
+          ? (e as { code: unknown }).code
+          : undefined;
+      if (code === 'P2034' && attempt < MAX_RETRIES - 1) continue;
+      throw e;
+    }
+  }
+  throw lastError;
 }
 
 export function czkToTokens(amountHalire: number): number {

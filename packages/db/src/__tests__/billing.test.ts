@@ -10,6 +10,7 @@ vi.mock('../client', () => ({
     user: {
       findFirst: vi.fn(),
     },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -19,6 +20,7 @@ import {
   checkBalance,
   createTransaction,
   deductTokens,
+  deductTokensIfSufficient,
   czkToTokens,
   generateVariableSymbol,
 } from '../billing';
@@ -27,6 +29,8 @@ const mockAggregate = prisma.tokenTransaction.aggregate as ReturnType<typeof vi.
 const mockCreate = prisma.tokenTransaction.create as ReturnType<typeof vi.fn>;
 const mockFindFirst = prisma.tokenTransaction.findFirst as ReturnType<typeof vi.fn>;
 const mockUserFindFirst = prisma.user.findFirst as ReturnType<typeof vi.fn>;
+const mockTransaction = (prisma as unknown as { $transaction: ReturnType<typeof vi.fn> })
+  .$transaction;
 
 describe('billing', () => {
   beforeEach(() => {
@@ -264,6 +268,73 @@ describe('billing', () => {
       await deductTokens('user-1', 100, 50, 'no ref');
       const createCall = mockCreate.mock.calls[0]![0];
       expect(createCall.data.referenceId).toBeUndefined();
+    });
+  });
+
+  describe('deductTokensIfSufficient', () => {
+    beforeEach(() => {
+      // Run the callback against a tx that delegates to the mocked tokenTransaction.
+      mockTransaction.mockImplementation(
+        async (cb: (tx: unknown) => unknown) =>
+          cb({
+            tokenTransaction: {
+              aggregate: mockAggregate,
+              findFirst: mockFindFirst,
+              create: mockCreate,
+            },
+          }),
+      );
+    });
+
+    it('deducts and reports the resulting balance when sufficient', async () => {
+      mockAggregate.mockResolvedValue({ _sum: { amount: 10000 } });
+      mockFindFirst.mockResolvedValue(null);
+      mockCreate.mockResolvedValue({ id: 'tx-1', amount: -3000 });
+
+      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      expect(res.success).toBe(true);
+      expect(res.balance).toBe(7000); // 10000 + (-3000)
+    });
+
+    it('refuses when balance is not positive', async () => {
+      mockAggregate.mockResolvedValue({ _sum: { amount: 0 } });
+      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      expect(res.success).toBe(false);
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent and does NOT double-count the existing amount', async () => {
+      // aggregate already includes the existing -3000 transaction.
+      mockAggregate.mockResolvedValue({ _sum: { amount: 7000 } });
+      mockFindFirst.mockResolvedValue({ id: 'tx-existing', amount: -3000 });
+
+      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job', 'ref-1');
+      expect(res.success).toBe(true);
+      expect(res.balance).toBe(7000); // not 4000 — the existing amount is already in the sum
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('retries on a write-conflict (P2034) then succeeds', async () => {
+      mockAggregate.mockResolvedValue({ _sum: { amount: 10000 } });
+      mockFindFirst.mockResolvedValue(null);
+      mockCreate.mockResolvedValue({ id: 'tx-1', amount: -3000 });
+      mockTransaction
+        .mockImplementationOnce(() =>
+          Promise.reject(Object.assign(new Error('write conflict'), { code: 'P2034' })),
+        )
+        .mockImplementationOnce(async (cb: (tx: unknown) => unknown) =>
+          cb({
+            tokenTransaction: {
+              aggregate: mockAggregate,
+              findFirst: mockFindFirst,
+              create: mockCreate,
+            },
+          }),
+        );
+
+      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      expect(res.success).toBe(true);
+      expect(mockTransaction).toHaveBeenCalledTimes(2);
     });
   });
 

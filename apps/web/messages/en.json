@@ -333,6 +333,8 @@
     "cannotAddBoth": "Cannot add both collection and page at once",
     "invalidItemType": "Invalid item type",
     "missingMessages": "Missing messages",
+    "tooManyMessages": "Too many messages in the conversation",
+    "messageTooLong": "Message is too long",
     "missingJobId": "Missing jobId",
     "missingUrls": "Missing urls",
     "noProcessedDocuments": "No processed documents",

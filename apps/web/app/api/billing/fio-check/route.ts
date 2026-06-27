@@ -40,9 +40,17 @@ export async function POST(): Promise<NextResponse> {
     return NextResponse.json({ error: 'FIO API není nakonfigurováno' }, { status: 503 });
   }
 
-  // Call FIO API
+  // Call FIO API over a deterministic date range (/periods/) instead of /last/.
+  // /last/ advances a GLOBAL cursor on the shared account token: when one user
+  // polled, another user's transaction (different VS) was skipped AND marked as
+  // read, so it was never credited. /periods/ does not move the cursor, so each
+  // user can safely scan the same window; idempotency (referenceId fio-<txId>)
+  // prevents double-crediting.
   lastFioCallByUser.set(userId, Date.now());
-  const fioUrl = `https://www.fio.cz/ib_api/rest/last/${fioToken}/transactions.json`;
+  const to = new Date();
+  const from = new Date(to.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date): string => d.toISOString().slice(0, 10);
+  const fioUrl = `https://www.fio.cz/ib_api/rest/periods/${fioToken}/${fmt(from)}/${fmt(to)}/transactions.json`;
 
   let fioData: Record<string, unknown>;
   try {

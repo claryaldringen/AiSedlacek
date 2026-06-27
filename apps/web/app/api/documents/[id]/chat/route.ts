@@ -90,6 +90,21 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return Response.json({ error: t('missingMessages') }, { status: 400 });
   }
 
+  // Bound the request so a single chat call can't burn an unbounded amount of
+  // tokens (and money): cap the number of turns and the total input size.
+  const MAX_MESSAGES = 50;
+  const MAX_TOTAL_CHARS = 100_000;
+  if (messages.length > MAX_MESSAGES) {
+    return Response.json({ error: t('tooManyMessages') }, { status: 400 });
+  }
+  const totalChars = messages.reduce(
+    (n, m) => n + (typeof m?.content === 'string' ? m.content.length : 0),
+    0,
+  );
+  if (totalChars > MAX_TOTAL_CHARS) {
+    return Response.json({ error: t('messageTooLong') }, { status: 400 });
+  }
+
   // Load document with all context
   const doc = await prisma.document.findUnique({
     where: { id },

@@ -333,6 +333,8 @@
     "cannotAddBoth": "Nelze přidat kolekci i stránku najednou",
     "invalidItemType": "Neplatný typ položky",
     "missingMessages": "Chybí messages",
+    "tooManyMessages": "Příliš mnoho zpráv v konverzaci",
+    "messageTooLong": "Zpráva je příliš dlouhá",
     "missingJobId": "Chybí jobId",
     "missingUrls": "Chybí urls",
     "noProcessedDocuments": "Žádné zpracované dokumenty",

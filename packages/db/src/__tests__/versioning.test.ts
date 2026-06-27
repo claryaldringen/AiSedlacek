@@ -71,4 +71,26 @@ describe('createVersion', () => {
     const createCall = mockCreate.mock.calls[0]![0];
     expect(createCall.data.model).toBeUndefined();
   });
+
+  it('retries on a unique-constraint collision (concurrent writers race)', async () => {
+    // First attempt reads version 3, tries to create 4 → loses the race (P2002).
+    // Second attempt re-reads (now 4) and creates 5.
+    mockFindFirst.mockResolvedValueOnce({ version: 3 }).mockResolvedValueOnce({ version: 4 });
+    mockCreate
+      .mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002' }))
+      .mockResolvedValueOnce({});
+
+    await createVersion('doc-race', 'consolidatedText', 'x', 'claude');
+
+    expect(mockFindFirst).toHaveBeenCalledTimes(2);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockCreate.mock.calls[1]![0].data.version).toBe(5);
+  });
+
+  it('gives up after repeated collisions and rethrows', async () => {
+    mockFindFirst.mockResolvedValue({ version: 1 });
+    mockCreate.mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' }));
+
+    await expect(createVersion('doc-x', 'f', 'c', 's')).rejects.toMatchObject({ code: 'P2002' });
+  });
 });
