@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface JobStatus {
@@ -16,13 +16,26 @@ interface JobStatus {
  * Returns a startPolling function that resolves when the job completes.
  */
 export function useJobPolling() {
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Všechny běžící intervaly. Každé volání pollJob má vlastní interval —
+  // sdílený ref by způsobil, že spuštění druhého pollu zruší interval prvního
+  // a jeho Promise by se nikdy neresolvnula (zaseknutý await).
+  const intervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
 
   const stopPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    for (const interval of intervalsRef.current) {
+      clearInterval(interval);
     }
+    intervalsRef.current.clear();
+  }, []);
+
+  // Úklid na unmount — zastav všechny rozběhnuté polly.
+  useEffect(() => {
+    return () => {
+      for (const interval of intervalsRef.current) {
+        clearInterval(interval);
+      }
+      intervalsRef.current.clear();
+    };
   }, []);
 
   const pollJob = useCallback(
@@ -34,16 +47,27 @@ export function useJobPolling() {
         onProgress?: (completed: number, total: number) => void;
       },
     ): Promise<'completed' | 'error' | 'cancelled'> => {
-      stopPolling();
       const ms = options?.intervalMs ?? 2000;
 
       return new Promise((resolve) => {
-        intervalRef.current = setInterval(async () => {
+        let interval: ReturnType<typeof setInterval> | null = null;
+
+        // Ukončí pouze tento poll (ne ostatní běžící) a vždy resolvne Promise,
+        // aby na ni čekající await nikdy nevisel. Idempotentní díky null guardu.
+        const settle = (status: 'completed' | 'error' | 'cancelled'): void => {
+          if (interval !== null) {
+            clearInterval(interval);
+            intervalsRef.current.delete(interval);
+            interval = null;
+          }
+          resolve(status);
+        };
+
+        interval = setInterval(async () => {
           try {
             const res = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
             if (!res.ok) {
-              stopPolling();
-              resolve('error');
+              settle('error');
               return;
             }
             const data = (await res.json()) as JobStatus;
@@ -58,17 +82,16 @@ export function useJobPolling() {
               data.status === 'error' ||
               data.status === 'cancelled'
             ) {
-              stopPolling();
-              resolve(data.status as 'completed' | 'error' | 'cancelled');
+              settle(data.status as 'completed' | 'error' | 'cancelled');
             }
           } catch {
-            stopPolling();
-            resolve('error');
+            settle('error');
           }
         }, ms);
+        intervalsRef.current.add(interval);
       });
     },
-    [stopPolling],
+    [],
   );
 
   return { pollJob, stopPolling };

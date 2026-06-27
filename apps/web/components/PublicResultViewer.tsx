@@ -50,9 +50,16 @@ export async function PublicResultViewer({
   const translation =
     document.translations.find((tr) => tr.language === locale) ?? document.translations[0];
   const context = translation?.context || document.context;
-  const glossary: { term: string; definition: string }[] = translation?.glossaryJson
-    ? (JSON.parse(translation.glossaryJson) as { term: string; definition: string }[])
-    : document.glossary;
+  // Poškozený glossaryJson nesmí shodit celé veřejné view — při chybě parsování
+  // padáme zpět na glosář dokumentu.
+  let glossary: { term: string; definition: string }[] = document.glossary;
+  if (translation?.glossaryJson) {
+    try {
+      glossary = JSON.parse(translation.glossaryJson) as { term: string; definition: string }[];
+    } catch {
+      glossary = document.glossary;
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">

@@ -22,7 +22,14 @@ function LoginForm(): React.JSX.Element {
   const tc = useTranslations('common');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') ?? '/workspace';
+  const rawCallbackUrl = searchParams.get('callbackUrl');
+  // Open-redirect ochrana: povol jen interní cesty (ne absolutní URL ani
+  // protocol-relative `//evil.com`). Credentials flow má redirect:false, takže
+  // same-origin kontrola NextAuthu se neuplatní a musíme validovat sami.
+  const callbackUrl =
+    rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')
+      ? rawCallbackUrl
+      : '/workspace';
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');

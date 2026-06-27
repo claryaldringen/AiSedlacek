@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -174,6 +174,26 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
 
+  // Interval pro polling retranslace ukládáme do refu, aby šel uklidit.
+  const retranslatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Vždy aktuální id zobrazeného dokumentu — pro ověření, že doběhlý poll
+  // patří k dokumentu, který je stále otevřený.
+  const currentResultIdRef = useRef(result.id);
+  currentResultIdRef.current = result.id;
+
+  const stopRetranslatePoll = useCallback((): void => {
+    if (retranslatePollRef.current) {
+      clearInterval(retranslatePollRef.current);
+      retranslatePollRef.current = null;
+    }
+  }, []);
+
+  // Úklid pollu při přepnutí na jiný dokument i při unmountu — jinak by poll
+  // po dokončení přepsal panel zobrazující už jiný dokument a leakoval.
+  useEffect(() => {
+    return () => stopRetranslatePoll();
+  }, [result.id, stopRetranslatePoll]);
+
   const saveField = useCallback(
     async (field: string, value: string): Promise<DocumentResult> => {
       setSaving(true);
@@ -199,6 +219,9 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
 
   const handleTranscriptionSave = useCallback(
     async (newText: string): Promise<void> => {
+      // Dokument, pro který tento poll běží — výsledek aplikujeme jen pokud
+      // je při dokončení stále otevřený tentýž dokument.
+      const docId = result.id;
       const updated = await saveField('transcription', newText);
 
       // Re-translate based on updated transcription via worker job
@@ -218,12 +241,13 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
-        // Poll for job completion
-        const pollInterval = setInterval(async () => {
+        // Poll for job completion — interval v refu, ať ho lze uklidit.
+        stopRetranslatePoll();
+        retranslatePollRef.current = setInterval(async () => {
           try {
             const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
             if (!statusRes.ok) {
-              clearInterval(pollInterval);
+              stopRetranslatePoll();
               setRetranslating(false);
               return;
             }
@@ -236,7 +260,7 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
               statusData.status === 'error' ||
               statusData.status === 'cancelled'
             ) {
-              clearInterval(pollInterval);
+              stopRetranslatePoll();
               setRetranslating(false);
               if (statusData.status === 'completed') {
                 // Reload the document to get the new translation
@@ -254,7 +278,8 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
                   const translation = doc.translations.find(
                     (t: { language: string }) => t.language === result.translationLanguage,
                   );
-                  if (translation) {
+                  // Aplikuj jen pokud je stále otevřený dokument, pro který poll běžel.
+                  if (translation && currentResultIdRef.current === docId) {
                     onUpdate?.({
                       ...updated,
                       translation: translation.text,
@@ -267,7 +292,7 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
               }
             }
           } catch {
-            clearInterval(pollInterval);
+            stopRetranslatePoll();
             setRetranslating(false);
           }
         }, 2000);
@@ -275,7 +300,7 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
         setRetranslating(false);
       }
     },
-    [result, onUpdate, saveField],
+    [result, onUpdate, saveField, stopRetranslatePoll],
   );
 
   return (

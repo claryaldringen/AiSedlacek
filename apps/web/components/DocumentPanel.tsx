@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ResultViewer, type DocumentResult } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface DocumentPanelProps {
   page: PageItem | null;
@@ -79,16 +80,26 @@ export function DocumentPanel({
   const handleChatApplyUpdate = useCallback(
     (field: string, content: string): void => {
       if (!result) return;
-      void fetch(`/api/documents/${result.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          [field]: content,
-          ...(field === 'translation' ? { translationLanguage: result.translationLanguage } : {}),
-        }),
-      });
-      const updated = { ...result, [field]: content };
-      onResultUpdate?.(updated);
+      // Optimistický update + rollback při selhání PATCHe.
+      const previous = result;
+      onResultUpdate?.({ ...result, [field]: content });
+      void (async () => {
+        try {
+          const res = await apiFetch(`/api/documents/${result.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              [field]: content,
+              ...(field === 'translation'
+                ? { translationLanguage: result.translationLanguage }
+                : {}),
+            }),
+          });
+          if (!res.ok) onResultUpdate?.(previous);
+        } catch {
+          onResultUpdate?.(previous);
+        }
+      })();
     },
     [result, onResultUpdate],
   );
@@ -106,13 +117,21 @@ export function DocumentPanel({
     const newName = titleDraft.trim();
     const displayName = newName === cleanFilename(page.filename) ? null : newName || null;
     if (displayName === (page.displayName ?? null)) return;
-    void fetch(`/api/pages/${page.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName }),
-    });
-    const updated = { ...page, displayName };
-    onPageUpdate?.(updated);
+    // Optimistický update + rollback při selhání PATCHe.
+    const previous = page;
+    onPageUpdate?.({ ...page, displayName });
+    void (async () => {
+      try {
+        const res = await apiFetch(`/api/pages/${page.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName }),
+        });
+        if (!res.ok) onPageUpdate?.(previous);
+      } catch {
+        onPageUpdate?.(previous);
+      }
+    })();
   }, [page, titleDraft, onPageUpdate]);
 
   const t = useTranslations('document');
