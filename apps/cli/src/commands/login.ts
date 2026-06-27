@@ -93,7 +93,8 @@ function startCallbackServer(
       resolveToken(token);
     });
 
-    server.listen(0, () => {
+    // Bindni jen na loopback (127.0.0.1), ať token z callbacku nemůže zachytit nikdo v síti.
+    server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number };
       resolveSetup({ port: addr.port, tokenPromise, server });
     });

@@ -20,7 +20,29 @@ export type ApiClient = {
   getRaw(path: string): Promise<Response>;
 };
 
+// Povolíme jen HTTPS; výjimka je localhost přes HTTP kvůli lokálnímu vývoji.
+function isSecureBaseUrl(serverUrl: string): boolean {
+  try {
+    const u = new URL(serverUrl);
+    if (u.protocol === 'https:') return true;
+    if (u.protocol === 'http:') {
+      return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function createApiClient(serverUrl: string, token: string): ApiClient {
+  // Bezpečnost: Bearer token nikdy neposílej přes nezašifrované HTTP (mimo localhost dev).
+  if (token && !isSecureBaseUrl(serverUrl)) {
+    throw new Error(
+      `Nezabezpečené spojení: ${serverUrl}. Bearer token lze posílat pouze přes HTTPS ` +
+        `(výjimka: localhost pro vývoj). Změňte 'server' v konfiguraci na https://.`,
+    );
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function request(path: string, init?: RequestInit): Promise<any> {
     const url = `${serverUrl}${path}`;

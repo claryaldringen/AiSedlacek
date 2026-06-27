@@ -19,12 +19,21 @@ export function loadConfig(): CliConfig {
   if (!fs.existsSync(configPath)) {
     return { ...DEFAULT_CONFIG };
   }
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+  } catch {
+    // Poškozený konfigurační soubor nesmí shodit CLI — varuj a použij výchozí nastavení.
+    console.error(
+      `Varování: konfigurační soubor ${configPath} je poškozený, používám výchozí nastavení.`,
+    );
+    return { ...DEFAULT_CONFIG };
+  }
 }
 
 export function saveConfig(config: CliConfig): void {
   const dir = getConfigDir();
-  fs.mkdirSync(dir, { recursive: true });
+  // Adresář jen pro vlastníka (0o700) — obsahuje i auth.json s tokenem.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config, null, 2));
 }

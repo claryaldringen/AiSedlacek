@@ -53,4 +53,13 @@ describe('api-client', () => {
     );
     await expect(api.get('/api/pages/999')).rejects.toThrow('Not found');
   });
+
+  it('refuses to create client with token over plaintext http (non-localhost)', () => {
+    expect(() => createApiClient('http://example.com', 'test-token')).toThrow(/Nezabezpečené/);
+  });
+
+  it('allows plaintext http on localhost for dev', () => {
+    expect(() => createApiClient('http://localhost:3000', 'test-token')).not.toThrow();
+    expect(() => createApiClient('http://127.0.0.1:3000', 'test-token')).not.toThrow();
+  });
 });

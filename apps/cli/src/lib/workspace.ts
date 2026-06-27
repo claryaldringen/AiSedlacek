@@ -34,6 +34,10 @@ export function getWorkspaceDir(): string {
 }
 
 export function getPageDir(pageId: string): string {
+  // Sanitizace ID stránky — zabraňuje path traversal v cestách workspace.
+  if (!/^[A-Za-z0-9_-]+$/.test(pageId)) {
+    throw new Error(`Neplatné ID stránky: "${pageId}"`);
+  }
   return path.join(getWorkspaceDir(), pageId);
 }
 
@@ -62,6 +66,35 @@ export function writePageFiles(data: PageData): void {
     serverUpdatedAt: data.serverUpdatedAt,
     hashes,
   };
+  fs.writeFileSync(path.join(dir, '.meta.json'), JSON.stringify(meta, null, 2));
+}
+
+/**
+ * Aktualizuje pouze metadata reálně pushnutých polí — přepočítá hash z aktuálního
+ * lokálního obsahu daných souborů a uloží novou serverUpdatedAt. Lokální obsah souborů
+ * (zejm. glossary.md, který je read-only/nepushovatelný) se NEPŘEPISUJE.
+ */
+export function updateMetaAfterPush(
+  pageId: string,
+  pushedFiles: WorkspaceFile[],
+  serverUpdatedAt?: string,
+): void {
+  const meta = readMeta(pageId);
+  if (!meta) return;
+
+  const dir = getPageDir(pageId);
+  for (const file of pushedFiles) {
+    const filePath = path.join(dir, file);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    meta.hashes[file] = sha256(content);
+  }
+
+  if (serverUpdatedAt !== undefined) {
+    meta.serverUpdatedAt = serverUpdatedAt;
+  }
+  meta.pulledAt = new Date().toISOString();
+
   fs.writeFileSync(path.join(dir, '.meta.json'), JSON.stringify(meta, null, 2));
 }
 

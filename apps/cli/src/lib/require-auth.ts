@@ -11,6 +11,12 @@ export function requireAuth(): { token: string; api: ApiClient } {
   }
 
   const config = loadConfig();
-  const api = createApiClient(config.server, token);
+  let api: ApiClient;
+  try {
+    api = createApiClient(config.server, token);
+  } catch (e: unknown) {
+    output.error((e as Error).message);
+    process.exit(1);
+  }
   return { token, api };
 }

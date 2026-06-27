@@ -20,7 +20,8 @@ export function getToken(): string | null {
 
 export function saveToken(token: string): void {
   const dir = getConfigDir();
-  fs.mkdirSync(dir, { recursive: true });
+  // Adresář jen pro vlastníka (0o700), soubor s tokenem jen pro čtení/zápis vlastníkem (0o600).
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(getAuthPath(), JSON.stringify({ token }, null, 2), {
     mode: 0o600,
   });

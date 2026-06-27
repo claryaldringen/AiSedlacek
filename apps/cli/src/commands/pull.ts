@@ -23,6 +23,7 @@ export const pullCommand = new Command('pull')
       return;
     }
 
+    let hadError = false;
     const spinner = ora('Stahuji...').start();
 
     for (let i = 0; i < ids.length; i++) {
@@ -65,9 +66,11 @@ export const pullCommand = new Command('pull')
         spinner.stop();
         output.error(`  ${pageId}: ${(e as Error).message}`);
         spinner.start();
+        hadError = true;
       }
     }
 
     spinner.stop();
     output.info('Pull dokončen.');
+    if (hadError) process.exitCode = 1;
   });
