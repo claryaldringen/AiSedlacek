@@ -16,6 +16,8 @@ export const showCommand = new Command('show')
       console.log(`Status: ${output.statusBadge(page.status)}`);
       console.log(`ID: ${page.id}`);
       if (page.collection) console.log(`Kolekce: ${page.collection.name}`);
+      // URL skenu — agent ho stáhne (<server><imageUrl>) a sám provede rozpoznání.
+      if (page.imageUrl) console.log(`Obrázek: ${page.imageUrl}`);
       console.log();
 
       if (!page.document) {
