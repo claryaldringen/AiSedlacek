@@ -196,11 +196,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
       return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
     }
 
+    // When only a slug is sent (rename of an already-public link), data.isPublic
+    // is undefined — fall back to the collection's current state so we don't drop
+    // the PublicSlug and leave isPublic=true with a dead /view link.
+    const effectiveIsPublic =
+      typeof data.isPublic === 'boolean' ? data.isPublic : collection.isPublic;
+
     if (sharingFieldsPresent) {
       const updated = await prisma.$transaction(async (tx) => {
         await tx.publicSlug.deleteMany({ where: { targetId: id } });
 
-        if (data.isPublic && resolvedSlug) {
+        if (effectiveIsPublic && resolvedSlug) {
           await tx.publicSlug.create({
             data: {
               slug: resolvedSlug,

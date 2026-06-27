@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/infrastructure/db';
 import { sendVerificationEmail } from '@/lib/infrastructure/verification';
+import { rateLimit, clientIp } from '@/lib/infrastructure/rate-limit';
 import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
   const locale = getLocaleFromRequest(request);
+
+  // Throttle per IP — limits mail-bombing and bcrypt CPU abuse.
+  const rl = rateLimit(`register:${clientIp(request)}`, 10, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: t('rateLimited'), retryAfterSeconds: rl.retryAfterSeconds },
+      { status: 429 },
+    );
+  }
 
   let body: unknown;
   try {

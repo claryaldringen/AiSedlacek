@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/infrastructure/db';
 import { getEmailProvider } from '@/lib/adapters/email';
+import { rateLimit, clientIp } from '@/lib/infrastructure/rate-limit';
 import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
   const locale = getLocaleFromRequest(request);
+
+  // Per-IP throttle (independent of whether the email exists → no enumeration).
+  const rl = rateLimit(`forgot:${clientIp(request)}`, 10, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: t('rateLimited'), retryAfterSeconds: rl.retryAfterSeconds },
+      { status: 429 },
+    );
+  }
 
   let body: unknown;
   try {

@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { sendVerificationEmail } from '@/lib/infrastructure/verification';
+import { rateLimit, clientIp } from '@/lib/infrastructure/rate-limit';
 import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
   const locale = getLocaleFromRequest(request);
+
+  // Per-IP throttle to limit mail-bombing.
+  const rl = rateLimit(`send-verification:${clientIp(request)}`, 10, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: t('rateLimited'), retryAfterSeconds: rl.retryAfterSeconds },
+      { status: 429 },
+    );
+  }
 
   let body: unknown;
   try {
@@ -32,11 +42,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ message: successMessage });
   }
 
-  const sent = await sendVerificationEmail(email, locale);
-  if (!sent) {
-    // Rate limited — return 200 with rateLimited flag (anti-enumeration: no 429)
-    return NextResponse.json({ message: successMessage, rateLimited: true });
-  }
-
+  // Always return the identical generic response. Previously a `rateLimited: true`
+  // flag was only ever returned for an existing, unverified, credentials account
+  // — an account-enumeration oracle.
+  await sendVerificationEmail(email, locale);
   return NextResponse.json({ message: successMessage });
 }

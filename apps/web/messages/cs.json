@@ -335,6 +335,7 @@
     "missingMessages": "Chybí messages",
     "tooManyMessages": "Příliš mnoho zpráv v konverzaci",
     "messageTooLong": "Zpráva je příliš dlouhá",
+    "rateLimited": "Příliš mnoho požadavků, zkuste to prosím později",
     "missingJobId": "Chybí jobId",
     "missingUrls": "Chybí urls",
     "noProcessedDocuments": "Žádné zpracované dokumenty",

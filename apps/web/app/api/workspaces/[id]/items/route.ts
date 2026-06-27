@@ -53,17 +53,27 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('cannotAddBoth') }, { status: 400 });
   }
 
+  const isPublicWorkspace = workspace.id === PUBLIC_WORKSPACE_ID;
+
   // Validate the referenced entity exists and belongs to user
   if (typeof collectionId === 'string') {
     const collection = await prisma.collection.findUnique({ where: { id: collectionId } });
     if (!collection || collection.userId !== userId) {
       return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
     }
+    // Adding to the public workspace must go through publishing (isPublic), not a
+    // direct item insert that would bypass the share flow.
+    if (isPublicWorkspace && !collection.isPublic) {
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
+    }
 
-    const item = await prisma.workspaceItem.create({
-      data: { workspaceId, collectionId },
-    });
-    return NextResponse.json(item, { status: 201 });
+    const item = await prisma.workspaceItem
+      .create({ data: { workspaceId, collectionId } })
+      .catch((e: unknown) => {
+        if (e && typeof e === 'object' && 'code' in e && e.code === 'P2002') return null;
+        throw e;
+      });
+    return NextResponse.json(item ?? { ok: true }, { status: item ? 201 : 200 });
   }
 
   if (typeof pageId === 'string') {
@@ -71,11 +81,17 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     if (!page || page.userId !== userId) {
       return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
     }
+    if (isPublicWorkspace && !page.isPublic) {
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
+    }
 
-    const item = await prisma.workspaceItem.create({
-      data: { workspaceId, pageId },
-    });
-    return NextResponse.json(item, { status: 201 });
+    const item = await prisma.workspaceItem
+      .create({ data: { workspaceId, pageId } })
+      .catch((e: unknown) => {
+        if (e && typeof e === 'object' && 'code' in e && e.code === 'P2002') return null;
+        throw e;
+      });
+    return NextResponse.json(item ?? { ok: true }, { status: item ? 201 : 200 });
   }
 
   return NextResponse.json({ error: t('invalidItemType') }, { status: 400 });
@@ -122,7 +138,18 @@ export async function DELETE(
 
   const { collectionId, pageId } = body as { collectionId?: unknown; pageId?: unknown };
 
+  // Only the item's owner (or the workspace owner) may remove it — otherwise any
+  // co-member could unshare another member's collection/page (vandalism).
+  const isWorkspaceOwner = workspace.ownerId === userId;
+
   if (typeof collectionId === 'string') {
+    const collection = await prisma.collection.findUnique({
+      where: { id: collectionId },
+      select: { userId: true },
+    });
+    if (!isWorkspaceOwner && collection?.userId !== userId) {
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
+    }
     await prisma.workspaceItem.deleteMany({
       where: { workspaceId, collectionId },
     });
@@ -130,6 +157,13 @@ export async function DELETE(
   }
 
   if (typeof pageId === 'string') {
+    const page = await prisma.page.findUnique({
+      where: { id: pageId },
+      select: { userId: true },
+    });
+    if (!isWorkspaceOwner && page?.userId !== userId) {
+      return NextResponse.json({ error: t('insufficientPermissions') }, { status: 403 });
+    }
     await prisma.workspaceItem.deleteMany({
       where: { workspaceId, pageId },
     });
