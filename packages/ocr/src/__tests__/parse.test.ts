@@ -160,4 +160,68 @@ describe('parseOcrJsonBatch', () => {
     const results = parseOcrJsonBatch(input, 2);
     expect(results).toHaveLength(2);
   });
+
+  it('keeps positional indices aligned when a middle line fails to parse', () => {
+    const noIndex = {
+      transcription: 'a',
+      detectedLanguage: 'la',
+      translation: 'b',
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    };
+    const input = `${JSON.stringify(noIndex)}\nBROKEN\n${JSON.stringify(noIndex)}`;
+    const results = parseOcrJsonBatch(input);
+    // The broken line must NOT shift the third page onto the second's index.
+    expect(results.map((r) => r.index)).toEqual([0, 2]);
+  });
+
+  it('ignores an out-of-range imageIndex and falls back to position', () => {
+    const bad = { ...makeResult(0), imageIndex: 99 };
+    const results = parseOcrJsonBatch(JSON.stringify(bad), 3);
+    expect(results[0]!.index).toBe(0);
+  });
+
+  it('ignores a duplicate imageIndex and falls back to position', () => {
+    const a = makeResult(0);
+    const b = { ...makeResult(0) }; // also imageIndex 0
+    const results = parseOcrJsonBatch(`${JSON.stringify(a)}\n${JSON.stringify(b)}`);
+    expect(results.map((r) => r.index)).toEqual([0, 1]);
+  });
+
+  it('falls back to parsing a pretty-printed JSON array (not JSONL)', () => {
+    const arr = [makeResult(0), makeResult(1)];
+    const input = JSON.stringify(arr, null, 2); // multi-line array, not one-object-per-line
+    const results = parseOcrJsonBatch(input);
+    expect(results).toHaveLength(2);
+    expect(results[0]!.result.transcription).toBe('text 0');
+  });
+});
+
+describe('parseOcrJson normalization', () => {
+  it('defaults a missing glossary to an empty array', () => {
+    const raw = JSON.stringify({
+      transcription: 't',
+      detectedLanguage: 'la',
+      translation: 'x',
+      translationLanguage: 'cs',
+      context: 'c',
+      // glossary omitted
+    });
+    const result = parseOcrJson(raw);
+    expect(result.glossary).toEqual([]);
+  });
+
+  it('drops malformed glossary entries', () => {
+    const raw = JSON.stringify({
+      transcription: 't',
+      detectedLanguage: 'la',
+      translation: 'x',
+      translationLanguage: 'cs',
+      context: 'c',
+      glossary: [{ term: 'ok', definition: 'd' }, { term: 'bad' }, null],
+    });
+    const result = parseOcrJson(raw);
+    expect(result.glossary).toEqual([{ term: 'ok', definition: 'd' }]);
+  });
 });
