@@ -17,11 +17,22 @@ export async function getPreviousPageContext(
   limit: number = 3,
 ): Promise<string | undefined> {
   if (!collectionId) return undefined;
+
+  // Only pages that come BEFORE the current one (lower order). Previously this
+  // returned the collection's last pages regardless of position, feeding the OCR
+  // the wrong neighbouring context (and wasting tokens).
+  const current = await prisma.page.findUnique({
+    where: { id: currentPageId },
+    select: { order: true },
+  });
+  if (current?.order == null) return undefined;
+
   const previousPages = await prisma.page.findMany({
     where: {
       collectionId,
       document: { isNot: null },
       id: { not: currentPageId },
+      order: { lt: current.order },
     },
     orderBy: { order: 'desc' },
     take: limit,

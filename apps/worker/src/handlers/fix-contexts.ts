@@ -57,6 +57,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
   });
 
   let completed = 0;
+  let succeeded = 0;
   const errors: string[] = [];
 
   for (const doc of documents) {
@@ -108,18 +109,20 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         });
       }
 
-      // Deduct tokens
+      // Deduct tokens. Deterministic referenceId (no Date.now()) so a job re-run
+      // is idempotent and doesn't bill the same document twice.
       await deductTokensIfSufficient(
         userId,
         response.inputTokens,
         response.outputTokens,
         `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
-        `fix-context:${doc.id}:${Date.now()}`,
+        `fix-context:${jobId}:${doc.id}`,
       ).catch((err) => {
         console.warn('[Worker:fix-contexts] Token deduction failed:', err);
       });
 
       completed++;
+      succeeded++;
     } catch (err) {
       completed++;
       const message = err instanceof Error ? err.message : 'Chyba';
@@ -148,7 +151,7 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
   await prisma.processingJob.update({
     where: { id: jobId },
     data: {
-      status: errors.length > 0 && completed === 0 ? 'error' : 'completed',
+      status: errors.length > 0 && succeeded === 0 ? 'error' : 'completed',
       currentStep: 'Hotovo',
       completedPages: completed,
       errors,

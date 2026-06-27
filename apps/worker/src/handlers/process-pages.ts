@@ -455,12 +455,15 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     }
 
     // Deduct tokens for the whole batch
+    // referenceId must be unique per (job, batch). The old `batch-${batchIdx}`
+    // collided across different jobs (batch-0 of job A == batch-0 of job B), so
+    // the second job's batch was treated as an idempotent duplicate and never billed.
     const deductResult = await deductTokensIfSufficient(
       userId,
       inputTokens,
       outputTokens,
       `OCR dávka ${batchIdx + 1} (${batch.length} stránek)${collectionLabel}`,
-      savedDocs.length > 0 ? savedDocs[0]!.docId : `batch-${batchIdx}`,
+      `batch-${jobId}-${batchIdx}`,
     );
 
     // Update completed count
@@ -531,12 +534,15 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   }
 
   // ── Complete job ─────────────────────────────────────
+  // Surface collected per-page errors, and flag the job as failed when nothing
+  // succeeded (previously it always reported 'completed', hiding total failures).
   await prisma.processingJob.update({
     where: { id: jobId },
     data: {
-      status: 'completed',
+      status: errors.length > 0 && errors.length >= total ? 'error' : 'completed',
       currentStep: 'Hotovo',
       completedPages: total,
+      errors,
     },
   });
 }
@@ -602,7 +608,16 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     glossary: { term: string; definition: string }[];
   };
   try {
-    parsed = JSON.parse(text);
+    // Strip optional ```json fences and isolate the JSON object before parsing,
+    // so a fenced/decorated response doesn't get stored as the raw translation.
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '');
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    const jsonText = start !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+    parsed = JSON.parse(jsonText);
   } catch {
     // Fallback: treat the whole response as translation text
     parsed = { translation: text, context: '', glossary: [] };
@@ -631,12 +646,13 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     },
   });
 
-  // Deduct tokens
+  // Deduct tokens. Deterministic referenceId (no Date.now()) keeps a re-run
+  // idempotent instead of billing the same translation again.
   await deductTokensIfSufficient(
     userId,
     response.inputTokens,
     response.outputTokens,
     `Překlad dokumentu ${doc.id}${collectionLabel}`,
-    `translate-doc-${doc.id}-${targetLanguage}-${Date.now()}`,
+    `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
   ).catch(() => {});
 }
