@@ -8,6 +8,7 @@ export interface UploadedPage {
   id: string;
   filename: string;
   imageUrl: string;
+  thumbnailUrl?: string | null;
   status: string;
   collectionId: string | null;
   hash: string;

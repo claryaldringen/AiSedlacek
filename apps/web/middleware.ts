@@ -53,5 +53,8 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg|hero/|api/images).*)'],
+  // /api/* úplně mimo middleware: Next jinak kvůli middlewaru klonuje tělo každého
+  // requestu do paměti a nad 10 MB ho ořízne – rozbíjelo to uploady skenů
+  // (limit uploadu je 20 MB). Middleware pro API stejně nic nedělá.
+  matcher: ['/((?!api/|_next/static|_next/image|favicon.ico|icon.svg|hero/).*)'],
 };

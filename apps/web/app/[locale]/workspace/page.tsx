@@ -491,6 +491,8 @@ function WorkspaceContent(): React.JSX.Element {
         id: p.id,
         filename: p.filename,
         imageUrl: p.imageUrl,
+        // Bez náhledu grid stahoval a dekódoval plné originály (3–20 MB na kartu).
+        thumbnailUrl: p.thumbnailUrl ?? null,
         status: p.status,
         order: p.order,
         collectionId: p.collectionId,
