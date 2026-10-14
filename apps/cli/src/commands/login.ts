@@ -76,10 +76,11 @@ function startCallbackServer(
       const token = url.searchParams.get('token');
       const state = url.searchParams.get('state');
 
+      // Cizí požadavek (jiný lokální proces, skenování portů z webové stránky) nesmí
+      // přihlášení shodit – odmítni ho a čekej dál na skutečný callback nebo timeout.
       if (state !== expectedState) {
         res.writeHead(400);
         res.end('Neplatný state parametr');
-        rejectToken(new Error('State mismatch'));
         return;
       }
 

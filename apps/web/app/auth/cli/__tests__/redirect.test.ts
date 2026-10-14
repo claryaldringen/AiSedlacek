@@ -11,6 +11,19 @@ describe('parseCliRedirect', () => {
     expect(parseCliRedirect(redirect)).not.toBeNull();
   });
 
+  it.each([
+    ['short IPv4', 'http://127.1:5000/callback'],
+    ['hex IPv4', 'http://0x7f000001:5000/callback'],
+    ['decimal IPv4', 'http://2130706433:5000/callback'],
+    ['expanded IPv6', 'http://[0:0::1]:5000/callback'],
+    ['backslash path', 'http://127.0.0.1:5000\\callback'],
+  ])('normalises %s to a loopback callback', (_name, redirect) => {
+    const url = parseCliRedirect(redirect);
+    expect(url?.protocol).toBe('http:');
+    expect(url?.pathname).toBe('/callback');
+    expect(['127.0.0.1', '[::1]']).toContain(url?.hostname);
+  });
+
   it('accepts the URL built by `ais login` (current and previous CLI versions)', () => {
     for (const host of ['127.0.0.1', 'localhost']) {
       const redirect = `http://${host}:61234/callback`;
@@ -30,6 +43,9 @@ describe('parseCliRedirect', () => {
     'ftp://localhost:1234/callback',
     'https://localhost:1234/callback',
     'ws://localhost:1234/callback',
+    'java\nscript://localhost:1234/callback',
+    ' javascript://localhost:1234/callback',
+    'java\tscript://localhost:1234/callback',
   ])('rejects non-http scheme %s', (redirect) => {
     expect(parseCliRedirect(redirect)).toBeNull();
   });
@@ -41,6 +57,8 @@ describe('parseCliRedirect', () => {
     'http://192.168.1.10:1234/callback',
     'http://0.0.0.0:1234/callback',
     'http://localhost.:1234/callback',
+    'http://[::ffff:127.0.0.1]:1234/callback',
+    'http://127.0.0.1@evil.example:1234/callback',
   ])('rejects non-loopback host %s', (redirect) => {
     expect(parseCliRedirect(redirect)).toBeNull();
   });
