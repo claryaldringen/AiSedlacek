@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
 
 import Anthropic from '@anthropic-ai/sdk';
-import { sharpForUntrustedInput } from '@/lib/infrastructure/image-validation';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
-import { detectMediaType } from '@ai-sedlacek/ocr';
+import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
@@ -133,29 +132,14 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const storage = getStorage();
   const storagePath = storageKeyFromImageUrl(doc.page.imageUrl);
   let imageBase64: string | null = null;
-  let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg';
+  let mediaType: ImageMediaType = 'image/jpeg';
   try {
-    let imageBuffer = await storage.read(storagePath);
-    const MAX_BYTES = 5 * 1024 * 1024;
-    // Stored uploads are user data – decode with the pixel limit (SEC-13).
-    if (imageBuffer.length > MAX_BYTES) {
-      imageBuffer = Buffer.from(
-        await sharpForUntrustedInput(imageBuffer)
-          .resize({ width: 3000, withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer(),
-      );
-      if (imageBuffer.length > MAX_BYTES) {
-        imageBuffer = Buffer.from(
-          await sharpForUntrustedInput(imageBuffer)
-            .resize({ width: 2000, withoutEnlargement: true })
-            .jpeg({ quality: 75 })
-            .toBuffer(),
-        );
-      }
-    }
-    imageBase64 = imageBuffer.toString('base64');
-    mediaType = detectMediaType(imageBuffer);
+    // Stejná příprava jako u OCR: limit velikosti pro API, převod TIFF a dalších
+    // nepodporovaných formátů, EXIF orientace a limit pixelů (SEC-13). Dřív se
+    // TIFF poslal jako image/jpeg a API odmítlo celý chat.
+    const prepared = await prepareImage(await storage.read(storagePath));
+    imageBase64 = prepared.buffer.toString('base64');
+    mediaType = prepared.mediaType;
   } catch {
     // Image not available — continue without it
   }
@@ -180,7 +164,6 @@ ${doc.context || '(žádný)'}
 ${glossaryText}`;
 
   // Build messages for Claude
-  type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
   type ContentBlock =
     | { type: 'text'; text: string }
     | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } };
