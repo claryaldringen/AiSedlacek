@@ -396,7 +396,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     let lastProgressUpdate = 0;
 
     const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
-    const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens } =
+    const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens, truncated } =
       await processBatch(images, userPrompt, {
         previousContext,
         estimatedOutputTokens: estimatedTotal,
@@ -464,12 +464,16 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       }
     }
 
-    // Handle pages that didn't get a result
+    // Handle pages that didn't get a result. Při useknutí výstupu (stop_reason
+    // max_tokens) se kompletní stránky uloží výše a zbytek skončí jasnou chybou –
+    // neúplný výsledek se nikdy neukládá (LLM-2). Účtuje se skutečná spotřeba volání.
     const processedIndices = new Set(results.map((r) => r.index));
     for (let idx = 0; idx < sentPages.length; idx++) {
       if (!processedIndices.has(idx)) {
         const pageInfo = sentPages[idx]!;
-        const message = 'Model nevrátil výsledek pro tuto stránku';
+        const message = truncated
+          ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
+          : 'Model nevrátil výsledek pro tuto stránku';
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
         await prisma.page.update({
           where: { id: pageInfo.pageId },

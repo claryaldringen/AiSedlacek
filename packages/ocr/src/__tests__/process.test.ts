@@ -25,10 +25,15 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }));
 
 // ── Import after mocks ──────────────────────────────
-import { processWithClaudeBatch, processWithClaude } from '../process.js';
+import {
+  processWithClaudeBatch,
+  processWithClaude,
+  batchMaxTokens,
+  BATCH_MAX_OUTPUT_TOKENS,
+} from '../process.js';
 
 // ── Helpers ─────────────────────────────────────────
-function setupMockStream(jsonlOutput: string) {
+function setupMockStream(jsonlOutput: string, stopReason = 'end_turn') {
   let textCb: ((text: string) => void) | undefined;
   mockStreamOn.mockImplementation((event: string, cb: (...args: unknown[]) => void) => {
     if (event === 'text') textCb = cb;
@@ -40,7 +45,7 @@ function setupMockStream(jsonlOutput: string) {
       id: 'msg_test',
       model: 'claude-opus-4-6',
       usage: { input_tokens: 1000, output_tokens: 500 },
-      stop_reason: 'end_turn',
+      stop_reason: stopReason,
       content: [{ type: 'text', text: jsonlOutput }],
     };
   });
@@ -177,6 +182,70 @@ describe('processWithClaudeBatch', () => {
     const images = [{ buffer: Buffer.from([0xff, 0xd8, 0x00]), pageId: 'p1', index: 0 }];
     const result = await processWithClaudeBatch(images, 'Přepiš text.');
     expect(result.results).toHaveLength(0);
+  });
+});
+
+// ── LLM-2 ───────────────────────────────────────────
+describe('processWithClaudeBatch – max_tokens a stop_reason (LLM-2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const line = (index: number) =>
+    JSON.stringify({
+      imageIndex: index,
+      transcription: `text${index}`,
+      detectedLanguage: 'la',
+      translation: `tr${index}`,
+      translationLanguage: 'cs',
+      context: '',
+      glossary: [],
+    });
+  const jpeg = () => Buffer.from([0xff, 0xd8, 0xff]);
+
+  it('batchMaxTokens roste s počtem stránek a nepřekročí konzervativní strop', () => {
+    expect(batchMaxTokens(1)).toBe(8192);
+    expect(batchMaxTokens(3)).toBe(24_000);
+    expect(batchMaxTokens(6)).toBe(48_000);
+    expect(batchMaxTokens(50)).toBe(BATCH_MAX_OUTPUT_TOKENS);
+    // claude-opus-4-6 má max. 128k výstupních tokenů
+    expect(BATCH_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(128_000);
+  });
+
+  it('posílá max_tokens odvozený od skutečného počtu obrázků v dávce', async () => {
+    setupMockStream([0, 1, 2, 3, 4, 5].map(line).join('\n'));
+    const images = [0, 1, 2, 3, 4, 5].map((i) => ({ buffer: jpeg(), pageId: `p${i}`, index: i }));
+
+    await processWithClaudeBatch(images, 'Přepiš text.');
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as { max_tokens: number };
+    // Dřív 2 500 × 6 = 15 000 – hustým stránkám to nestačilo
+    expect(apiCall.max_tokens).toBe(48_000);
+  });
+
+  it('při stop_reason max_tokens vrátí jen kompletní stránky a příznak truncated', async () => {
+    const cut = line(1).slice(0, 40); // useknutý druhý řádek
+    setupMockStream(`${line(0)}\n${cut}`, 'max_tokens');
+    const images = [0, 1].map((i) => ({ buffer: jpeg(), pageId: `p${i}`, index: i }));
+
+    const result = await processWithClaudeBatch(images, 'Přepiš text.');
+
+    expect(result.truncated).toBe(true);
+    expect(result.stopReason).toBe('max_tokens');
+    expect(result.results.map((r) => r.index)).toEqual([0]);
+    // Skutečná spotřeba se vrací pro účtování
+    expect(result.inputTokens).toBe(1000);
+    expect(result.outputTokens).toBe(500);
+  });
+
+  it('běžné dokončení není truncated', async () => {
+    setupMockStream(line(0));
+    const result = await processWithClaudeBatch(
+      [{ buffer: jpeg(), pageId: 'p0', index: 0 }],
+      'Přepiš text.',
+    );
+    expect(result.truncated).toBe(false);
+    expect(result.stopReason).toBe('end_turn');
   });
 });
 

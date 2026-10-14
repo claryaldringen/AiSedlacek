@@ -253,3 +253,36 @@ describe('processPages – obrázky až pro konkrétní dávku (PERF-1)', () => 
     ]);
   });
 });
+
+// ── LLM-2 ────────────────────────────────────────────────────
+describe('processPages – useknutý výstup dávky (LLM-2)', () => {
+  it('kompletní stránky uloží, useknuté označí chybou a účtuje skutečnou spotřebu', async () => {
+    addPage('p1');
+    addPage('p2');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [{ index: 0, result: ocrResult(0) }],
+      rawResponse: '{...}',
+      processingTimeMs: 1000,
+      model: 'claude-opus-4-6',
+      inputTokens: 3000,
+      outputTokens: 48000,
+      stopReason: 'max_tokens',
+      truncated: true,
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2'] });
+
+    // p1 je kompletní → uložena
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p1');
+    // p2 → chyba s jasnou hláškou, nic se neuložilo
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p2' },
+      data: { status: 'error', errorMessage: expect.stringContaining('useknut') },
+    });
+    // Účtuje se celé volání (skutečná spotřeba API), ne odhad
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+    const [, input, output] = mocks.deductTokensIfSufficient.mock.calls[0]!;
+    expect([input, output]).toEqual([3000, 48000]);
+  });
+});

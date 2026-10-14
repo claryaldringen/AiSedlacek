@@ -20,6 +20,29 @@ IMPORTANT: Return your response as valid JSON with this exact structure:
 
 Use \\n for newlines inside JSON strings. Return ONLY the JSON object, no markdown fences, no extra text.`;
 
+/**
+ * Rezerva výstupních tokenů na jednu stránku dávky. Hustá stránka (přepis, překlad,
+ * kontext, glosář) má typicky 2 500–3 500 tokenů; 8 000 pokryje i výjimečně dlouhé
+ * stránky. Platí se jen skutečně vygenerované tokeny, štědrý limit nic nestojí.
+ */
+export const BATCH_OUTPUT_TOKENS_PER_PAGE = 8_000;
+
+/**
+ * Strop `max_tokens` dávky. claude-opus-4-6 umí až 128k výstupních tokenů (jen se
+ * streamingem, který používáme); volíme konzervativně polovinu. Dávka má podle
+ * `createBatches` ve workeru max. ~6 stránek (6 × 8k = 48k) – výstup nad 64k by
+ * spíš znamenal zacyklení modelu než legitimní obsah.
+ */
+export const BATCH_MAX_OUTPUT_TOKENS = 64_000;
+
+/** `max_tokens` odvozený od skutečného počtu stránek v dávce (LLM-2). */
+export function batchMaxTokens(pageCount: number): number {
+  return Math.min(
+    BATCH_MAX_OUTPUT_TOKENS,
+    Math.max(8192, BATCH_OUTPUT_TOKENS_PER_PAGE * Math.max(1, pageCount)),
+  );
+}
+
 export async function processWithClaude(
   image: Buffer,
   userPrompt: string,
@@ -127,6 +150,10 @@ export async function processWithClaudeBatch(
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** `stop_reason` odpovědi API (např. `end_turn`, `max_tokens`). */
+  stopReason: string | null;
+  /** Výstup byl useknut limitem `max_tokens` – chybějící stránky nejsou kompletní. */
+  truncated: boolean;
 }> {
   const startTime = Date.now();
   const client = new Anthropic();
@@ -171,7 +198,7 @@ export async function processWithClaudeBatch(
 
   const estimated = options?.estimatedOutputTokens ?? 2500 * images.length;
   let fullText = '';
-  const maxTokens = Math.min(Math.max(8192, 2500 * images.length), 128_000);
+  const maxTokens = batchMaxTokens(images.length);
 
   const stream = client.messages.stream({
     model: 'claude-opus-4-6',
@@ -200,12 +227,22 @@ export async function processWithClaudeBatch(
       usage: finalMessage.usage,
       stop_reason: finalMessage.stop_reason,
       imageCount: images.length,
+      maxTokens,
     }),
   );
+
+  const truncated = finalMessage.stop_reason === 'max_tokens';
+  if (truncated) {
+    console.warn(
+      `[Claude Batch] Output truncated at max_tokens=${maxTokens} (${images.length} images) – incomplete pages will be reported as errors`,
+    );
+  }
 
   const text =
     fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
+  // Useknutý poslední řádek JSONL se nenaparsuje a parser ho zahodí – vrácené
+  // výsledky jsou tedy jen kompletní stránky; o zbytku rozhodne volající.
   const results = parseOcrJsonBatch(text, images.length);
 
   return {
@@ -215,5 +252,7 @@ export async function processWithClaudeBatch(
     model: finalMessage.model,
     inputTokens: finalMessage.usage.input_tokens,
     outputTokens: finalMessage.usage.output_tokens,
+    stopReason: finalMessage.stop_reason ?? null,
+    truncated,
   };
 }

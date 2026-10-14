@@ -248,6 +248,8 @@ export async function processWithClaudeBatchCli(
   model: string;
   inputTokens: number;
   outputTokens: number;
+  stopReason: string | null;
+  truncated: boolean;
 }> {
   const startTime = Date.now();
   const totalEstimated = options?.estimatedOutputTokens ?? 2500 * images.length;
@@ -292,6 +294,9 @@ export async function processWithClaudeBatchCli(
     model: 'claude-cli',
     inputTokens: 0,
     outputTokens: 0,
+    // CLI zpracovává stránky po jedné se structured output – useknutí nehrozí
+    stopReason: 'end_turn',
+    truncated: false,
   };
 }
 
