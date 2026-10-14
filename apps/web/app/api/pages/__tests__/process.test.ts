@@ -167,6 +167,18 @@ describe('POST /api/pages/process', () => {
     );
   });
 
+  it('returns 409 when the same pages are already in a running job (no collection)', async () => {
+    mockProcessingJobFindFirst.mockImplementation((args: { where: Record<string, unknown> }) =>
+      Promise.resolve('pageIds' in args.where ? { id: 'job-running' } : null),
+    );
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).jobId).toBe('job-running');
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
   it('returns 404 when collectionId belongs to another user', async () => {
     mockGetOwnedCollection.mockResolvedValue(null);
 

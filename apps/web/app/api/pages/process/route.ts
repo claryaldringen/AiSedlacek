@@ -102,6 +102,25 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
+  // Stejné stránky nesmí běžet ve dvou jobech (dvojklik, dva příkazy `ais`) –
+  // u stránek bez svazku výše uvedená kontrola nezabírá a výsledek by byl dvojí
+  // Opus, dvojí účtování a stránka v chybě kvůli unique pageId.
+  const overlappingJob = await prisma.processingJob.findFirst({
+    where: {
+      userId,
+      status: { in: ['running', 'queued'] },
+      type: 'ocr',
+      pageIds: { hasSome: pageIds as string[] },
+    },
+    select: { id: true },
+  });
+  if (overlappingJob) {
+    return Response.json(
+      { error: t('processingAlreadyRunning'), jobId: overlappingJob.id },
+      { status: 409 },
+    );
+  }
+
   // Create ProcessingJob in DB with status 'queued' — worker picks it up
   const job = await prisma.processingJob.create({
     data: {
