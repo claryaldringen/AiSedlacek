@@ -19,7 +19,7 @@
   "dependencies": {
     "@ai-sedlacek/shared": "*",
     "@anthropic-ai/sdk": "^0.78.0",
-    "sharp": "^0.33"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "eslint": "^9",
