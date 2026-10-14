@@ -31,7 +31,7 @@ vi.mock('@ai-sedlacek/ocr', () => ({
 vi.mock('../lib/storage', () => ({ getStorage: () => ({ read: mocks.storageRead }) }));
 vi.mock('../lib/llm', () => ({ isCliMode: () => false, createMessage: vi.fn() }));
 
-import { processPages } from '../handlers/process-pages';
+import { processPages, ocrBatchReferenceId } from '../handlers/process-pages';
 
 // ── Fixtures ─────────────────────────────────────────────────
 interface PageFixture {
@@ -315,5 +315,60 @@ describe('processPages – nejednoznačné přiřazení výsledků dávky (LLM-3
         data: { status: 'error', errorMessage: problem },
       });
     }
+  });
+});
+
+// ── BIL-3 ────────────────────────────────────────────────────
+describe('processPages – deterministický referenceId odečtu dávky (BIL-3)', () => {
+  it('po reclaimu nová dávka s jinými stránkami nekoliduje s klíčem staré dávky', async () => {
+    // Max. 2 stránky na dávku → [p1, p2], [p3]
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+    const firstRun = mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4] as string);
+    expect(firstRun).toEqual([
+      ocrBatchReferenceId('job-1', ['p1', 'p2']),
+      ocrBatchReferenceId('job-1', ['p3']),
+    ]);
+    expect(firstRun[0]).not.toBe(firstRun[1]);
+
+    // Reclaim téhož jobu: p1 a p2 už jsou hotové, nový běh má jedinou dávku [p3]
+    // s indexem 0. Dřívější klíč `batch-job-1-0` by kolidoval s první dávkou.
+    for (const id of ['p1', 'p2']) {
+      pages.get(id)!.document = {
+        id: `doc-${id}`,
+        context: '',
+        translations: [{ language: 'cs', text: 'hotovo' }],
+        glossary: [],
+      };
+    }
+    mocks.deductTokensIfSufficient.mockClear();
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+    const secondRun = mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4] as string);
+
+    expect(secondRun).toHaveLength(1);
+    expect(secondRun[0]).not.toBe(firstRun[0]);
+    // Stejná jednotka práce (stránka p3 v témže jobu) → stejný klíč → neúčtuje se dvakrát
+    expect(secondRun[0]).toBe(firstRun[1]);
+  });
+
+  it('klíč nezávisí na pořadí stránek a liší se mezi joby', () => {
+    expect(ocrBatchReferenceId('job-1', ['b', 'a'])).toBe(ocrBatchReferenceId('job-1', ['a', 'b']));
+    expect(ocrBatchReferenceId('job-1', ['a'])).not.toBe(ocrBatchReferenceId('job-2', ['a']));
+    expect(ocrBatchReferenceId('job-1', ['a'])).toMatch(/^ocr-batch:job-1:[0-9a-f]{32}$/);
+  });
+
+  it('odečte hned po volání API, ještě před uložením výsledků', async () => {
+    addPage('p1');
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const deductOrder = mocks.deductTokensIfSufficient.mock.invocationCallOrder[0]!;
+    const saveOrder = mocks.prisma.document.create.mock.invocationCallOrder[0]!;
+    expect(deductOrder).toBeLessThan(saveOrder);
   });
 });

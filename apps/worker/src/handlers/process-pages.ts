@@ -5,6 +5,7 @@
  * Called from worker/index.ts when a queued ProcessingJob is found in DB.
  */
 
+import crypto from 'crypto';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { createMessage, isCliMode } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
@@ -427,6 +428,23 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       },
     });
 
+    // Odečet hned po získání usage, ještě před ukládáním – pád workeru mezi uložením
+    // a odečtem by jinak nechal zpracování nezaplacené. Klíč je deterministický
+    // a odvozený od jobu a stránek dávky (BIL-3): dřívější `batch-${jobId}-${batchIdx}`
+    // po reclaimu kolidoval – dávky se číslují znovu od 0, nová dávka 0 (jiné
+    // stránky) tak „idempotentně" prošla bez zaplacení. Opakované zpracování
+    // stejných stránek po restartu se naopak neúčtuje dvakrát.
+    const deductResult = await deductTokensIfSufficient(
+      userId,
+      inputTokens,
+      outputTokens,
+      `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
+      ocrBatchReferenceId(
+        jobId,
+        sentPages.map((p) => p.pageId),
+      ),
+    );
+
     // Distribute tokens proportionally across pages in the batch
     const perPageInputTokens = Math.round(inputTokens / sentPages.length);
     const perPageOutputTokens = Math.round(outputTokens / sentPages.length);
@@ -493,18 +511,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         });
       }
     }
-
-    // Deduct tokens for the whole batch
-    // referenceId must be unique per (job, batch). The old `batch-${batchIdx}`
-    // collided across different jobs (batch-0 of job A == batch-0 of job B), so
-    // the second job's batch was treated as an idempotent duplicate and never billed.
-    const deductResult = await deductTokensIfSufficient(
-      userId,
-      inputTokens,
-      outputTokens,
-      `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
-      `batch-${jobId}-${batchIdx}`,
-    );
 
     // Update completed count
     const batchCompleted = batch.length;
@@ -585,6 +591,21 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       errors,
     },
   });
+}
+
+/**
+ * Deterministický `referenceId` odečtu za OCR dávku: job + hash seřazených ID
+ * stránek, které šly do API. Každá stránka je v jednom běhu jobu jen v jedné
+ * dávce, takže různé dávky nekolidují; po restartu dostane stejná sada stránek
+ * stejný klíč (idempotentní odečet) a jiná sada jiný.
+ */
+export function ocrBatchReferenceId(jobId: string, pageIds: string[]): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update([...pageIds].sort().join(','))
+    .digest('hex')
+    .slice(0, 32);
+  return `ocr-batch:${jobId}:${digest}`;
 }
 
 /**
@@ -694,5 +715,11 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     response.outputTokens,
     `Překlad dokumentu ${doc.id}${collectionLabel}`,
     `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
-  ).catch(() => {});
+  ).catch((err) => {
+    // Chybu odečtu nepolykat potichu (BIL-3)
+    console.error(
+      `[Worker] Token deduction failed for translation of document ${doc.id}:`,
+      err instanceof Error ? err.message : err,
+    );
+  });
 }

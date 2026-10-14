@@ -63,7 +63,8 @@ ${collection.context}`,
     response.inputTokens,
     response.outputTokens,
     `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
-    `translate-context:${collectionId}:${Date.now()}`,
+    // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+    `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
   ).catch((err) => {
     console.warn('[Worker:translate-context] Token deduction failed:', err);
   });

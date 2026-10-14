@@ -115,7 +115,9 @@ Return ONLY the updated translation in markdown, nothing else.`;
     response.inputTokens,
     response.outputTokens,
     `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
-    `retranslate-${documentId}-${Date.now()}`,
+    // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož jobu
+    // po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
+    `retranslate:${jobId}:${documentId}:${targetLang}`,
   );
 
   if (!deductResult.success) {
