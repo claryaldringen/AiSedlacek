@@ -17,6 +17,7 @@ export const uploadCommand = new Command('upload')
 
     const urls: string[] = [];
     const localFiles: string[] = [];
+    let totalErrors = 0;
 
     for (const src of expanded) {
       if (src.startsWith('http://') || src.startsWith('https://')) {
@@ -24,13 +25,13 @@ export const uploadCommand = new Command('upload')
       } else if (fs.existsSync(src)) {
         localFiles.push(src);
       } else {
-        output.warn(`Přeskakuji: ${src} (soubor nenalezen)`);
+        output.error(`Přeskakuji: ${src} (soubor nenalezen)`);
+        totalErrors++;
       }
     }
 
     const spinner = ora('Nahrávám...').start();
     let totalPages = 0;
-    let totalErrors = 0;
 
     if (urls.length > 0) {
       spinner.text = `Nahrávám ${urls.length} URL...`;
@@ -106,6 +107,8 @@ export const uploadCommand = new Command('upload')
 
     spinner.stop();
     output.info(`Nahráno: ${totalPages} stránek, ${totalErrors} chyb`);
+    // Chyby jednotlivých souborů nesmí skončit úspěšným exit kódem (skripty/agenti).
+    if (totalErrors > 0) process.exitCode = 1;
   });
 
 function expandSources(sources: string[]): string[] {

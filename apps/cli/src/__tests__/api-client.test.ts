@@ -54,6 +54,36 @@ describe('api-client', () => {
     await expect(api.get('/api/pages/999')).rejects.toThrow('Not found');
   });
 
+  it('uses a generic message when an error response is not JSON', async () => {
+    mockFetch.mockResolvedValue(new Response('<html>Bad Gateway</html>', { status: 502 }));
+    await expect(api.patchJson('/api/documents/1', {})).rejects.toMatchObject({
+      status: 502,
+      message: 'Server vrátil 502',
+    });
+  });
+
+  it('throws on a 2xx response that is not JSON (e.g. HTML login page)', async () => {
+    mockFetch.mockResolvedValue(
+      new Response('<!doctype html><title>Login</title>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+    await expect(api.patchJson('/api/documents/1', { transcription: 'x' })).rejects.toThrow(
+      /očekáván JSON/,
+    );
+  });
+
+  it('accepts 204 No Content', async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(api.delete('/api/collections/1')).resolves.toBeNull();
+  });
+
+  it('returns JSON null body as null', async () => {
+    mockFetch.mockResolvedValue(new Response('null', { status: 200 }));
+    await expect(api.get('/api/documents/1')).resolves.toBeNull();
+  });
+
   it('refuses to create client with token over plaintext http (non-localhost)', () => {
     expect(() => createApiClient('http://example.com', 'test-token')).toThrow(/Nezabezpečené/);
   });

@@ -21,9 +21,14 @@ export const pullCommand = new Command('pull')
 
     let ids = pageIds;
     if (options.collection) {
-      const collection = await api.get(`/api/collections/${options.collection}`);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ids = collection.pages.filter((p: any) => p.status === 'done').map((p: any) => p.id);
+      try {
+        const collection = await api.get(`/api/collections/${options.collection}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ids = collection.pages.filter((p: any) => p.status === 'done').map((p: any) => p.id);
+      } catch (e: unknown) {
+        output.error(`Kolekci ${options.collection} nelze načíst: ${(e as Error).message}`);
+        process.exit(1);
+      }
     }
 
     if (ids.length === 0) {
