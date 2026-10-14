@@ -5,9 +5,7 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-export async function resolveUserFromToken(
-  authHeader: string | null,
-): Promise<string | null> {
+export async function resolveUserFromToken(authHeader: string | null): Promise<string | null> {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
 
   const token = authHeader.slice(7);

@@ -64,7 +64,10 @@ interface FileGridProps {
   onShareItem?: (id: string, type: 'page' | 'collection') => void;
   /** Reorder pages via drag and drop */
   onReorderPages?: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
-  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }> | null;
+  searchMatchIds?: Map<
+    string,
+    { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }
+  > | null;
   searchMatchCollectionIds?: Map<string, number> | null;
 }
 

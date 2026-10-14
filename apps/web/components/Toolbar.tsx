@@ -102,7 +102,13 @@ export function Toolbar({
         {/* Group 1: Content */}
         <div className="flex items-end gap-1">
           <button onClick={onImportClick} className={btnPrimary}>
-            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className={ico}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
             {t('insert')}
@@ -110,7 +116,13 @@ export function Toolbar({
 
           {onCreateCollection && (
             <button onClick={onCreateCollection} className={btnDefault}>
-              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className={ico}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -128,7 +140,13 @@ export function Toolbar({
         <div className="flex items-end gap-1">
           {hasCollection && onEditContext && (
             <button onClick={onEditContext} title={t('contextTitle')} className={btnDefault}>
-              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className={ico}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -149,7 +167,13 @@ export function Toolbar({
                   : btnDefault
               }
             >
-              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className={ico}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -162,7 +186,13 @@ export function Toolbar({
 
           {onSortByName && (
             <button onClick={onSortByName} title={t('sortTitle')} className={btnDefault}>
-              <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className={ico}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -183,7 +213,13 @@ export function Toolbar({
               {detectingBlank ? (
                 spinnerIcon
               ) : (
-                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className={ico}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -201,10 +237,22 @@ export function Toolbar({
         <div className="flex items-end gap-1">
           <button
             onClick={onSearchToggle}
-            className={isSearchOpen ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100` : btnDefault}
+            className={
+              isSearchOpen ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100` : btnDefault
+            }
           >
-            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            <svg
+              className={ico}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+              />
             </svg>
             {t('search')}
           </button>
@@ -230,7 +278,13 @@ export function Toolbar({
                     onClick={() => onSearchChange?.('')}
                     className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
                     </svg>
                   </button>
@@ -257,7 +311,13 @@ export function Toolbar({
                 disabled={pendingSelectedCount === 0 || isProcessing}
                 className={`${btnDefault} ${btnDisabled}`}
               >
-                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className={ico}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -281,7 +341,13 @@ export function Toolbar({
                   {generatingContext ? (
                     spinnerIcon
                   ) : (
-                    <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg
+                      className={ico}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -297,7 +363,13 @@ export function Toolbar({
 
               {onRenameCollection && (
                 <button onClick={onRenameCollection} className={btnDefault}>
-                  <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg
+                    className={ico}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -309,7 +381,13 @@ export function Toolbar({
               )}
 
               <button onClick={onDeleteSelected} className={btnDanger}>
-                <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className={ico}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -354,7 +432,13 @@ export function Toolbar({
                 : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600',
             ].join(' ')}
           >
-            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className={ico}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -372,7 +456,13 @@ export function Toolbar({
                 : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600',
             ].join(' ')}
           >
-            <svg className={ico} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className={ico}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"

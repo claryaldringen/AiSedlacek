@@ -58,7 +58,13 @@ function processChildren(
   });
 }
 
-function HighlightedMarkdown({ content, query }: { content: string; query?: string }): React.JSX.Element {
+function HighlightedMarkdown({
+  content,
+  query,
+}: {
+  content: string;
+  query?: string;
+}): React.JSX.Element {
   if (!query || query.length < 2) {
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
   }
@@ -70,7 +76,13 @@ function HighlightedMarkdown({ content, query }: { content: string; query?: stri
     const parts = text.split(regex);
     if (parts.length <= 1) return text;
     return parts.map((part, i) =>
-      regex.test(part) ? <mark key={i} className="bg-yellow-200 rounded px-0.5">{part}</mark> : part
+      regex.test(part) ? (
+        <mark key={i} className="bg-yellow-200 rounded px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
     );
   };
 
@@ -79,9 +91,15 @@ function HighlightedMarkdown({ content, query }: { content: string; query?: stri
       remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children, ...props }) => <p {...props}>{processChildren(children, highlightText)}</p>,
-        li: ({ children, ...props }) => <li {...props}>{processChildren(children, highlightText)}</li>,
-        td: ({ children, ...props }) => <td {...props}>{processChildren(children, highlightText)}</td>,
-        th: ({ children, ...props }) => <th {...props}>{processChildren(children, highlightText)}</th>,
+        li: ({ children, ...props }) => (
+          <li {...props}>{processChildren(children, highlightText)}</li>
+        ),
+        td: ({ children, ...props }) => (
+          <td {...props}>{processChildren(children, highlightText)}</td>
+        ),
+        th: ({ children, ...props }) => (
+          <th {...props}>{processChildren(children, highlightText)}</th>
+        ),
       }}
     >
       {content}
@@ -169,7 +187,11 @@ function EditableSection({
   );
 }
 
-export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerProps): React.JSX.Element {
+export function ResultViewer({
+  result,
+  onUpdate,
+  highlightQuery,
+}: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);

@@ -16,7 +16,10 @@ interface FileListProps {
   onDelete: (id: string) => void;
   processingPageIds: Set<string>;
   showCollections?: boolean;
-  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionName: string | null }> | null;
+  searchMatchIds?: Map<
+    string,
+    { matches: number; snippet: string; collectionName: string | null }
+  > | null;
 }
 
 function cleanFilename(raw: string): string {

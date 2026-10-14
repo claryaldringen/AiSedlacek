@@ -7,10 +7,7 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: RouteContext,
-): Promise<NextResponse> {
+export async function POST(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
   const { id } = await params;
 
   const auth = await resolveUserId(request);
@@ -24,10 +21,7 @@ export async function POST(
   }
 
   if (page.status === 'done') {
-    return NextResponse.json(
-      { error: 'Stránka už byla zpracována' },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: 'Stránka už byla zpracována' }, { status: 409 });
   }
 
   const body = await request.json();

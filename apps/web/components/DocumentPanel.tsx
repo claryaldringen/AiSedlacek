@@ -369,7 +369,11 @@ export function DocumentPanel({
               </div>
             ) : status === 'done' && result ? (
               <div className="flex flex-1 flex-col overflow-y-auto">
-                <ResultViewer result={result} onUpdate={onResultUpdate} highlightQuery={highlightQuery} />
+                <ResultViewer
+                  result={result}
+                  onUpdate={onResultUpdate}
+                  highlightQuery={highlightQuery}
+                />
                 {/* Chat */}
                 <div className="border-t border-slate-200">
                   <DocumentChat

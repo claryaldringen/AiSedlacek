@@ -339,9 +339,10 @@ export function useProcessingJob({
           // There's an active job — start monitoring it
           // Use job's pageIds (covers all pages, not just currently displayed collection)
           const jobPageIds = data.pageIds ?? [];
-          const processingPages = jobPageIds.length > 0
-            ? jobPageIds
-            : pagesRef.current.filter((p) => p.status === 'processing').map((p) => p.id);
+          const processingPages =
+            jobPageIds.length > 0
+              ? jobPageIds
+              : pagesRef.current.filter((p) => p.status === 'processing').map((p) => p.id);
           setProcessingPageIds(new Set(processingPages));
           setProcessingStep(data.currentStep ?? 'Zpracovávám…');
           setProcessingProgress(

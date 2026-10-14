@@ -35,13 +35,19 @@ function CliAuthContent(): React.ReactElement {
   try {
     const parsed = new URL(redirect);
     redirectValid =
-      parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]';
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname === '[::1]';
   } catch {
     redirectValid = false;
   }
 
   if (!redirectValid) {
-    return <div className="p-8 text-center text-red-600">Neplatný redirect — pouze localhost je povolen.</div>;
+    return (
+      <div className="p-8 text-center text-red-600">
+        Neplatný redirect — pouze localhost je povolen.
+      </div>
+    );
   }
 
   return (
@@ -53,9 +59,7 @@ function CliAuthContent(): React.ReactElement {
         </p>
 
         {status === 'error' && (
-          <p className="mb-4 text-red-600">
-            Chyba při autorizaci. Zkuste to znovu.
-          </p>
+          <p className="mb-4 text-red-600">Chyba při autorizaci. Zkuste to znovu.</p>
         )}
 
         <button

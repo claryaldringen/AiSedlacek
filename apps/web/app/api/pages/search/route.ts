@@ -58,9 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const start = Math.max(0, idx - 50);
       const end = Math.min(allText.length, idx + q.length + 50);
       snippet =
-        (start > 0 ? '…' : '') +
-        allText.slice(start, end) +
-        (end < allText.length ? '…' : '');
+        (start > 0 ? '…' : '') + allText.slice(start, end) + (end < allText.length ? '…' : '');
     }
 
     return {

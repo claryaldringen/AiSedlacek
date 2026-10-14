@@ -160,7 +160,17 @@ function WorkspaceContent(): React.JSX.Element {
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>>(new Map());
+  const [searchResults, setSearchResults] = useState<
+    Map<
+      string,
+      {
+        matches: number;
+        snippet: string;
+        collectionId: string | null;
+        collectionName: string | null;
+      }
+    >
+  >(new Map());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Document panel
@@ -193,9 +203,22 @@ function WorkspaceContent(): React.JSX.Element {
         const res = await apiFetch(`/api/pages/search?${params}`);
         if (!res.ok) return;
         const data = await res.json();
-        const map = new Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>();
+        const map = new Map<
+          string,
+          {
+            matches: number;
+            snippet: string;
+            collectionId: string | null;
+            collectionName: string | null;
+          }
+        >();
         for (const r of data.results) {
-          map.set(r.pageId, { matches: r.matches, snippet: r.snippet, collectionId: r.collectionId, collectionName: r.collectionName });
+          map.set(r.pageId, {
+            matches: r.matches,
+            snippet: r.snippet,
+            collectionId: r.collectionId,
+            collectionName: r.collectionName,
+          });
         }
         setSearchResults(map);
       } catch {
@@ -665,11 +688,7 @@ function WorkspaceContent(): React.JSX.Element {
       if (targetIndex === -1) return;
 
       const insertAt = position === 'before' ? targetIndex : targetIndex + 1;
-      const reordered = [
-        ...remaining.slice(0, insertAt),
-        ...dragged,
-        ...remaining.slice(insertAt),
-      ];
+      const reordered = [...remaining.slice(0, insertAt), ...dragged, ...remaining.slice(insertAt)];
 
       // Optimistic update
       const withOrder = reordered.map((p, i) => ({ ...p, order: i }));
@@ -841,14 +860,11 @@ function WorkspaceContent(): React.JSX.Element {
             const hasLocaleTranslation = doc.translations.some((tr) => tr.language === locale);
             if (!hasLocaleTranslation && doc.transcription) {
               setRegenerateStep(t('callingModel'));
-              const retransRes = await apiFetch(
-                `/api/documents/${page.document.id}/retranslate`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ language: locale }),
-                },
-              );
+              const retransRes = await apiFetch(`/api/documents/${page.document.id}/retranslate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ language: locale }),
+              });
               if (!retransRes.ok) {
                 const errData = (await retransRes.json()) as { error?: string };
                 throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
@@ -867,9 +883,7 @@ function WorkspaceContent(): React.JSX.Element {
                 setPanelPage(updatedPage);
                 setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
                 if (updatedPage.document) {
-                  const reloadDoc = await apiFetch(
-                    `/api/documents/${updatedPage.document.id}`,
-                  );
+                  const reloadDoc = await apiFetch(`/api/documents/${updatedPage.document.id}`);
                   if (reloadDoc.ok) {
                     const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
                     setPanelResult(mapDocToResult(updatedDoc, updatedPage, locale, false));
@@ -1055,7 +1069,10 @@ function WorkspaceContent(): React.JSX.Element {
     const collectionMatches = new Map<string, number>();
     for (const [, result] of searchMatchIds) {
       if (result.collectionId) {
-        collectionMatches.set(result.collectionId, (collectionMatches.get(result.collectionId) ?? 0) + result.matches);
+        collectionMatches.set(
+          result.collectionId,
+          (collectionMatches.get(result.collectionId) ?? 0) + result.matches,
+        );
       }
     }
     return collectionMatches;
