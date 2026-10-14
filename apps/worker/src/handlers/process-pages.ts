@@ -15,6 +15,7 @@ import {
   getPreviousPageContext,
   saveDocumentResult,
   copyDocumentForPage,
+  findDedupSourceDocument,
   loadImageAndHash,
 } from '../lib/processing-helpers';
 import { createBatches } from '../lib/batch-utils';
@@ -185,11 +186,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Load image and compute hash
     const { imageBuffer, imageHash } = await loadImageAndHash(page.imageUrl);
 
-    // Check for existing document with same hash (cross-user dedup)
-    const existingByHash = await prisma.document.findFirst({
-      where: { hash: imageHash },
-      include: { translations: true, glossary: true },
-    });
+    // Dedup: existující dokument se stejným hashem – jen v rámci téhož uživatele
+    // a jen z výstupu API (SEC-2, viz findDedupSourceDocument).
+    const existingByHash = await findDedupSourceDocument(userId, imageHash);
 
     if (existingByHash !== null && page.document === null) {
       // Dedup: copy existing document instead of re-processing

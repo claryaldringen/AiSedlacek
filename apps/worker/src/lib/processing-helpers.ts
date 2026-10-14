@@ -113,32 +113,75 @@ export async function saveDocumentResult(
   return doc;
 }
 
-// ── copyDocumentForPage ───────────────────────────────────────
+// ── findDedupSourceDocument ───────────────────────────────────
 
-/** Copy an existing Document (from any user) for a new page, including translations, glossary, and versions. */
-export async function copyDocumentForPage(
-  pageId: string,
-  source: {
-    id: string;
-    hash: string;
-    rawResponse: string | null;
-    transcription: string;
-    detectedLanguage: string;
-    context: string;
+/** Zdrojový dokument pro deduplikaci (dokument + překlady + glosář). */
+export interface DedupSourceDocument {
+  id: string;
+  hash: string;
+  rawResponse: string | null;
+  transcription: string;
+  detectedLanguage: string;
+  context: string;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  processingTimeMs: number | null;
+  batchId?: string | null;
+  translations: {
+    language: string;
+    text: string;
     model: string | null;
     inputTokens: number | null;
     outputTokens: number | null;
-    processingTimeMs: number | null;
-    batchId?: string | null;
-    translations: {
-      language: string;
-      text: string;
-      model: string | null;
-      inputTokens: number | null;
-      outputTokens: number | null;
-    }[];
-    glossary: { term: string; definition: string }[];
-  },
+  }[];
+  glossary: { term: string; definition: string }[];
+}
+
+/**
+ * Modely, jejichž výstup nevznikl placeným API voláním workeru: CLI režim
+ * (`LLM_PROVIDER=claude-cli`) a výsledky odeslané přes `POST /api/pages/[id]/result`
+ * (`ais submit`), kde si model i obsah volí klient.
+ */
+export const NON_DEDUP_MODELS = ['claude-cli', 'claude-agent-cli'];
+
+/**
+ * Najde dokument se stejným hashem obrázku, který lze zkopírovat místo nového OCR.
+ *
+ * SEC-2 (hotfix): dříve se hledalo napříč všemi uživateli, takže se cizí ručně
+ * upravené přepisy (a přes `rawResponse` i obsah dalších stránek cizí dávky)
+ * kopírovaly jinému uživateli a přes `ais submit` šlo cizím uživatelům podstrčit
+ * libovolný „AI výsledek". Nově jen:
+ *  - dokumenty stránek TÉHOŽ uživatele, které nejsou archivované,
+ *  - výstupy skutečného API volání workeru (`outputTokens > 0` – `/result` nechává
+ *    tokeny prázdné, CLI režim zapisuje 0; model z `/result` si volí klient, proto
+ *    samotný filtr na model nestačí).
+ */
+export async function findDedupSourceDocument(
+  userId: string,
+  hash: string,
+): Promise<DedupSourceDocument | null> {
+  return prisma.document.findFirst({
+    where: {
+      hash,
+      page: { userId, status: { not: 'archived' } },
+      model: { notIn: NON_DEDUP_MODELS },
+      outputTokens: { gt: 0 },
+    },
+    orderBy: { createdAt: 'desc' },
+    include: { translations: true, glossary: true },
+  });
+}
+
+// ── copyDocumentForPage ───────────────────────────────────────
+
+/**
+ * Copy an existing Document of the SAME user for a new page, including translations,
+ * glossary, and versions. Source must come from `findDedupSourceDocument` (SEC-2).
+ */
+export async function copyDocumentForPage(
+  pageId: string,
+  source: DedupSourceDocument,
 ): Promise<{ id: string }> {
   const doc = await prisma.document.create({
     data: {
