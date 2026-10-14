@@ -365,6 +365,7 @@ describe('GET /api/collections/[id]', () => {
       where: { id: 'col-1' },
       include: {
         pages: {
+          where: { status: { not: 'archived' } },
           orderBy: { order: 'asc' },
           include: {
             document: {

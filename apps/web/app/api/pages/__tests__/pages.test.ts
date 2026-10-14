@@ -326,37 +326,66 @@ describe('PATCH /api/pages/[id]', () => {
   });
 
   it('updates status', async () => {
-    const updated = { ...FAKE_PAGE, status: 'processed' };
+    const updated = { ...FAKE_PAGE, status: 'blank' };
     mockPageUpdate.mockResolvedValue(updated);
 
     const res = await updatePage(
-      makeRequest('page-1', 'PATCH', { status: 'processed' }),
+      makeRequest('page-1', 'PATCH', { status: 'blank' }),
       routeContext('page-1'),
     );
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.status).toBe('processed');
+    expect(json.status).toBe('blank');
 
     expect(mockPageUpdate).toHaveBeenCalledWith({
       where: { id: 'page-1' },
-      data: { status: 'processed' },
+      data: { status: 'blank' },
+    });
+  });
+
+  it('rejects statuses that only the server/worker may set', async () => {
+    for (const status of ['done', 'processing', 'error', 'processed', 42]) {
+      const res = await updatePage(
+        makeRequest('page-1', 'PATCH', { status }),
+        routeContext('page-1'),
+      );
+      expect(res.status, String(status)).toBe(400);
+      expect((await res.json()).error).toBe('Neplatný stav stránky');
+    }
+    expect(mockPageUpdate).not.toHaveBeenCalled();
+  });
+
+  it('archiving unpublishes the page and removes its public slug', async () => {
+    mockPageFindUnique.mockResolvedValue({ ...FAKE_PAGE, isPublic: true, slug: 'moje-stranka' });
+    mockPageUpdate.mockResolvedValue({ ...FAKE_PAGE, status: 'archived', isPublic: false });
+
+    const res = await updatePage(
+      makeRequest('page-1', 'PATCH', { status: 'archived' }),
+      routeContext('page-1'),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'page-1' } });
+    expect(mockPageUpdate).toHaveBeenCalledWith({
+      where: { id: 'page-1' },
+      data: { status: 'archived', isPublic: false, slug: null },
     });
   });
 
   it('updates multiple fields at once', async () => {
-    const updated = { ...FAKE_PAGE, collectionId: 'col-2', order: 5, status: 'done' };
+    const updated = { ...FAKE_PAGE, collectionId: 'col-2', order: 5, status: 'blank' };
     mockPageUpdate.mockResolvedValue(updated);
 
     const res = await updatePage(
-      makeRequest('page-1', 'PATCH', { collectionId: 'col-2', order: 5, status: 'done' }),
+      makeRequest('page-1', 'PATCH', { collectionId: 'col-2', order: 5, status: 'blank' }),
       routeContext('page-1'),
     );
 
     expect(res.status).toBe(200);
     expect(mockPageUpdate).toHaveBeenCalledWith({
       where: { id: 'page-1' },
-      data: { collectionId: 'col-2', order: 5, status: 'done' },
+      data: { collectionId: 'col-2', order: 5, status: 'blank' },
     });
   });
 

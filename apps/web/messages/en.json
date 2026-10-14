@@ -279,6 +279,7 @@
     "invalidJson": "Invalid JSON",
     "serverError": "Internal server error",
     "invalidBody": "Invalid request body",
+    "invalidStatus": "Invalid page status",
     "nothingToUpdate": "Nothing to update",
     "pageNotFound": "Page not found",
     "documentNotFound": "Document not found",

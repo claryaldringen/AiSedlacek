@@ -6,6 +6,8 @@ import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
+const CLIENT_SETTABLE_STATUSES = new Set(['pending', 'blank', 'archived']);
+
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
@@ -92,7 +94,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     data.order = order;
   }
 
-  if (typeof status === 'string') {
+  // Klient smí nastavit jen tyto stavy – done/processing/error zapisuje server
+  // a worker. Dřív šlo nastavit cokoli (např. done bez dokumentu).
+  if (status !== undefined) {
+    if (typeof status !== 'string' || !CLIENT_SETTABLE_STATUSES.has(status)) {
+      return NextResponse.json({ error: t('invalidStatus') }, { status: 400 });
+    }
     data.status = status;
   }
 
@@ -142,6 +149,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     }
   }
 
+  // Archivace („smazání" zpracované stránky) ruší i veřejné sdílení – jinak by
+  // stránka zůstala dostupná na /view/<slug> proti vůli uživatele.
+  if (data.status === 'archived') {
+    data.isPublic = false;
+    data.slug = null;
+    resolvedSlug = null;
+    sharingFieldsPresent = true;
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
   }
@@ -163,8 +179,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
         // Remove old PublicSlug for this entity
         await tx.publicSlug.deleteMany({ where: { targetId: id } });
 
-        // Create new PublicSlug if now public
-        if (data.isPublic && resolvedSlug) {
+        // Create new PublicSlug if (still) public – u PATCH se samotným slugem
+        // isPublic v requestu chybí a rozhoduje stávající stav stránky.
+        if ((data.isPublic ?? page.isPublic) && resolvedSlug) {
           await tx.publicSlug.create({
             data: {
               slug: resolvedSlug,

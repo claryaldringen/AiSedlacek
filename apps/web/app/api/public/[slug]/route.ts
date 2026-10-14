@@ -18,6 +18,8 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
       where: { id: publicSlug.targetId },
       include: {
         pages: {
+          // Archivované („smazané") stránky nesmí zůstat veřejné.
+          where: { status: { not: 'archived' } },
           orderBy: { order: 'asc' },
           include: {
             document: {
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
       },
     });
 
-    if (!page || !page.isPublic) {
+    if (!page || !page.isPublic || page.status === 'archived') {
       return NextResponse.json({ error: t('notFound') }, { status: 404 });
     }
 

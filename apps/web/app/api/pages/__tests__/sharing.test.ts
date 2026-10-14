@@ -181,6 +181,21 @@ describe('PATCH /api/pages/[id] – sharing fields', () => {
     );
   });
 
+  it('slug-only change on a public page keeps it public (recreates PublicSlug)', async () => {
+    mockPageFindUnique.mockResolvedValue({ ...FAKE_PAGE, isPublic: true, slug: 'stary-slug' });
+
+    const res = await updatePage(
+      makeRequest('page-1', 'PATCH', { slug: 'novy-slug' }),
+      routeContext('page-1'),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalled();
+    expect(mockPublicSlugCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ slug: 'novy-slug' }) }),
+    );
+  });
+
   it('returns 400 when slug is too short (invalid)', async () => {
     const res = await updatePage(
       makeRequest('page-1', 'PATCH', { isPublic: true, slug: 'ab' }),

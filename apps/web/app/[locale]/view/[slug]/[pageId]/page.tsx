@@ -39,7 +39,7 @@ export default async function PublicCollectionPageView({
   if (!collection || !collection.isPublic) notFound();
 
   const allPages = await prisma.page.findMany({
-    where: { collectionId: collection.id },
+    where: { collectionId: collection.id, status: { not: 'archived' } },
     orderBy: { order: 'asc' },
     select: { id: true, displayName: true, filename: true, order: true },
   });

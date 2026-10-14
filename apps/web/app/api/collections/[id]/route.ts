@@ -20,6 +20,7 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     where: { id },
     include: {
       pages: {
+        where: { status: { not: 'archived' } },
         orderBy: { order: 'asc' },
         include: {
           document: {
