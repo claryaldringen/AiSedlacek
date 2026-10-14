@@ -118,7 +118,8 @@ function EditableSection({
   title: string;
   subtitle?: string;
   content: string;
-  onSave: (newContent: string) => void;
+  /** Vrací true po úspěšném uložení – při chybě zůstane editor otevřený s rozepsaným textem. */
+  onSave: (newContent: string) => Promise<boolean>;
   saving?: boolean;
   highlightQuery?: string;
 }): React.JSX.Element {
@@ -132,10 +133,9 @@ function EditableSection({
     setEditing(true);
   }, [content]);
 
-  const handleSave = useCallback((): void => {
+  const handleSave = useCallback(async (): Promise<void> => {
     const md = editorRef.current?.getMarkdown() ?? draft;
-    onSave(md);
-    setEditing(false);
+    if (await onSave(md)) setEditing(false);
   }, [draft, onSave]);
 
   const handleCancel = useCallback((): void => {
@@ -165,7 +165,7 @@ function EditableSection({
               {tc('cancel')}
             </button>
             <button
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={saving}
               className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:opacity-50"
             >
@@ -216,19 +216,38 @@ export function ResultViewer({
     return () => stopRetranslatePoll();
   }, [result.id, stopRetranslatePoll]);
 
+  // Chyba posledního uložení – bez ní se dřív editace při chybě serveru tvářila
+  // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi).
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const saveField = useCallback(
-    async (field: string, value: string): Promise<DocumentResult> => {
+    async (
+      field: 'transcription' | 'translation' | 'context',
+      value: string,
+      translationLanguage: string = result.translationLanguage,
+    ): Promise<DocumentResult> => {
       setSaving(true);
+      setSaveError(null);
       try {
         const body: Record<string, string> = { [field]: value };
         if (field === 'translation') {
-          body.translationLanguage = result.translationLanguage;
+          body.translationLanguage = translationLanguage;
         }
-        await apiFetch(`/api/documents/${result.id}`, {
+        const res = await apiFetch(`/api/documents/${result.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          const message = data.error ?? `HTTP ${res.status}`;
+          setSaveError(message);
+          throw new Error(message);
+        }
+        // Překlad v jiném jazyce (obnova verze) nemění zobrazený překlad.
+        if (field === 'translation' && translationLanguage !== result.translationLanguage) {
+          return result;
+        }
         const updated = { ...result, [field]: value };
         onUpdate?.(updated);
         return updated;
@@ -239,12 +258,34 @@ export function ResultViewer({
     [result, onUpdate],
   );
 
+  const trySaveField = useCallback(
+    async (
+      field: 'transcription' | 'translation' | 'context',
+      value: string,
+      translationLanguage?: string,
+    ): Promise<boolean> => {
+      try {
+        await saveField(field, value, translationLanguage);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [saveField],
+  );
+
   const handleTranscriptionSave = useCallback(
-    async (newText: string): Promise<void> => {
+    async (newText: string): Promise<boolean> => {
       // Dokument, pro který tento poll běží — výsledek aplikujeme jen pokud
       // je při dokončení stále otevřený tentýž dokument.
       const docId = result.id;
-      const updated = await saveField('transcription', newText);
+      let updated: DocumentResult;
+      try {
+        updated = await saveField('transcription', newText);
+      } catch {
+        // Neuložená transkripce nesmí spustit (placenou) retranslaci.
+        return false;
+      }
 
       // Re-translate based on updated transcription via worker job
       setRetranslating(true);
@@ -259,7 +300,7 @@ export function ResultViewer({
         });
         if (!res.ok) {
           setRetranslating(false);
-          return;
+          return true;
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
@@ -321,12 +362,30 @@ export function ResultViewer({
       } catch {
         setRetranslating(false);
       }
+      return true;
     },
     [result, onUpdate, saveField, stopRetranslatePoll],
   );
 
   return (
     <div className="flex flex-col">
+      {saveError && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+        >
+          <span>
+            {t('savingFailed')}: {saveError}
+          </span>
+          <button
+            onClick={() => setSaveError(null)}
+            className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-100"
+            aria-label="×"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {retranslating && (
         <div className="overflow-hidden border-b border-blue-200 bg-blue-50">
           <div className="flex items-center gap-2 px-4 py-2 text-sm text-blue-700">
@@ -363,7 +422,7 @@ export function ResultViewer({
             title={t('transcription')}
             subtitle={t('originalLanguage', { lang: result.detectedLanguage })}
             content={result.transcription}
-            onSave={(text) => void handleTranscriptionSave(text)}
+            onSave={handleTranscriptionSave}
             saving={saving}
             highlightQuery={highlightQuery}
           />
@@ -373,7 +432,7 @@ export function ResultViewer({
             title={t('translation')}
             subtitle={`${t('translationLanguage', { lang: result.translationLanguage })}${retranslating ? ' ' + t('translationUpdating') : ''}`}
             content={result.translation}
-            onSave={(text) => void saveField('translation', text)}
+            onSave={(text) => trySaveField('translation', text)}
             saving={saving}
             highlightQuery={highlightQuery}
           />
@@ -412,7 +471,7 @@ export function ResultViewer({
           <EditableSection
             title={t('context')}
             content={result.context || ''}
-            onSave={(text) => void saveField('context', text)}
+            onSave={(text) => trySaveField('context', text)}
             saving={saving}
           />
         </div>
@@ -571,9 +630,10 @@ export function ResultViewer({
                   if (field === 'transcription') {
                     void handleTranscriptionSave(content);
                   } else if (field.startsWith('translation:')) {
-                    void saveField('translation', content);
+                    // Verze nese jazyk v názvu pole – obnovit do něj, ne do zobrazeného.
+                    void trySaveField('translation', content, field.slice('translation:'.length));
                   } else if (field === 'context') {
-                    void saveField('context', content);
+                    void trySaveField('context', content);
                   }
                 }}
               />

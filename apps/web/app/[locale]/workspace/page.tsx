@@ -23,7 +23,7 @@ import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { apiFetch } from '@/lib/infrastructure/api-client';
+import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -517,7 +517,7 @@ function WorkspaceContent(): React.JSX.Element {
       );
       await Promise.all(
         pageIds.map((id) =>
-          apiFetch(`/api/pages/${id}`, {
+          apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus }),
@@ -661,7 +661,7 @@ function WorkspaceContent(): React.JSX.Element {
       // Fire API calls
       await Promise.all(
         pageIds.map((id) =>
-          apiFetch(`/api/pages/${id}`, {
+          apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ collectionId: targetCollectionId }),
@@ -701,7 +701,7 @@ function WorkspaceContent(): React.JSX.Element {
       try {
         await Promise.all(
           changed.map((p) =>
-            apiFetch(`/api/pages/${p.id}`, {
+            apiFetchOk(`/api/pages/${p.id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ order: p.order }),
@@ -721,31 +721,28 @@ function WorkspaceContent(): React.JSX.Element {
       const page = pages.find((p) => p.id === pageId);
       if (!page) return;
 
-      if (page.status === 'done' || page.document) {
-        try {
-          await apiFetch(`/api/pages/${pageId}`, {
+      try {
+        if (page.status === 'done' || page.document) {
+          await apiFetchOk(`/api/pages/${pageId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'archived' }),
           });
-          setPages((prev) => prev.filter((p) => p.id !== pageId));
-        } catch {
-          // ignore
+        } else {
+          await apiFetchOk(`/api/pages/${pageId}`, { method: 'DELETE' });
         }
-      } else {
-        try {
-          await apiFetch(`/api/pages/${pageId}`, { method: 'DELETE' });
-          setPages((prev) => prev.filter((p) => p.id !== pageId));
-        } catch {
-          // ignore
-        }
+        setPages((prev) => prev.filter((p) => p.id !== pageId));
+      } catch (err) {
+        // Stránka zůstane v seznamu – uživatel musí vidět, že smazání neproběhlo.
+        setError(err instanceof Error ? err.message : t('error'));
+        return;
       }
       if (panelPage?.id === pageId) {
         setPanelPage(null);
         setPanelResult(null);
       }
     },
-    [pages, panelPage],
+    [pages, panelPage, t],
   );
 
   const handleDeleteSelected = useCallback(async (): Promise<void> => {
@@ -1108,15 +1105,19 @@ function WorkspaceContent(): React.JSX.Element {
                   return nameA.localeCompare(nameB, 'cs', { numeric: true });
                 });
                 setPages(sorted);
-                await Promise.all(
-                  sorted.map((p, i) =>
-                    apiFetch(`/api/pages/${p.id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ order: i }),
-                    }),
-                  ),
-                );
+                try {
+                  await Promise.all(
+                    sorted.map((p, i) =>
+                      apiFetchOk(`/api/pages/${p.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ order: i }),
+                      }),
+                    ),
+                  );
+                } catch {
+                  void loadPages(selectedCollectionId);
+                }
               }
             : undefined
         }
