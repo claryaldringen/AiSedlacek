@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type Metadata } from 'sharp';
 import type { ImageMediaType } from './types';
 
 // API limit is 5 MB for base64-encoded data. Base64 inflates size by ~4/3,
@@ -36,7 +36,7 @@ export async function prepareImage(
 ): Promise<{ buffer: Buffer; mediaType: ImageMediaType }> {
   const sharpOptions = { limitInputPixels: options.limitInputPixels ?? MAX_INPUT_PIXELS };
 
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(image, sharpOptions).metadata();
   } catch (err) {

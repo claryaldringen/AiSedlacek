@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import crypto from 'crypto';
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 import { prepareImage } from '../prepare-image.js';
 import { sniffMediaType } from '../parse.js';
 
 // Skutečný sharp (bez mocku) – testuje se reálná konverze formátů.
 vi.spyOn(console, 'log').mockImplementation(() => {});
 
-function solid(width: number, height: number): sharp.Sharp {
+function solid(width: number, height: number): Sharp {
   return sharp({ create: { width, height, channels: 3, background: '#cc9966' } });
 }
 
