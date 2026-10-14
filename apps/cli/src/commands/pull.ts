@@ -1,14 +1,22 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import { requireAuth } from '../lib/require-auth.js';
-import { writePageFiles } from '../lib/workspace.js';
+import { writePageFiles, getChangedFiles, readMeta } from '../lib/workspace.js';
+import { pickTranslation } from '../lib/document-sync.js';
 import * as output from '../lib/output.js';
+
+type PullOptions = { collection?: string; lang?: string; force?: boolean };
 
 export const pullCommand = new Command('pull')
   .description('Stáhnout dokumenty do lokálního workspace')
   .argument('[pageIds...]', 'ID stránek')
   .option('-c, --collection <id>', 'Stáhnout celou kolekci')
-  .action(async (pageIds: string[], options) => {
+  .option(
+    '--lang <code>',
+    'Jazyk překladu do translation.md (výchozí: jazyk z předchozího pull, jinak původní překlad)',
+  )
+  .option('-f, --force', 'Přepsat i lokálně změněné (neodeslané) soubory')
+  .action(async (pageIds: string[], options: PullOptions) => {
     const { api } = requireAuth();
 
     let ids = pageIds;
@@ -31,6 +39,21 @@ export const pullCommand = new Command('pull')
       spinner.text = `[${i + 1}/${ids.length}] ${pageId}`;
 
       try {
+        // Neodeslané lokální změny nepřepisuj – pull by je jinak tiše zahodil.
+        const localChanges = options.force ? [] : getChangedFiles(pageId);
+        if (localChanges.length > 0) {
+          spinner.stop();
+          output.error(
+            `  ${pageId}: lokálně změněné soubory (${localChanges
+              .map((c) => c.file)
+              .join(', ')}) – přeskakuji, aby se nepřepsaly`,
+          );
+          output.info(`    Nejdřív je odešlete (ais push), nebo použijte --force pro přepsání`);
+          spinner.start();
+          hadError = true;
+          continue;
+        }
+
         const page = await api.get(`/api/pages/${pageId}`);
         if (!page.document) {
           spinner.stop();
@@ -40,7 +63,10 @@ export const pullCommand = new Command('pull')
         }
 
         const doc = page.document;
-        const translation = doc.translations?.[0];
+        // Jazyk překladu volíme deterministicky a ukládáme do metadat, aby ho push
+        // mohl poslat serveru (bez něj server překlad neuloží).
+        const preferredLanguage = options.lang ?? readPreviousLanguage(pageId);
+        const translation = pickTranslation(doc.translations, preferredLanguage);
 
         const glossaryText = (doc.glossary ?? [])
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,7 +77,8 @@ export const pullCommand = new Command('pull')
           pageId,
           documentId: doc.id,
           transcription: doc.transcription ?? '',
-          translation: translation?.text ?? '',
+          translation: translation.text,
+          translationLanguage: translation.language,
           context: doc.context ?? '',
           glossary: glossaryText,
           serverUpdatedAt: doc.updatedAt,
@@ -59,8 +86,18 @@ export const pullCommand = new Command('pull')
 
         spinner.stop();
         output.success(
-          `  ${page.displayName ?? page.filename ?? pageId} → .ais-workspace/${pageId}/`,
+          `  ${page.displayName ?? page.filename ?? pageId} → .ais-workspace/${pageId}/` +
+            (translation.language ? ` (překlad: ${translation.language})` : ''),
         );
+        if (translation.language && !translation.available.includes(translation.language)) {
+          output.warn(
+            `    Překlad v jazyce ${translation.language} zatím neexistuje – translation.md je prázdný`,
+          );
+        } else if (translation.available.length > 1) {
+          output.info(
+            `    Dostupné překlady: ${translation.available.join(', ')} (jiný zvolte přes --lang)`,
+          );
+        }
         spinner.start();
       } catch (e: unknown) {
         spinner.stop();
@@ -74,3 +111,12 @@ export const pullCommand = new Command('pull')
     output.info('Pull dokončen.');
     if (hadError) process.exitCode = 1;
   });
+
+function readPreviousLanguage(pageId: string): string | undefined {
+  try {
+    return readMeta(pageId)?.translationLanguage;
+  } catch {
+    // Poškozená metadata – pull je stejně přepíše.
+    return undefined;
+  }
+}

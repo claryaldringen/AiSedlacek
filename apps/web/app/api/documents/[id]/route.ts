@@ -45,12 +45,31 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
+  if (typeof body !== 'object' || body === null) {
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
+  }
+
   const { transcription, translation, translationLanguage, context } = body as {
     transcription?: string;
     translation?: string;
     translationLanguage?: string;
     context?: string;
   };
+
+  // Překlad se ukládá per jazyk – bez jazyka ho nelze uložit. Dříve se v tom případě
+  // tiše ignoroval a klient (CLI push) dostal 200, takže změnu považoval za uloženou.
+  // Validujeme před jakýmkoli zápisem, aby 400 znamenalo „nic se neuložilo".
+  if (
+    translation !== undefined &&
+    (typeof translationLanguage !== 'string' || translationLanguage.trim() === '')
+  ) {
+    return NextResponse.json(
+      {
+        error: `${t('invalidBody')}: translationLanguage is required when translation is provided`,
+      },
+      { status: 400 },
+    );
+  }
 
   // Fetch current state for versioning and ownership check
   const current = await prisma.document.findUnique({
