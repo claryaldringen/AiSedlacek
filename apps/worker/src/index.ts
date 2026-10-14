@@ -16,52 +16,12 @@ import { handleRetranslate } from './handlers/retranslate';
 import { handleGenerateContext } from './handlers/generate-context';
 import { handleFixContexts } from './handlers/fix-contexts';
 import { handleTranslateContext } from './handlers/translate-context';
+import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_CONCURRENT_JOBS = 5;
-// A running job whose row hasn't been touched in this long is considered orphaned
-// (the worker crashed mid-job). Active jobs update progress well within this window.
-const STALE_JOB_MS = 30 * 60 * 1000;
 let running = true;
 let activeJobCount = 0;
-
-/**
- * Re-queue jobs left in `running` by a crashed worker (SIGKILL/OOM/deploy),
- * and reset their pages from `processing` back to `pending`. Without this, such
- * jobs stay `running` forever and the user can never restart them.
- *
- * `onStartup` reclaims ALL running jobs (this deployment runs a single worker
- * instance, so on boot nothing is legitimately running); the periodic sweep only
- * touches jobs that have been stale for STALE_JOB_MS as a backstop.
- */
-async function reclaimStuckJobs(onStartup: boolean): Promise<void> {
-  try {
-    const where = onStartup
-      ? { status: 'running' }
-      : { status: 'running', updatedAt: { lt: new Date(Date.now() - STALE_JOB_MS) } };
-    const stuck = await prisma.processingJob.findMany({
-      where,
-      select: { id: true, pageIds: true },
-    });
-    if (stuck.length === 0) return;
-
-    const ids = stuck.map((j) => j.id);
-    await prisma.processingJob.updateMany({
-      where: { id: { in: ids } },
-      data: { status: 'queued', currentStep: 'Obnoveno po restartu — čeká ve frontě…' },
-    });
-    const pageIds = stuck.flatMap((j) => j.pageIds);
-    if (pageIds.length > 0) {
-      await prisma.page.updateMany({
-        where: { id: { in: pageIds }, status: 'processing' },
-        data: { status: 'pending', errorMessage: null },
-      });
-    }
-    console.log(`[Worker] Reclaimed ${stuck.length} stuck job(s)`);
-  } catch (err) {
-    console.error('[Worker] reclaimStuckJobs failed:', err instanceof Error ? err.message : err);
-  }
-}
 
 // Track which collections have an active OCR job (to keep OCR sequential per collection)
 const activeOcrCollections = new Set<string>();

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deductTokensIfSufficient: vi.fn(),
   createVersion: vi.fn(),
   processWithClaudeBatch: vi.fn(),
+  prepareImage: vi.fn(),
   storageRead: vi.fn(),
 }));
 
@@ -23,6 +24,7 @@ vi.mock('@ai-sedlacek/db/billing', () => ({
 }));
 vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersion }));
 vi.mock('@ai-sedlacek/ocr', () => ({
+  prepareImage: mocks.prepareImage,
   processWithClaudeBatch: mocks.processWithClaudeBatch,
   processWithClaudeBatchCli: vi.fn(),
 }));
@@ -107,6 +109,10 @@ beforeEach(() => {
   mocks.createVersion.mockResolvedValue(undefined);
   // Každá stránka má jiný obsah → jiný hash
   mocks.storageRead.mockImplementation(async (path: string) => Buffer.from(`image:${path}`));
+  mocks.prepareImage.mockImplementation(async (buffer: Buffer) => ({
+    buffer,
+    mediaType: 'image/jpeg',
+  }));
   mocks.processWithClaudeBatch.mockImplementation(async (images: { index: number }[]) => ({
     results: images.map((img) => ({ index: img.index, result: ocrResult(img.index) })),
     rawResponse: '{}',
@@ -167,5 +173,83 @@ describe('processPages – deduplikace (SEC-2)', () => {
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
     expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
     expect(mocks.prisma.document.create.mock.calls[0]![0].data.transcription).toBe('můj přepis');
+  });
+});
+
+// ── PERF-1 ───────────────────────────────────────────────────
+describe('processPages – obrázky až pro konkrétní dávku (PERF-1)', () => {
+  it('v přípravě obrázky jen hashuje a pro OCR je načte až těsně před svou dávkou', async () => {
+    // Průměr 8000 tokenů/stránku → createBatches dá max. 2 stránky na dávku
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+
+    const log: string[] = [];
+    mocks.storageRead.mockImplementation(async (path: string) => {
+      log.push(`read:${path}`);
+      return Buffer.from(`image:${path}`);
+    });
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch.mockImplementation(
+      async (images: { pageId: string; index: number }[], ...rest: unknown[]) => {
+        log.push(`ocr:${images.map((i) => i.pageId).join(',')}`);
+        return ocrDefault(images, ...rest);
+      },
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+
+    expect(log).toEqual([
+      // příprava: jen hash, nic se nedrží
+      'read:p1.jpg',
+      'read:p2.jpg',
+      'read:p3.jpg',
+      // dávka 1
+      'read:p1.jpg',
+      'read:p2.jpg',
+      'ocr:p1,p2',
+      // dávka 2 – její obrázky se načtou až po dokončení dávky 1
+      'read:p3.jpg',
+      'ocr:p3',
+    ]);
+  });
+
+  it('stránka, jejíž obrázek nejde připravit, skončí chybou a zbytek dávky se uloží ke správným stránkám', async () => {
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+    mocks.prepareImage.mockImplementation(async (buffer: Buffer) => {
+      if (buffer.toString().includes('p2')) throw new Error('Input image exceeds pixel limit');
+      return { buffer, mediaType: 'image/jpeg' };
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+
+    // Do API jdou jen p1 a p3, s indexy 0 a 1
+    const images = mocks.processWithClaudeBatch.mock.calls[0]![0] as {
+      pageId: string;
+      index: number;
+    }[];
+    expect(images.map((i) => [i.pageId, i.index])).toEqual([
+      ['p1', 0],
+      ['p3', 1],
+    ]);
+    // p2 → chyba s jasnou hláškou
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p2' },
+      data: {
+        status: 'error',
+        errorMessage: expect.stringContaining('Obrázek nelze připravit pro OCR'),
+      },
+    });
+    // Výsledek indexu 1 patří p3, ne p2
+    const created = mocks.prisma.document.create.mock.calls.map(
+      (c) => [c[0].data.pageId, c[0].data.transcription] as const,
+    );
+    expect(created).toEqual([
+      ['p1', 'přepis 0'],
+      ['p3', 'přepis 1'],
+    ]);
   });
 });

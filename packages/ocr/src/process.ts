@@ -131,13 +131,13 @@ export async function processWithClaudeBatch(
   const startTime = Date.now();
   const client = new Anthropic();
 
-  // Prepare all images in parallel
-  const preparedImages = await Promise.all(
-    images.map(async (img) => {
-      const { buffer, mediaType } = await prepareImage(img.buffer);
-      return { ...img, buffer, mediaType };
-    }),
-  );
+  // Obrázky se připravují postupně, ne paralelně – sharp dekóduje celý obrázek
+  // do paměti a několik velkých skenů najednou zbytečně zvedá špičku (PERF-1).
+  const preparedImages: ((typeof images)[number] & { mediaType: ImageMediaType })[] = [];
+  for (const img of images) {
+    const { buffer, mediaType } = await prepareImage(img.buffer);
+    preparedImages.push({ ...img, buffer, mediaType });
+  }
 
   // Build content blocks: images first, then text contexts, then prompt
   const content: Array<

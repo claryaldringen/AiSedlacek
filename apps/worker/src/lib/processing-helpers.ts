@@ -235,19 +235,28 @@ export async function copyDocumentForPage(
   return doc;
 }
 
-// ── loadImageAndHash ──────────────────────────────────────────
+// ── loadImage / hashImage ─────────────────────────────────────
 
-export async function loadImageAndHash(
+function storagePathFromImageUrl(imageUrl: string): string {
+  if (imageUrl.startsWith('/api/images/')) return imageUrl.replace('/api/images/', '');
+  if (imageUrl.startsWith('/uploads/')) return imageUrl.replace('/uploads/', '');
+  return imageUrl;
+}
+
+/** Načte originál obrázku stránky z úložiště. */
+export async function loadImage(imageUrl: string): Promise<Buffer> {
+  return getStorage().read(storagePathFromImageUrl(imageUrl));
+}
+
+/**
+ * Spočítá SHA256 hash a velikost obrázku. Buffer se hned zahodí – ve fázi přípravy
+ * jobu se obrázky nesmí držet v paměti (PERF-1: celý svazek jako base64 → OOM,
+ * restart PM2 a nekonečná smyčka reclaimu). Obrázek se znovu načte až pro dávku.
+ */
+export async function hashImage(
   imageUrl: string,
-): Promise<{ imageBuffer: Buffer; imageHash: string }> {
-  const storage = getStorage();
-  let storagePath = imageUrl;
-  if (storagePath.startsWith('/api/images/')) {
-    storagePath = storagePath.replace('/api/images/', '');
-  } else if (storagePath.startsWith('/uploads/')) {
-    storagePath = storagePath.replace('/uploads/', '');
-  }
-  const imageBuffer = await storage.read(storagePath);
+): Promise<{ imageHash: string; fileSize: number }> {
+  const imageBuffer = await loadImage(imageUrl);
   const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
-  return { imageBuffer, imageHash };
+  return { imageHash, fileSize: imageBuffer.length };
 }

@@ -9,20 +9,22 @@ import { LANGUAGE_NAMES } from '../lib/languages';
 import { createMessage, isCliMode } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { processWithClaudeBatch, processWithClaudeBatchCli } from '@ai-sedlacek/ocr';
+import { prepareImage, processWithClaudeBatch, processWithClaudeBatchCli } from '@ai-sedlacek/ocr';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
   saveDocumentResult,
   copyDocumentForPage,
   findDedupSourceDocument,
-  loadImageAndHash,
+  hashImage,
+  loadImage,
 } from '../lib/processing-helpers';
 import { createBatches } from '../lib/batch-utils';
 
 interface PreparedPage {
   pageId: string;
-  imageBuffer: string; // base64-encoded
+  // Jen odkaz na obrázek – samotná data se načtou až pro konkrétní dávku (PERF-1)
+  imageUrl: string;
   imageHash: string;
   fileSize: number;
   collectionId: string | null;
@@ -183,8 +185,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       data: { status: 'processing', errorMessage: null },
     });
 
-    // Load image and compute hash
-    const { imageBuffer, imageHash } = await loadImageAndHash(page.imageUrl);
+    // Hash obrázku (buffer se hned zahodí, viz hashImage)
+    const { imageHash, fileSize } = await hashImage(page.imageUrl);
 
     // Dedup: existující dokument se stejným hashem – jen v rámci téhož uživatele
     // a jen z výstupu API (SEC-2, viz findDedupSourceDocument).
@@ -252,9 +254,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
     pagesToProcess.push({
       pageId,
-      imageBuffer: imageBuffer.toString('base64'),
+      imageUrl: page.imageUrl,
       imageHash,
-      fileSize: imageBuffer.length,
+      fileSize,
       collectionId: page.collection?.id ?? collectionId ?? null,
       collectionContext: page.collection?.context ?? null,
       existingDocId: page.document?.id ?? null,
@@ -359,15 +361,38 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       userPrompt = `${contextPrefix}\n${batchCollectionContext}\n\n---\n\n${transcribePrompt}`;
     }
 
-    // Prepare images for the batch call
-    const images = batch.map((p, idx) => ({
-      buffer: Buffer.from(p.imageBuffer, 'base64'),
-      pageId: p.pageId,
-      index: idx,
-    }));
+    // Obrázky dávky se načítají a připravují až teď, postupně a jen pro tuto dávku;
+    // po skončení iterace je uvolní GC (PERF-1). Stránka, jejíž obrázek nejde načíst
+    // nebo připravit, skončí chybou sama – nesmí shodit celou dávku ani zbytek jobu.
+    const images: { buffer: Buffer; pageId: string; index: number }[] = [];
+    const sentPages: (typeof batch)[number][] = [];
+    for (const p of batch) {
+      try {
+        const { buffer } = await prepareImage(await loadImage(p.imageUrl));
+        images.push({ buffer, pageId: p.pageId, index: sentPages.length });
+        sentPages.push(p);
+      } catch (err) {
+        const message = `Obrázek nelze připravit pro OCR: ${err instanceof Error ? err.message : 'neznámá chyba'}`;
+        console.error(`[Worker] Image preparation failed for page ${p.pageId}:`, message);
+        errors.push(`Stránka ${p.pageId}: ${message}`);
+        await prisma.page.update({
+          where: { id: p.pageId },
+          data: { status: 'error', errorMessage: message },
+        });
+      }
+    }
+
+    if (sentPages.length === 0) {
+      completed += batch.length;
+      await prisma.processingJob.update({
+        where: { id: jobId },
+        data: { completedPages: completed },
+      });
+      continue;
+    }
 
     // Call Claude with all images in the batch at once
-    const estimatedTotal = avgOutputPerPage * batch.length;
+    const estimatedTotal = avgOutputPerPage * sentPages.length;
     let lastProgressUpdate = 0;
 
     const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
@@ -395,14 +420,14 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       });
 
     // Distribute tokens proportionally across pages in the batch
-    const perPageInputTokens = Math.round(inputTokens / batch.length);
-    const perPageOutputTokens = Math.round(outputTokens / batch.length);
-    const perPageProcessingTimeMs = Math.round(processingTimeMs / batch.length);
+    const perPageInputTokens = Math.round(inputTokens / sentPages.length);
+    const perPageOutputTokens = Math.round(outputTokens / sentPages.length);
+    const perPageProcessingTimeMs = Math.round(processingTimeMs / sentPages.length);
 
     // Save results for each page
     const savedDocs: { pageId: string; docId: string }[] = [];
     for (const { index, result } of results) {
-      const pageInfo = batch[index];
+      const pageInfo = sentPages[index];
       if (!pageInfo) continue;
 
       try {
@@ -441,9 +466,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
     // Handle pages that didn't get a result
     const processedIndices = new Set(results.map((r) => r.index));
-    for (let idx = 0; idx < batch.length; idx++) {
+    for (let idx = 0; idx < sentPages.length; idx++) {
       if (!processedIndices.has(idx)) {
-        const pageInfo = batch[idx]!;
+        const pageInfo = sentPages[idx]!;
         const message = 'Model nevrátil výsledek pro tuto stránku';
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
         await prisma.page.update({
@@ -461,7 +486,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       userId,
       inputTokens,
       outputTokens,
-      `OCR dávka ${batchIdx + 1} (${batch.length} stránek)${collectionLabel}`,
+      `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
       `batch-${jobId}-${batchIdx}`,
     );
 
@@ -478,7 +503,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     });
 
     console.log(
-      `[Worker] Batch ${batchIdx + 1}/${batches.length} done: ${batch.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
+      `[Worker] Batch ${batchIdx + 1}/${batches.length} done: ${sentPages.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
     );
 
     // If deduction failed, stop further batches
