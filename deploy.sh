@@ -41,7 +41,9 @@ echo "=== Running database migrations ==="
 npx prisma migrate deploy --schema="$SCHEMA"
 
 echo "=== Restarting PM2 processes ==="
-pm2 restart ecosystem.config.cjs
+# --update-env: bez něj PM2 při restartu ponechá staré proměnné z env bloků
+# ecosystem.config.cjs (např. NODE_ENV workeru).
+pm2 restart ecosystem.config.cjs --update-env
 
 echo "=== Done ==="
 pm2 status
