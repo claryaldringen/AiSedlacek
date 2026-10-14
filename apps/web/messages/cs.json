@@ -279,6 +279,7 @@
     "invalidJson": "Neplatný JSON",
     "serverError": "Interní chyba serveru",
     "invalidBody": "Neplatné tělo požadavku",
+    "contextIncomplete": "Model nevrátil kompletní kontext – stávající kontext zůstal beze změny. Zkuste kratší text.",
     "unsupportedLanguage": "Nepodporovaný jazyk překladu",
     "invalidMessages": "Neplatný formát zpráv",
     "invalidStatus": "Neplatný stav stránky",

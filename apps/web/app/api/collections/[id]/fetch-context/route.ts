@@ -145,7 +145,9 @@ ${newContent}`;
 
     response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      // Sloučení dlouhého kontextu s textem z URL se do 4096 tokenů nevešlo
+      // a useknutý výsledek přepsal původní kontext.
+      max_tokens: 16_000,
       messages: [{ role: 'user', content: prompt }],
     });
   } catch (err) {
@@ -161,7 +163,19 @@ ${newContent}`;
     'fetch-context',
   );
 
-  const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const context = response.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('')
+    .trim();
+
+  // Kontext svazku nemá historii – přepsat ho smí jen kompletní, neprázdný výstup.
+  // Useknutý (max_tokens) nebo prázdný výsledek by stávající kontext nenávratně zničil.
+  if (response.stop_reason !== 'end_turn' || context === '') {
+    console.warn(
+      `[fetch-context] Neúplný výstup modelu (stop_reason=${response.stop_reason}, ${context.length} znaků) – kontext svazku ${id} se nemění`,
+    );
+    return NextResponse.json({ error: t('contextIncomplete') }, { status: 422 });
+  }
 
   // Update URLs list only when a URL was provided
   const updatedUrls = hasUrl
