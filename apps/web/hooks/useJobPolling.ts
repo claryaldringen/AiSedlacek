@@ -15,7 +15,19 @@ interface JobStatus {
  * Reusable hook for polling ProcessingJob status.
  * Returns a startPolling function that resolves when the job completes.
  */
-export function useJobPolling() {
+type JobOutcome = 'completed' | 'error' | 'cancelled';
+
+export function useJobPolling(): {
+  pollJob: (
+    jobId: string,
+    options?: {
+      intervalMs?: number;
+      onStep?: (step: string) => void;
+      onProgress?: (completed: number, total: number) => void;
+    },
+  ) => Promise<JobOutcome>;
+  stopPolling: () => void;
+} {
   // Všechny běžící intervaly. Každé volání pollJob má vlastní interval —
   // sdílený ref by způsobil, že spuštění druhého pollu zruší interval prvního
   // a jeho Promise by se nikdy neresolvnula (zaseknutý await).

@@ -1,4 +1,5 @@
 import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/.turbo/**'] },
@@ -8,6 +9,16 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],
+    },
+  },
+  {
+    // Jen klasická pravidla hooků – doporučená sada v7 přidává pravidla React
+    // Compileru, na která kód zatím není připravený.
+    files: ['apps/web/**/*.tsx', 'apps/web/hooks/**/*.ts'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
   {
