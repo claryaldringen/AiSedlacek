@@ -36,6 +36,11 @@ describe('reclaimStuckJobs (PERF-1)', () => {
       where: { id: { in: ['p1', 'p2'] }, status: 'processing' },
       data: { status: 'pending', errorMessage: null },
     });
+    // Stránka s dokumentem (přerušená regenerace) se vrací do done, ne pending
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1', 'p2'] }, status: 'processing', document: { isNot: null } },
+      data: { status: 'done', errorMessage: null },
+    });
   });
 
   it('job opakovaně shazující worker už znovu nespustí, ale označí jako chybný', async () => {

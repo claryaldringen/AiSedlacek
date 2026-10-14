@@ -3,6 +3,7 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
+import { resetUnfinishedPages } from './page-status';
 
 // A running job whose row hasn't been touched in this long is considered orphaned
 // (the worker crashed mid-job). Active jobs update progress well within this window.
@@ -76,13 +77,7 @@ export async function reclaimStuckJobs(onStartup: boolean): Promise<void> {
       console.error(`[Worker] Job ${job.id} gave up after ${MAX_RECLAIMS} reclaims`);
     }
 
-    const pageIds = stuck.flatMap((j) => j.pageIds);
-    if (pageIds.length > 0) {
-      await prisma.page.updateMany({
-        where: { id: { in: pageIds }, status: 'processing' },
-        data: { status: 'pending', errorMessage: null },
-      });
-    }
+    await resetUnfinishedPages(stuck.flatMap((j) => j.pageIds));
     console.log(
       `[Worker] Reclaimed ${requeue.length} stuck job(s), gave up ${giveUp.length} job(s)`,
     );

@@ -8,6 +8,14 @@ const mocks = vi.hoisted(() => ({
     document: { aggregate: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
     translation: { create: vi.fn(), upsert: vi.fn() },
     processingJob: { update: vi.fn(), findUnique: vi.fn() },
+    $transaction: vi.fn(),
+  },
+  // Klient uvnitř prisma.$transaction (regenerace, DAT-1)
+  tx: {
+    document: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
+    documentVersion: { findFirst: vi.fn(), createMany: vi.fn() },
+    glossaryEntry: { deleteMany: vi.fn() },
+    translation: { upsert: vi.fn() },
   },
   checkBalance: vi.fn(),
   deductTokensIfSufficient: vi.fn(),
@@ -43,6 +51,7 @@ interface PageFixture {
   collection: { id: string; context: string } | null;
   document: null | {
     id: string;
+    batchId?: string | null;
     context: string;
     translations: { language: string; text: string }[];
     glossary: { term: string; definition: string }[];
@@ -103,6 +112,14 @@ beforeEach(() => {
   mocks.prisma.document.create.mockImplementation(async () => ({ id: `doc-${++docCounter}` }));
   mocks.prisma.processingJob.update.mockResolvedValue({});
   mocks.prisma.processingJob.findUnique.mockResolvedValue({ status: 'running' });
+  mocks.prisma.$transaction.mockImplementation(async (fn: (tx: typeof mocks.tx) => unknown) =>
+    fn(mocks.tx),
+  );
+  mocks.tx.document.update.mockResolvedValue({});
+  mocks.tx.documentVersion.findFirst.mockResolvedValue({ version: 4 });
+  mocks.tx.documentVersion.createMany.mockResolvedValue({ count: 0 });
+  mocks.tx.glossaryEntry.deleteMany.mockResolvedValue({ count: 0 });
+  mocks.tx.translation.upsert.mockResolvedValue({});
 
   mocks.checkBalance.mockResolvedValue({ balance: 1_000_000, sufficient: true });
   mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 900_000 });
@@ -370,5 +387,198 @@ describe('processPages – deterministický referenceId odečtu dávky (BIL-3)',
     const deductOrder = mocks.deductTokensIfSufficient.mock.invocationCallOrder[0]!;
     const saveOrder = mocks.prisma.document.create.mock.invocationCallOrder[0]!;
     expect(deductOrder).toBeLessThan(saveOrder);
+  });
+});
+
+// ── DAT-1 ────────────────────────────────────────────────────
+describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
+  const existingDocument = {
+    id: 'doc-1',
+    batchId: null,
+    context: 'starý kontext',
+    translations: [
+      { language: 'cs', text: 'starý překlad' },
+      { language: 'en', text: 'old translation' },
+    ],
+    glossary: [{ term: 'starý', definition: 'termín' }],
+  };
+
+  beforeEach(() => {
+    mocks.tx.document.findUniqueOrThrow.mockResolvedValue({
+      id: 'doc-1',
+      transcription: 'starý přepis',
+      context: 'starý kontext',
+      translations: existingDocument.translations,
+    });
+  });
+
+  it('stránku s dokumentem nepřeskočí, nededuplikuje a výsledek zapíše do existujícího dokumentu', async () => {
+    addPage('p1', { status: 'processing', document: existingDocument });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    // Projde OCR, bez dedup dotazu
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.findFirst).not.toHaveBeenCalled();
+    // Žádný nový dokument ani překlad mimo transakci
+    expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.translation.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1);
+
+    // Předchozí hodnoty jako verze ai_regenerate s novým modelem, čísla navazují
+    expect(mocks.tx.documentVersion.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'doc-1',
+          version: 5,
+          field: 'transcription',
+          content: 'starý přepis',
+          source: 'ai_regenerate',
+          model: 'claude-opus-4-6',
+        },
+        {
+          documentId: 'doc-1',
+          version: 6,
+          field: 'context',
+          content: 'starý kontext',
+          source: 'ai_regenerate',
+          model: 'claude-opus-4-6',
+        },
+        {
+          documentId: 'doc-1',
+          version: 7,
+          field: 'translation:cs',
+          content: 'starý překlad',
+          source: 'ai_regenerate',
+          model: 'claude-opus-4-6',
+        },
+      ],
+    });
+
+    // Dokument se aktualizuje na místě (nový obsah, metadata, značka jobu)
+    const update = mocks.tx.document.update.mock.calls[0]![0];
+    expect(update.where).toEqual({ id: 'doc-1' });
+    expect(update.data).toMatchObject({
+      transcription: 'přepis 0',
+      context: 'kontext 0',
+      rawResponse: '{}',
+      model: 'claude-opus-4-6',
+      inputTokens: 1000,
+      outputTokens: 500,
+      batchId: 'job-1',
+    });
+    // Glosář se nahradí
+    expect(mocks.tx.glossaryEntry.deleteMany).toHaveBeenCalledWith({
+      where: { documentId: 'doc-1' },
+    });
+
+    // Překlad cílového jazyka se přepíše, ostatní jazyky zůstanou
+    expect(mocks.tx.translation.upsert).toHaveBeenCalledTimes(1);
+    const upsert = mocks.tx.translation.upsert.mock.calls[0]![0];
+    expect(upsert.where).toEqual({ documentId_language: { documentId: 'doc-1', language: 'cs' } });
+    expect(upsert.update).toMatchObject({ text: 'překlad 0', context: null, glossaryJson: null });
+
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { status: 'done', errorMessage: null },
+    });
+    // Účtuje se jako běžné OCR
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+  });
+
+  it('nezměněná pole verzi nevytváří', async () => {
+    addPage('p1', { status: 'processing', document: existingDocument });
+    mocks.tx.document.findUniqueOrThrow.mockResolvedValue({
+      id: 'doc-1',
+      transcription: 'přepis 0',
+      context: 'kontext 0',
+      translations: [{ language: 'cs', text: 'překlad 0' }],
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    expect(mocks.tx.documentVersion.createMany).not.toHaveBeenCalled();
+    expect(mocks.tx.document.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('bez příznaku regenerate se stránka s překladem dál přeskakuje', async () => {
+    addPage('p1', { document: existingDocument });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('stránku, kterou tento job už přegeneroval (restart workeru), znovu neposílá', async () => {
+    addPage('p1', {
+      status: 'processing',
+      document: { ...existingDocument, batchId: 'job-1' },
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { status: 'done', errorMessage: null },
+    });
+  });
+
+  it('nepovedená regenerace nechá dokument beze změny a stránku ve stavu done s chybou', async () => {
+    addPage('p1', { status: 'processing', document: existingDocument });
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [],
+      rawResponse: '',
+      processingTimeMs: 1000,
+      model: 'claude-opus-4-6',
+      inputTokens: 1000,
+      outputTokens: 10,
+      stopReason: 'end_turn',
+      truncated: false,
+      parseProblem: null,
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { status: 'done', errorMessage: 'Model nevrátil výsledek pro tuto stránku' },
+    });
+  });
+
+  it('při kolizi čísla verze (P2002) transakci zopakuje', async () => {
+    addPage('p1', { status: 'processing', document: existingDocument });
+    let calls = 0;
+    mocks.prisma.$transaction.mockImplementation(async (fn: (tx: typeof mocks.tx) => unknown) => {
+      calls++;
+      if (calls === 1) throw Object.assign(new Error('Unique constraint'), { code: 'P2002' });
+      return fn(mocks.tx);
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { status: 'done', errorMessage: null },
+    });
+  });
+
+  it('nedostatek kreditu vrátí stránku s dokumentem do done, bez dokumentu do pending', async () => {
+    addPage('p1', { status: 'processing', document: existingDocument });
+    mocks.checkBalance.mockResolvedValue({ balance: 0, sufficient: false });
+
+    await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1'] }, status: 'processing', document: { isNot: null } },
+      data: { status: 'done', errorMessage: null },
+    });
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1'] }, status: 'processing' },
+      data: { status: 'pending', errorMessage: null },
+    });
   });
 });

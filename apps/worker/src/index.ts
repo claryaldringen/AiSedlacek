@@ -17,6 +17,8 @@ import { handleGenerateContext } from './handlers/generate-context';
 import { handleFixContexts } from './handlers/fix-contexts';
 import { handleTranslateContext } from './handlers/translate-context';
 import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
+import { parseOcrJobOptions } from './lib/job-options';
+import { resetUnfinishedPages } from './lib/page-status';
 import { assertLlmProviderAllowed } from './lib/startup-checks';
 
 // Fail-fast na nebezpečnou konfiguraci dřív, než worker začne brát joby (SEC-12)
@@ -60,6 +62,7 @@ async function executeJob(job: {
           collectionId: job.collectionId ?? undefined,
           language: job.language,
           mode: job.mode as 'transcribe+translate' | 'translate',
+          regenerate: parseOcrJobOptions(job.jobData).regenerate,
         });
         break;
 
@@ -99,14 +102,9 @@ async function executeJob(job: {
 
     // Reset stuck "processing" pages back to "pending" so they can be retried
     if (jobType === 'ocr' && job.pageIds.length > 0) {
-      const resetResult = await prisma.page
-        .updateMany({
-          where: { id: { in: job.pageIds }, status: 'processing' },
-          data: { status: 'pending', errorMessage: null },
-        })
-        .catch(() => ({ count: 0 }));
-      if (resetResult.count > 0) {
-        console.log(`[Worker] Reset ${resetResult.count} stuck pages to pending for job ${job.id}`);
+      const resetCount = await resetUnfinishedPages(job.pageIds).catch(() => 0);
+      if (resetCount > 0) {
+        console.log(`[Worker] Reset ${resetCount} stuck pages for job ${job.id}`);
       }
     }
   } finally {

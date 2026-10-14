@@ -15,11 +15,13 @@ import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
   saveDocumentResult,
+  regenerateDocumentResult,
   copyDocumentForPage,
   findDedupSourceDocument,
   hashImage,
   loadImage,
 } from '../lib/processing-helpers';
+import { resetUnfinishedPages } from '../lib/page-status';
 import { createBatches } from '../lib/batch-utils';
 
 interface PreparedPage {
@@ -40,10 +42,24 @@ export interface ProcessPagesJobData {
   collectionId?: string;
   language: string;
   mode: ProcessingMode;
+  /**
+   * Regenerace (DAT-1, `jobData = {"regenerate": true}`): stránky s existujícím
+   * dokumentem se nepřeskakují ani nededuplikují, projdou OCR a výsledek se zapíše
+   * do EXISTUJÍCÍHO dokumentu (předchozí hodnoty jako verze `ai_regenerate`).
+   */
+  regenerate?: boolean;
 }
 
 export async function processPages(data: ProcessPagesJobData): Promise<void> {
-  const { jobId, userId, pageIds: rawPageIds, collectionId, language, mode } = data;
+  const {
+    jobId,
+    userId,
+    pageIds: rawPageIds,
+    collectionId,
+    language,
+    mode,
+    regenerate = false,
+  } = data;
 
   // Load collection name for transaction descriptions
   let collectionName: string | null = null;
@@ -80,7 +96,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   const avgOutputPerPage = Math.round(avgResult._avg.outputTokens ?? 1500);
 
   const pagesToProcess: PreparedPage[] = [];
-  const skippedCount = { blank: 0, alreadyTranslated: 0, deduped: 0, notFound: 0 };
+  const skippedCount = {
+    blank: 0,
+    alreadyTranslated: 0,
+    alreadyRegenerated: 0,
+    deduped: 0,
+    notFound: 0,
+  };
 
   for (let i = 0; i < pageIds.length; i++) {
     const pageId = pageIds[i]!;
@@ -125,8 +147,20 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       continue;
     }
 
+    // Regenerace: stránku, kterou tento job už přegeneroval (batchId = jobId),
+    // po restartu workeru znovu neposílat – zbytečně by se platilo podruhé.
+    if (regenerate && page.document !== null && page.document.batchId === jobId) {
+      await prisma.page.update({
+        where: { id: pageId },
+        data: { status: 'done', errorMessage: null },
+      });
+      skippedCount.alreadyRegenerated++;
+      continue;
+    }
+
     // Skip pages with existing translation in the target language
-    if (page.document !== null) {
+    // (při regeneraci se stránky s dokumentem naopak zpracují znovu)
+    if (page.document !== null && !regenerate) {
       const hasTranslation = page.document.translations.some(
         (t: { language: string }) => t.language === language,
       );
@@ -190,10 +224,14 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const { imageHash, fileSize } = await hashImage(page.imageUrl);
 
     // Dedup: existující dokument se stejným hashem – jen v rámci téhož uživatele
-    // a jen z výstupu API (SEC-2, viz findDedupSourceDocument).
-    const existingByHash = await findDedupSourceDocument(userId, imageHash);
+    // a jen z výstupu API (SEC-2, viz findDedupSourceDocument). Regenerace se
+    // nikdy nededuplikuje – uživatel chce nový výstup modelu.
+    const existingByHash =
+      !regenerate && page.document === null
+        ? await findDedupSourceDocument(userId, imageHash)
+        : null;
 
-    if (existingByHash !== null && page.document === null) {
+    if (existingByHash !== null) {
       // Dedup: copy existing document instead of re-processing
       const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
 
@@ -268,6 +306,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   const totalSkipped =
     skippedCount.blank +
     skippedCount.alreadyTranslated +
+    skippedCount.alreadyRegenerated +
     skippedCount.deduped +
     skippedCount.notFound;
 
@@ -317,12 +356,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         .slice(batchIdx)
         .flat()
         .map((p) => p.pageId);
-      if (remainingPageIds.length > 0) {
-        await prisma.page.updateMany({
-          where: { id: { in: remainingPageIds }, status: 'processing' },
-          data: { status: 'pending' },
-        });
-      }
+      await resetUnfinishedPages(remainingPageIds);
       errors.push('Nedostatečný kredit pro zpracování');
       await prisma.processingJob.update({
         where: { id: jobId },
@@ -376,10 +410,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         const message = `Obrázek nelze připravit pro OCR: ${err instanceof Error ? err.message : 'neznámá chyba'}`;
         console.error(`[Worker] Image preparation failed for page ${p.pageId}:`, message);
         errors.push(`Stránka ${p.pageId}: ${message}`);
-        await prisma.page.update({
-          where: { id: p.pageId },
-          data: { status: 'error', errorMessage: message },
-        });
+        await markPageFailed(p.pageId, p.existingDocId, message);
       }
     }
 
@@ -457,20 +488,31 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       if (!pageInfo) continue;
 
       try {
-        const doc = await saveDocumentResult(
-          pageInfo.pageId,
-          pageInfo.existingDocId ? { id: pageInfo.existingDocId } : null,
-          pageInfo.imageHash,
-          result,
-          rawResponse,
-          {
-            model,
-            inputTokens: perPageInputTokens,
-            outputTokens: perPageOutputTokens,
-            processingTimeMs: perPageProcessingTimeMs,
-          },
-          language,
-        );
+        const metadata = {
+          model,
+          inputTokens: perPageInputTokens,
+          outputTokens: perPageOutputTokens,
+          processingTimeMs: perPageProcessingTimeMs,
+        };
+        const doc =
+          regenerate && pageInfo.existingDocId
+            ? await regenerateDocumentResult(
+                pageInfo.existingDocId,
+                result,
+                rawResponse,
+                metadata,
+                language,
+                jobId,
+              )
+            : await saveDocumentResult(
+                pageInfo.pageId,
+                pageInfo.existingDocId ? { id: pageInfo.existingDocId } : null,
+                pageInfo.imageHash,
+                result,
+                rawResponse,
+                metadata,
+                language,
+              );
 
         savedDocs.push({ pageId: pageInfo.pageId, docId: doc.id });
 
@@ -482,11 +524,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';
         console.error(`[Worker] Save failed for page ${pageInfo.pageId}:`, message);
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
-
-        await prisma.page.update({
-          where: { id: pageInfo.pageId },
-          data: { status: 'error', errorMessage: message },
-        });
+        await markPageFailed(pageInfo.pageId, pageInfo.existingDocId, message);
       }
     }
 
@@ -505,10 +543,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
             ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
             : 'Model nevrátil výsledek pro tuto stránku');
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
-        await prisma.page.update({
-          where: { id: pageInfo.pageId },
-          data: { status: 'error', errorMessage: message },
-        });
+        await markPageFailed(pageInfo.pageId, pageInfo.existingDocId, message);
       }
     }
 
@@ -534,12 +569,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         .slice(batchIdx + 1)
         .flat()
         .map((p) => p.pageId);
-      if (remainingPageIds.length > 0) {
-        await prisma.page.updateMany({
-          where: { id: { in: remainingPageIds }, status: 'processing' },
-          data: { status: 'pending' },
-        });
-      }
+      await resetUnfinishedPages(remainingPageIds);
       errors.push('Nedostatečný kredit pro další zpracování');
       await prisma.processingJob.update({
         where: { id: jobId },
@@ -565,12 +595,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         .slice(batchIdx + 1)
         .flat()
         .map((p) => p.pageId);
-      if (remainingPageIds.length > 0) {
-        await prisma.page.updateMany({
-          where: { id: { in: remainingPageIds }, status: 'processing' },
-          data: { status: 'pending' },
-        });
-      }
+      await resetUnfinishedPages(remainingPageIds);
       return;
     }
 
@@ -590,6 +615,22 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       completedPages: total,
       errors,
     },
+  });
+}
+
+/**
+ * Označí neúspěšné zpracování stránky. Stránka s existujícím dokumentem (typicky
+ * nepovedená regenerace) zůstává `done` – její dokument je nedotčený – a chyba se
+ * jen poznamená do `errorMessage`; stránka bez dokumentu přejde do `error`.
+ */
+async function markPageFailed(
+  pageId: string,
+  existingDocId: string | null,
+  message: string,
+): Promise<void> {
+  await prisma.page.update({
+    where: { id: pageId },
+    data: { status: existingDocId ? 'done' : 'error', errorMessage: message },
   });
 }
 
