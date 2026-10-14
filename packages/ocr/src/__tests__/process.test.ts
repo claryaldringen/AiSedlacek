@@ -238,6 +238,34 @@ describe('processWithClaudeBatch – max_tokens a stop_reason (LLM-2)', () => {
     expect(result.outputTokens).toBe(500);
   });
 
+  it('před každý obrázek vloží textový popisek s imageIndex (LLM-3)', async () => {
+    setupMockStream([0, 1].map(line).join('\n'));
+    const images = [0, 1].map((i) => ({ buffer: jpeg(), pageId: `p${i}`, index: i }));
+
+    await processWithClaudeBatch(images, 'Přepiš text.');
+
+    const apiCall = mockMessagesStream.mock.calls[0]![0] as {
+      messages: { content: { type: string; text?: string }[] }[];
+    };
+    const blocks = apiCall.messages[0]!.content;
+    expect(blocks.slice(0, 4).map((b) => b.text ?? b.type)).toEqual([
+      'imageIndex 0:',
+      'image',
+      'imageIndex 1:',
+      'image',
+    ]);
+  });
+
+  it('nejednoznačné číslování vrátí jako parseProblem bez výsledků (LLM-3)', async () => {
+    setupMockStream(`${line(0)}\n${line(0)}`);
+    const images = [0, 1].map((i) => ({ buffer: jpeg(), pageId: `p${i}`, index: i }));
+
+    const result = await processWithClaudeBatch(images, 'Přepiš text.');
+
+    expect(result.results).toEqual([]);
+    expect(result.parseProblem).toMatch(/duplicitní imageIndex/);
+  });
+
   it('běžné dokončení není truncated', async () => {
     setupMockStream(line(0));
     const result = await processWithClaudeBatch(

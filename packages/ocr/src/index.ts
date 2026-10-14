@@ -1,5 +1,12 @@
 export type { StructuredOcrResult, ProcessingMode, ImageMediaType } from './types';
-export { detectMediaType, sniffMediaType, parseOcrJson, parseOcrJsonBatch } from './parse';
+export {
+  detectMediaType,
+  sniffMediaType,
+  parseOcrJson,
+  parseOcrJsonBatch,
+  parseOcrJsonBatchChecked,
+} from './parse';
+export type { OcrBatchParseResult } from './parse';
 export { prepareImage, MAX_INPUT_PIXELS } from './prepare-image';
 export {
   SYSTEM_PROMPT,

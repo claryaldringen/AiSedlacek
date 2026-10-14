@@ -396,28 +396,36 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     let lastProgressUpdate = 0;
 
     const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
-    const { results, rawResponse, processingTimeMs, model, inputTokens, outputTokens, truncated } =
-      await processBatch(images, userPrompt, {
-        previousContext,
-        estimatedOutputTokens: estimatedTotal,
-        mode,
-        language,
-        onProgress: (currentTokens, estimated) => {
-          const now = Date.now();
-          if (now - lastProgressUpdate < 2000) return;
-          lastProgressUpdate = now;
+    const {
+      results,
+      rawResponse,
+      processingTimeMs,
+      model,
+      inputTokens,
+      outputTokens,
+      truncated,
+      parseProblem,
+    } = await processBatch(images, userPrompt, {
+      previousContext,
+      estimatedOutputTokens: estimatedTotal,
+      mode,
+      language,
+      onProgress: (currentTokens, estimated) => {
+        const now = Date.now();
+        if (now - lastProgressUpdate < 2000) return;
+        lastProgressUpdate = now;
 
-          const pct = Math.min(99, Math.round((currentTokens / estimated) * 100));
-          void prisma.processingJob
-            .update({
-              where: { id: jobId },
-              data: {
-                currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
-              },
-            })
-            .catch(() => {});
-        },
-      });
+        const pct = Math.min(99, Math.round((currentTokens / estimated) * 100));
+        void prisma.processingJob
+          .update({
+            where: { id: jobId },
+            data: {
+              currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
+            },
+          })
+          .catch(() => {});
+      },
+    });
 
     // Distribute tokens proportionally across pages in the batch
     const perPageInputTokens = Math.round(inputTokens / sentPages.length);
@@ -471,9 +479,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     for (let idx = 0; idx < sentPages.length; idx++) {
       if (!processedIndices.has(idx)) {
         const pageInfo = sentPages[idx]!;
-        const message = truncated
-          ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
-          : 'Model nevrátil výsledek pro tuto stránku';
+        // parseProblem: výstup nešel jednoznačně přiřadit ke stránkám, takže se
+        // raději neuložilo nic, než aby se přepis uložil k jiné stránce (LLM-3).
+        const message =
+          parseProblem ??
+          (truncated
+            ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
+            : 'Model nevrátil výsledek pro tuto stránku');
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
         await prisma.page.update({
           where: { id: pageInfo.pageId },

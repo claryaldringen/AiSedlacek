@@ -286,3 +286,34 @@ describe('processPages – useknutý výstup dávky (LLM-2)', () => {
     expect([input, output]).toEqual([3000, 48000]);
   });
 });
+
+// ── LLM-3 ────────────────────────────────────────────────────
+describe('processPages – nejednoznačné přiřazení výsledků dávky (LLM-3)', () => {
+  it('nic neuloží a stránky označí chybou s důvodem z parseru', async () => {
+    addPage('p1');
+    addPage('p2');
+    const problem =
+      'Model vrátil duplicitní imageIndex (0, 0) – výsledky nelze jednoznačně přiřadit ke stránkám';
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [],
+      rawResponse: '...',
+      processingTimeMs: 1000,
+      model: 'claude-opus-4-6',
+      inputTokens: 1000,
+      outputTokens: 500,
+      stopReason: 'end_turn',
+      truncated: false,
+      parseProblem: problem,
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2'] });
+
+    expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+    for (const id of ['p1', 'p2']) {
+      expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+        where: { id },
+        data: { status: 'error', errorMessage: problem },
+      });
+    }
+  });
+});

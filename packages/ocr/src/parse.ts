@@ -58,6 +58,15 @@ export function normalizeOcrResult(obj: unknown): StructuredOcrResult {
 }
 
 export function parseOcrJson(raw: string): StructuredOcrResult {
+  return normalizeOcrResult(parseJsonObjectLenient(raw));
+}
+
+/**
+ * Naparsuje JSON objekt z výstupu modelu (odstraní ```json ploty a okolní text,
+ * opraví neescapované znaky). Vrací surový objekt – včetně polí mimo
+ * StructuredOcrResult, např. `imageIndex`.
+ */
+function parseJsonObjectLenient(raw: string): unknown {
   let jsonStr = raw.trim();
   // Strip ```json ... ``` fences
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -74,7 +83,7 @@ export function parseOcrJson(raw: string): StructuredOcrResult {
   }
   // Try parsing as-is first
   try {
-    return normalizeOcrResult(JSON.parse(jsonStr));
+    return JSON.parse(jsonStr);
   } catch {
     // Fix common issues in Claude's JSON output:
     // 1. Unescaped newlines/tabs inside string values
@@ -83,14 +92,51 @@ export function parseOcrJson(raw: string): StructuredOcrResult {
     // Strategy: rebuild the JSON character by character, tracking whether we're
     // inside a string value, and escaping problematic characters.
     const fixed = fixJsonString(jsonStr);
-    return normalizeOcrResult(JSON.parse(fixed));
+    return JSON.parse(fixed);
   }
 }
 
-export function parseOcrJsonBatch(
-  raw: string,
-  maxResults?: number,
-): { index: number; result: StructuredOcrResult }[] {
+export interface OcrBatchParseResult {
+  results: { index: number; result: StructuredOcrResult }[];
+  /**
+   * Proč výstup nešlo jednoznačně přiřadit ke stránkám (pak je `results` prázdné),
+   * jinak null. Chybějící výsledky jednotlivých stránek problémem nejsou.
+   */
+  problem: string | null;
+}
+
+interface BatchEntry {
+  declaredIndex: number | undefined;
+  result: StructuredOcrResult;
+}
+
+/** `imageIndex` z objektu výstupu – celé číslo (i jako řetězec „2"), jinak undefined. */
+function readImageIndex(obj: unknown): number | undefined {
+  const raw = (obj as { imageIndex?: unknown } | null)?.imageIndex;
+  if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
+  if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+  return undefined;
+}
+
+/**
+ * Rozparsuje JSONL výstup dávky a přiřadí výsledky k obrázkům.
+ *
+ * LLM-3: dřív se `imageIndex` bral, jen když byl v rozsahu a volný, jinak se použilo
+ * pořadí řádku – model číslující od 1, úvodní řádek nebo chybějící index tak tiše
+ * uložil přepis jedné stránky k jiné. Nově se výsledky přijmou jen při
+ * jednoznačném přiřazení:
+ *  - indexy jsou unikátní, v rozsahu 0..n-1 a obsahují 0 (číslování od 0; chybějící
+ *    stránky – např. při useknutí výstupu – skončí jako stránky bez výsledku),
+ *  - nebo jsou přesně 1..n (model číslo od 1) → posun o -1,
+ *  - nebo model indexy neuvedl vůbec a počet výsledků přesně odpovídá počtu obrázků
+ *    (pořadí podle instrukce „in the same order as the images").
+ * Řádky bez indexu mezi řádky s indexem se zahodí (jejich stránka zůstane bez
+ * výsledku). Cokoli jiného (duplicity, indexy mimo rozsah, 1..k u neúplného výstupu)
+ * je nejednoznačné → žádné výsledky a `problem` s popisem.
+ *
+ * @param expectedCount počet obrázků v dávce (bez něj se neověřuje horní mez)
+ */
+export function parseOcrJsonBatchChecked(raw: string, expectedCount?: number): OcrBatchParseResult {
   let text = raw.trim();
 
   // Strip markdown fences
@@ -99,42 +145,14 @@ export function parseOcrJsonBatch(
     text = fenceMatch[1] ?? text;
   }
 
+  const entries: BatchEntry[] = [];
   const lines = text.split('\n').filter((line) => line.trim().length > 0);
-  const results: { index: number; result: StructuredOcrResult }[] = [];
-  const usedIndices = new Set<number>();
-  let positionalIndex = 0;
-
-  const indexIsUsable = (n: number): boolean =>
-    Number.isInteger(n) &&
-    n >= 0 &&
-    (maxResults === undefined || n < maxResults) &&
-    !usedIndices.has(n);
-
   for (const line of lines) {
-    if (maxResults !== undefined && results.length >= maxResults) break;
-    // Advance the positional counter for EVERY line, even ones that fail to parse,
-    // so a single bad line doesn't shift every subsequent page onto the wrong index.
-    const pos = positionalIndex;
-    positionalIndex++;
     try {
-      const parsed = parseOcrJson(line);
-      // Trust the model's imageIndex only if it's a valid, in-range, not-yet-used
-      // slot; otherwise fall back to position. A bogus/duplicate index would
-      // otherwise save one page's result onto another page.
-      let imageIndex: number | undefined;
-      try {
-        const rawObj = JSON.parse(line.trim().startsWith('{') ? line.trim() : '{}');
-        if (typeof rawObj.imageIndex === 'number' && indexIsUsable(rawObj.imageIndex)) {
-          imageIndex = rawObj.imageIndex;
-        }
-      } catch {
-        // ignore — use positional fallback
-      }
-      const idx = imageIndex ?? pos;
-      usedIndices.add(idx);
-      results.push({ index: idx, result: parsed });
+      const obj = parseJsonObjectLenient(line);
+      entries.push({ declaredIndex: readImageIndex(obj), result: normalizeOcrResult(obj) });
     } catch {
-      // Skip unparseable lines (e.g. extra text from model)
+      // Skip unparseable lines (e.g. extra text from model, truncated last line)
       console.warn('[Claude Batch] Skipping unparseable JSONL line:', line.slice(0, 80));
     }
   }
@@ -142,7 +160,7 @@ export function parseOcrJsonBatch(
   // Fallback: line-based parsing found nothing, but the model may have returned a
   // single pretty-printed JSON array/object instead of JSONL. Parse the whole
   // block so the batch isn't silently lost (while still having been billed).
-  if (results.length === 0) {
+  if (entries.length === 0) {
     try {
       const parsed = JSON.parse(extractJsonBlock(text)) as unknown;
       const arr: unknown[] = Array.isArray(parsed)
@@ -150,19 +168,85 @@ export function parseOcrJsonBatch(
         : Array.isArray((parsed as { results?: unknown[] })?.results)
           ? (parsed as { results: unknown[] }).results
           : [parsed];
-      arr.forEach((obj, i) => {
-        if (maxResults !== undefined && results.length >= maxResults) return;
-        const rawIdx = (obj as { imageIndex?: unknown })?.imageIndex;
-        const idx = typeof rawIdx === 'number' && indexIsUsable(rawIdx) ? rawIdx : i;
-        usedIndices.add(idx);
-        results.push({ index: idx, result: normalizeOcrResult(obj) });
-      });
+      for (const obj of arr) {
+        entries.push({ declaredIndex: readImageIndex(obj), result: normalizeOcrResult(obj) });
+      }
     } catch {
       // genuinely unparseable — return the empty result set
     }
   }
 
-  return results;
+  return assignBatchIndices(entries, expectedCount);
+}
+
+function assignBatchIndices(entries: BatchEntry[], n: number | undefined): OcrBatchParseResult {
+  if (entries.length === 0) return { results: [], problem: null };
+
+  const reject = (problem: string): OcrBatchParseResult => {
+    console.warn(`[Claude Batch] Rejecting batch output: ${problem}`);
+    return { results: [], problem };
+  };
+  const expected = n !== undefined ? ` pro ${n} obrázků` : '';
+
+  const declared = entries.filter((e) => e.declaredIndex !== undefined);
+
+  if (declared.length === 0) {
+    if (n === undefined || entries.length === n) {
+      return { results: entries.map((e, i) => ({ index: i, result: e.result })), problem: null };
+    }
+    return reject(
+      `Model neuvedl imageIndex a vrátil ${entries.length} výsledků${expected} – nelze je jednoznačně přiřadit ke stránkám`,
+    );
+  }
+
+  if (declared.length < entries.length) {
+    console.warn(
+      `[Claude Batch] Dropping ${entries.length - declared.length} result(s) without imageIndex`,
+    );
+  }
+
+  const indices = declared.map((e) => e.declaredIndex!);
+  if (new Set(indices).size !== indices.length) {
+    return reject(
+      `Model vrátil duplicitní imageIndex (${indices.join(', ')}) – výsledky nelze jednoznačně přiřadit ke stránkám`,
+    );
+  }
+
+  const zeroBased =
+    indices.includes(0) && indices.every((i) => i >= 0 && (n === undefined || i < n));
+  if (zeroBased) {
+    return {
+      results: declared.map((e) => ({ index: e.declaredIndex!, result: e.result })),
+      problem: null,
+    };
+  }
+
+  // Číslování od 1 přijmeme jen v úplné podobě 1..n – u neúplného výstupu (1..k)
+  // nejde odlišit od číslování od 0 s chybějící první stránkou.
+  const oneBased =
+    n !== undefined && indices.length === n && indices.every((i) => i >= 1 && i <= n);
+  if (oneBased) {
+    console.warn('[Claude Batch] Model numbered images from 1 – remapping imageIndex to 0-based');
+    return {
+      results: declared.map((e) => ({ index: e.declaredIndex! - 1, result: e.result })),
+      problem: null,
+    };
+  }
+
+  return reject(
+    `Model vrátil imageIndex mimo očekávané číslování (${indices.join(', ')})${expected} – výsledky nelze jednoznačně přiřadit ke stránkám`,
+  );
+}
+
+/**
+ * Zpětně kompatibilní varianta `parseOcrJsonBatchChecked` – vrací jen přiřazené
+ * výsledky (při nejednoznačném výstupu prázdné pole).
+ */
+export function parseOcrJsonBatch(
+  raw: string,
+  expectedCount?: number,
+): { index: number; result: StructuredOcrResult }[] {
+  return parseOcrJsonBatchChecked(raw, expectedCount).results;
 }
 
 /** Extract the first {...} or [...] block from text (else return text as-is). */

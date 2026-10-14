@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { BATCH_OCR_INSTRUCTION, TRANSLATE_ONLY_SYSTEM_PROMPT } from '@ai-sedlacek/shared';
-import { parseOcrJson, parseOcrJsonBatch } from './parse';
+import { parseOcrJson, parseOcrJsonBatchChecked } from './parse';
 import { prepareImage } from './prepare-image';
 import type { ImageMediaType, ProcessingMode, StructuredOcrResult } from './types';
 
@@ -154,6 +154,8 @@ export async function processWithClaudeBatch(
   stopReason: string | null;
   /** Výstup byl useknut limitem `max_tokens` – chybějící stránky nejsou kompletní. */
   truncated: boolean;
+  /** Proč výstup nešlo jednoznačně přiřadit ke stránkám (pak `results` = []), jinak null. */
+  parseProblem: string | null;
 }> {
   const startTime = Date.now();
   const client = new Anthropic();
@@ -172,7 +174,9 @@ export async function processWithClaudeBatch(
     | { type: 'text'; text: string }
   > = [];
 
-  for (const img of preparedImages) {
+  for (const [i, img] of preparedImages.entries()) {
+    // Popisek s indexem před každým obrázkem – model nemusí pořadí odvozovat (LLM-3)
+    content.push({ type: 'text', text: `imageIndex ${i}:` });
     content.push({
       type: 'image',
       source: {
@@ -243,7 +247,7 @@ export async function processWithClaudeBatch(
 
   // Useknutý poslední řádek JSONL se nenaparsuje a parser ho zahodí – vrácené
   // výsledky jsou tedy jen kompletní stránky; o zbytku rozhodne volající.
-  const results = parseOcrJsonBatch(text, images.length);
+  const { results, problem: parseProblem } = parseOcrJsonBatchChecked(text, images.length);
 
   return {
     results,
@@ -254,5 +258,6 @@ export async function processWithClaudeBatch(
     outputTokens: finalMessage.usage.output_tokens,
     stopReason: finalMessage.stop_reason ?? null,
     truncated,
+    parseProblem,
   };
 }
