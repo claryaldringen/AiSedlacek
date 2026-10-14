@@ -3,9 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // ── Mocks ──────────────────────────────────────────
 vi.mock('sharp', () => ({
   default: vi.fn().mockImplementation(() => ({
+    metadata: vi.fn().mockResolvedValue({ format: 'jpeg' }),
+    rotate: vi.fn().mockReturnThis(),
     resize: vi.fn().mockReturnThis(),
+    flatten: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
-    toBuffer: vi.fn().mockResolvedValue(Buffer.from([0xff, 0xd8, 0x00])),
+    toBuffer: vi.fn().mockResolvedValue(Buffer.from([0xff, 0xd8, 0xff])),
   })),
 }));
 

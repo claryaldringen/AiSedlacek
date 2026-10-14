@@ -1,11 +1,34 @@
 import type { ImageMediaType, StructuredOcrResult } from './types';
 
+/**
+ * Rozpozná podle magic bytes formát obrázku, který přijímá Claude API
+ * (JPEG, PNG, WebP, GIF). Pro cokoli jiného (TIFF, HEIC, neznámá data) vrací null.
+ */
+export function sniffMediaType(buffer: Buffer): ImageMediaType | null {
+  const ascii = (start: number, end: number): string =>
+    buffer.subarray(start, end).toString('latin1');
+  if (buffer.length >= 4 && buffer[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (buffer.length >= 4 && ascii(0, 4) === 'GIF8') return 'image/gif';
+  return null;
+}
+
+/**
+ * Media type obrázku pro Claude API. Pro nepodporovaný formát vyhodí chybu – dřív
+ * tiše vracel `image/jpeg`, takže např. TIFF odešel s chybným typem a API odmítlo
+ * celou dávku (LLM-1). Nepodporované formáty převádí `prepareImage`.
+ */
 export function detectMediaType(buffer: Buffer): ImageMediaType {
-  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
-  if (buffer[0] === 0x52 && buffer[1] === 0x49) return 'image/webp';
-  if (buffer[0] === 0x47 && buffer[1] === 0x49) return 'image/gif';
-  return 'image/jpeg';
+  const mediaType = sniffMediaType(buffer);
+  if (!mediaType) {
+    throw new Error(
+      'Nepodporovaný formát obrázku pro Claude API (podporované: JPEG, PNG, WebP, GIF)',
+    );
+  }
+  return mediaType;
 }
 
 /**

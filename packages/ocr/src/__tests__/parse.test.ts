@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectMediaType, parseOcrJson, parseOcrJsonBatch } from '../parse.js';
+import { detectMediaType, sniffMediaType, parseOcrJson, parseOcrJsonBatch } from '../parse.js';
 
 const VALID_JSON = {
   transcription: 'Starý text',
@@ -12,28 +12,48 @@ const VALID_JSON = {
 
 describe('detectMediaType', () => {
   it('detects JPEG from magic bytes', () => {
-    const buf = Buffer.from([0xff, 0xd8, 0x00, 0x00]);
+    const buf = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
     expect(detectMediaType(buf)).toBe('image/jpeg');
   });
 
   it('detects PNG from magic bytes', () => {
-    const buf = Buffer.from([0x89, 0x50, 0x00, 0x00]);
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     expect(detectMediaType(buf)).toBe('image/png');
   });
 
   it('detects WebP from magic bytes', () => {
-    const buf = Buffer.from([0x52, 0x49, 0x00, 0x00]);
+    const buf = Buffer.concat([
+      Buffer.from('RIFF', 'latin1'),
+      Buffer.from([0x00, 0x00, 0x00, 0x00]),
+      Buffer.from('WEBP', 'latin1'),
+    ]);
     expect(detectMediaType(buf)).toBe('image/webp');
   });
 
   it('detects GIF from magic bytes', () => {
-    const buf = Buffer.from([0x47, 0x49, 0x00, 0x00]);
+    const buf = Buffer.from('GIF89a', 'latin1');
     expect(detectMediaType(buf)).toBe('image/gif');
   });
 
-  it('defaults to image/jpeg for unknown magic bytes', () => {
-    const buf = Buffer.from([0x00, 0x00, 0x00, 0x00]);
-    expect(detectMediaType(buf)).toBe('image/jpeg');
+  // LLM-1: dřív se pro neznámý formát tiše vracelo image/jpeg
+  it('throws for TIFF instead of claiming image/jpeg', () => {
+    const littleEndian = Buffer.from([0x49, 0x49, 0x2a, 0x00]);
+    const bigEndian = Buffer.from([0x4d, 0x4d, 0x00, 0x2a]);
+    expect(() => detectMediaType(littleEndian)).toThrow(/Nepodporovaný formát/);
+    expect(() => detectMediaType(bigEndian)).toThrow(/Nepodporovaný formát/);
+  });
+
+  it('throws for unknown magic bytes', () => {
+    expect(() => detectMediaType(Buffer.from([0x00, 0x00, 0x00, 0x00]))).toThrow();
+  });
+
+  it('does not treat a non-WebP RIFF file (e.g. WAV) as WebP', () => {
+    const wav = Buffer.concat([
+      Buffer.from('RIFF', 'latin1'),
+      Buffer.from([0x00, 0x00, 0x00, 0x00]),
+      Buffer.from('WAVE', 'latin1'),
+    ]);
+    expect(sniffMediaType(wav)).toBeNull();
   });
 });
 
