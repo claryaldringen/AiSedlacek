@@ -919,22 +919,22 @@ function WorkspaceContent(): React.JSX.Element {
             }
             return; // Done — no API call needed
           }
-          // Re-parse failed — fall through to full regeneration
+          // Re-parse failed — fall through to full regeneration. Dokument se NEmaže:
+          // worker ho s `regenerate: true` přepíše na místě a předchozí obsah uloží
+          // jako verze. (Dřív se tu volal DELETE, který kaskádou smazal i historii
+          // verzí, a když /process vrátil 402/409, uživatel přišel o vše.)
           console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
-          await apiFetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
         }
-        // Reset page status
-        await apiFetch(`/api/pages/${pageId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'pending' }),
-        });
-        // Process again via Inngest background job
+        // Process again via worker job
         setRegenerateStep(t('callingModel'));
         const response = await apiFetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pageIds: [pageId], language: locale }),
+          body: JSON.stringify({
+            pageIds: [pageId],
+            language: locale,
+            regenerate: Boolean(page?.document),
+          }),
         });
         if (!response.ok) {
           const errData = (await response.json()) as { error?: string };

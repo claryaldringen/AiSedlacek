@@ -4,9 +4,10 @@ import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance } from '@/lib/infrastructure/billing';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-// ── POST: Start processing via BullMQ ───────────────────────
+// ── POST: Start processing (worker picks up queued ProcessingJob) ──
 
 export async function POST(request: NextRequest): Promise<Response> {
   const t = await getApiTranslations(request, 'api');
@@ -31,12 +32,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     language,
     mode: rawMode,
     collectionId: rawCollectionId,
+    regenerate: rawRegenerate,
   } = body as {
     pageIds: unknown;
     language?: unknown;
     mode?: unknown;
     collectionId?: unknown;
+    regenerate?: unknown;
   };
+  // Přegenerování stránek, které už dokument mají: worker dokument nemaže,
+  // ale přepíše ho na místě a předchozí obsah uloží jako verze.
+  const regenerate = rawRegenerate === true;
 
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
     return Response.json({ error: t('pageIdsNotArray') }, { status: 400 });
@@ -68,6 +74,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       ? rawCollectionId
       : (ownedPages[0]?.collectionId ?? undefined);
 
+  // collectionId z requestu určuje kontext svazku pro OCR i blokaci souběžných
+  // jobů – nesmí jít o cizí svazek.
+  if (typeof rawCollectionId === 'string' && !(await getOwnedCollection(userId, rawCollectionId))) {
+    return Response.json({ error: t('collectionNotFound') }, { status: 404 });
+  }
+
   // Block duplicate OCR for the same collection (context ordering requires sequential processing)
   if (collectionId) {
     const existingOcrJob = await prisma.processingJob.findFirst({
@@ -98,6 +110,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       language: targetLang,
       mode: processingMode,
       collectionId: collectionId ?? null,
+      jobData: regenerate ? JSON.stringify({ regenerate: true }) : null,
       currentStep: 'Ve frontě — čeká na zpracování…',
     },
   });

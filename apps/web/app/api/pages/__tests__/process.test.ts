@@ -25,6 +25,11 @@ vi.mock('@/lib/auth', () => ({
   requireUserId: vi.fn().mockResolvedValue('test-user-id'),
 }));
 
+const mockGetOwnedCollection = vi.fn();
+vi.mock('@/lib/infrastructure/authz', () => ({
+  getOwnedCollection: (...args: unknown[]) => mockGetOwnedCollection(...args),
+}));
+
 vi.mock('@/lib/infrastructure/billing', () => ({
   checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
@@ -53,6 +58,9 @@ describe('POST /api/pages/process', () => {
     mockPageUpdateMany.mockResolvedValue({ count: 0 });
     mockProcessingJobFindFirst.mockResolvedValue(null); // No running job
     mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'queued' });
+    mockGetOwnedCollection.mockImplementation((userId: string, id: string) =>
+      Promise.resolve({ id, userId }),
+    );
     // Default: ownership check returns matching pages
     mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
       const where = args?.where as Record<string, unknown> | undefined;
@@ -157,6 +165,31 @@ describe('POST /api/pages/process', () => {
         }),
       }),
     );
+  });
+
+  it('returns 404 when collectionId belongs to another user', async () => {
+    mockGetOwnedCollection.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'], collectionId: 'foreign-col' }));
+
+    expect(res.status).toBe(404);
+    expect(mockGetOwnedCollection).toHaveBeenCalledWith('test-user-id', 'foreign-col');
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
+  it('stores regenerate flag in jobData', async () => {
+    const res = await POST(makeRequest({ pageIds: ['page-1'], regenerate: true }));
+
+    expect(res.status).toBe(200);
+    const data = mockProcessingJobCreate.mock.calls[0]![0].data as { jobData: string | null };
+    expect(JSON.parse(data.jobData!)).toEqual({ regenerate: true });
+  });
+
+  it('does not set jobData for ordinary processing', async () => {
+    await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    const data = mockProcessingJobCreate.mock.calls[0]![0].data as { jobData: string | null };
+    expect(data.jobData).toBeNull();
   });
 
   it('returns 403 when pages do not belong to user', async () => {
