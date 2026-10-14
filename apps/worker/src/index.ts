@@ -17,6 +17,15 @@ import { handleGenerateContext } from './handlers/generate-context';
 import { handleFixContexts } from './handlers/fix-contexts';
 import { handleTranslateContext } from './handlers/translate-context';
 import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
+import { assertLlmProviderAllowed } from './lib/startup-checks';
+
+// Fail-fast na nebezpečnou konfiguraci dřív, než worker začne brát joby (SEC-12)
+try {
+  assertLlmProviderAllowed();
+} catch (err) {
+  console.error(`[Worker] ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_CONCURRENT_JOBS = 5;
