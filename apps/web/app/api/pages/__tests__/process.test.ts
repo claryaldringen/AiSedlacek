@@ -32,11 +32,12 @@ vi.mock('@/lib/infrastructure/billing', () => ({
 
 // ── Helpers ──────────────────────────────────────────────
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/pages/process', {
     method: 'POST',
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-locale': 'cs' },
   });
 }
 

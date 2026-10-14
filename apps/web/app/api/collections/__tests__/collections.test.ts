@@ -11,6 +11,11 @@ const mockDelete = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
 const mockPageGroupBy = vi.fn();
 const mockDocumentAggregate = vi.fn();
+const mockWorkspaceFindUnique = vi.fn();
+const mockWorkspaceMemberFindUnique = vi.fn();
+const mockWorkspaceItemCreateMany = vi.fn();
+const mockWorkspaceItemCreate = vi.fn();
+const mockEnsureWorkspaces = vi.fn();
 
 // tx object passed into $transaction callback
 const txMock = {
@@ -43,11 +48,27 @@ vi.mock('@/lib/infrastructure/db', () => ({
     document: {
       aggregate: (...args: unknown[]) => mockDocumentAggregate(...args),
     },
+    workspace: {
+      findUnique: (...args: unknown[]) => mockWorkspaceFindUnique(...args),
+    },
+    workspaceMember: {
+      findUnique: (...args: unknown[]) => mockWorkspaceMemberFindUnique(...args),
+    },
+    workspaceItem: {
+      createMany: (...args: unknown[]) => mockWorkspaceItemCreateMany(...args),
+      create: (...args: unknown[]) => mockWorkspaceItemCreate(...args),
+    },
     publicSlug: {
       deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
     },
     $transaction: (...args: unknown[]) => mockTransaction(...args),
   },
+}));
+
+// Nový svazek se po vytvoření zařadí do home workspace uživatele.
+vi.mock('@/lib/infrastructure/workspace', () => ({
+  ensureWorkspaces: (...args: unknown[]) => mockEnsureWorkspaces(...args),
+  PUBLIC_WORKSPACE_ID: 'public-workspace',
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -69,11 +90,14 @@ vi.mock('@auth/prisma-adapter', () => ({
 
 // -- Helpers --------------------------------------------------------------
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeRequest(url: string, method: string, body?: unknown): NextRequest {
-  const init: RequestInit = { method };
+  const init: RequestInit = { method, headers: CS_LOCALE };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'Content-Type': 'application/json', ...CS_LOCALE };
   }
   return new NextRequest(new Request(url, init));
 }
@@ -83,7 +107,7 @@ function makeRawRequest(url: string, method: string, rawBody: string): NextReque
     new Request(url, {
       method,
       body: rawBody,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
     }),
   );
 }
@@ -110,9 +134,18 @@ import {
 
 // -- Tests ----------------------------------------------------------------
 
+// Seznam svazků se od zavedení workspaců načítá pro konkrétní workspace –
+// parametr ?workspaceId= je povinný a u ne-veřejného workspace se ověřuje členství.
 describe('GET /api/collections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkspaceFindUnique.mockResolvedValue({ type: 'home' });
+    mockWorkspaceMemberFindUnique.mockResolvedValue({
+      workspaceId: 'ws-1',
+      userId: 'test-user-id',
+      role: 'owner',
+    });
+    mockWorkspaceItemCreateMany.mockResolvedValue({ count: 0 });
   });
 
   it('returns a list of collections', async () => {
@@ -120,7 +153,10 @@ describe('GET /api/collections', () => {
       { ...FAKE_COLLECTION, _count: { pages: 3 } },
       { ...FAKE_COLLECTION, id: 'col-2', name: 'Druhy svazek', _count: { pages: 0 } },
     ];
-    mockFindMany.mockResolvedValue(collections);
+    // 1. volání: synchronizace vlastních svazků do home workspace, 2. volání: výpis
+    mockFindMany
+      .mockResolvedValueOnce([{ id: 'col-1' }, { id: 'col-2' }])
+      .mockResolvedValueOnce(collections);
     mockPageGroupBy.mockResolvedValue([
       { status: 'done', _count: 2 },
       { status: 'pending', _count: 1 },
@@ -129,7 +165,9 @@ describe('GET /api/collections', () => {
       _sum: { inputTokens: 1000, outputTokens: 500 },
     });
 
-    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
+    );
 
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -143,8 +181,18 @@ describe('GET /api/collections', () => {
     expect(json[0].stats.costUsd).toBeGreaterThan(0);
     expect(json[1].name).toBe('Druhy svazek');
 
-    expect(mockFindMany).toHaveBeenCalledWith({
-      where: { userId: 'test-user-id' },
+    expect(mockWorkspaceMemberFindUnique).toHaveBeenCalledWith({
+      where: { workspaceId_userId: { workspaceId: 'ws-1', userId: 'test-user-id' } },
+    });
+    expect(mockWorkspaceItemCreateMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: 'ws-1', collectionId: 'col-1' },
+        { workspaceId: 'ws-1', collectionId: 'col-2' },
+      ],
+      skipDuplicates: true,
+    });
+    expect(mockFindMany).toHaveBeenLastCalledWith({
+      where: { workspaceItems: { some: { workspaceId: 'ws-1' } } },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { pages: true } } },
     });
@@ -153,17 +201,41 @@ describe('GET /api/collections', () => {
   it('returns an empty array when no collections exist', async () => {
     mockFindMany.mockResolvedValue([]);
 
-    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
+    );
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual([]);
+    expect(mockWorkspaceItemCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when workspaceId is missing', async () => {
+    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+
+    expect(res.status).toBe(400);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when user is not a member of a non-public workspace', async () => {
+    mockWorkspaceFindUnique.mockResolvedValue({ type: 'shared' });
+    mockWorkspaceMemberFindUnique.mockResolvedValue(null);
+
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-cizi'),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockFindMany).not.toHaveBeenCalled();
   });
 });
 
 describe('POST /api/collections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnsureWorkspaces.mockResolvedValue({ homeId: 'ws-home', publicId: 'public-workspace' });
+    mockWorkspaceItemCreate.mockResolvedValue({ id: 'wi-1' });
   });
 
   it('creates a collection with name and description', async () => {
@@ -185,6 +257,9 @@ describe('POST /api/collections', () => {
         name: 'Testovaci svazek',
         description: 'Popis svazku',
       },
+    });
+    expect(mockWorkspaceItemCreate).toHaveBeenCalledWith({
+      data: { workspaceId: 'ws-home', collectionId: 'col-1' },
     });
   });
 
@@ -277,7 +352,7 @@ describe('GET /api/collections/[id]', () => {
     };
     mockFindUnique.mockResolvedValue(collectionWithPages);
 
-    const req = new NextRequest('http://localhost/api/collections/col-1');
+    const req = new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE });
     const res = await getCollection(req, routeContext);
 
     expect(res.status).toBe(200);
@@ -308,7 +383,9 @@ describe('GET /api/collections/[id]', () => {
   it('returns 404 when collection does not exist', async () => {
     mockFindUnique.mockResolvedValue(null);
 
-    const req = new NextRequest('http://localhost/api/collections/nonexistent');
+    const req = new NextRequest('http://localhost/api/collections/nonexistent', {
+      headers: CS_LOCALE,
+    });
     const res = await getCollection(req, routeContext);
 
     expect(res.status).toBe(404);
@@ -425,6 +502,7 @@ describe('DELETE /api/collections/[id]', () => {
   it('deletes collection and returns ok', async () => {
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',
+      headers: CS_LOCALE,
     });
     const res = await deleteCollection(req, routeContext);
 
@@ -442,6 +520,7 @@ describe('DELETE /api/collections/[id]', () => {
 
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',
+      headers: CS_LOCALE,
     });
     const res = await deleteCollection(req, routeContext);
 

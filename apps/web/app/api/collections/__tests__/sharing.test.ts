@@ -68,10 +68,11 @@ vi.mock('@auth/prisma-adapter', () => ({
 // -- Helpers --------------------------------------------------------------
 
 function makeRequest(url: string, method: string, body?: unknown): NextRequest {
-  const init: RequestInit = { method };
+  // Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+  const init: RequestInit = { method, headers: { 'x-locale': 'cs' } };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'Content-Type': 'application/json', 'x-locale': 'cs' };
   }
   return new NextRequest(new Request(url, init));
 }

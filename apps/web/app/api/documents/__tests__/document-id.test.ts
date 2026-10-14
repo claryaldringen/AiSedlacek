@@ -45,9 +45,13 @@ vi.mock('@auth/prisma-adapter', () => ({
 
 const routeContext = { params: Promise.resolve({ id: 'doc-1' }) };
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeGetRequest(): NextRequest {
   return new NextRequest('http://localhost/api/documents/doc-1', {
     method: 'GET',
+    headers: CS_LOCALE,
   });
 }
 
@@ -56,7 +60,7 @@ function makePatchRequest(body: unknown): NextRequest {
     new Request('http://localhost/api/documents/doc-1', {
       method: 'PATCH',
       body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
     }),
   );
 }
@@ -64,6 +68,7 @@ function makePatchRequest(body: unknown): NextRequest {
 function makeDeleteRequest(): NextRequest {
   return new NextRequest('http://localhost/api/documents/doc-1', {
     method: 'DELETE',
+    headers: CS_LOCALE,
   });
 }
 
@@ -166,7 +171,7 @@ describe('PATCH /api/documents/[id]', () => {
       new Request('http://localhost/api/documents/doc-1', {
         method: 'PATCH',
         body: 'not json{{{',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
       }),
     );
 

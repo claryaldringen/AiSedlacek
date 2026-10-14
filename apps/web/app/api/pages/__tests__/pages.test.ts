@@ -7,6 +7,8 @@ const mockPageFindMany = vi.fn();
 const mockPageFindUnique = vi.fn();
 const mockPageUpdate = vi.fn();
 const mockPageDelete = vi.fn();
+const mockPageCount = vi.fn();
+const mockCollectionFindUnique = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
 
 // tx object passed into $transaction callback
@@ -32,6 +34,10 @@ vi.mock('@/lib/infrastructure/db', () => ({
       findUnique: (...args: unknown[]) => mockPageFindUnique(...args),
       update: (...args: unknown[]) => mockPageUpdate(...args),
       delete: (...args: unknown[]) => mockPageDelete(...args),
+      count: (...args: unknown[]) => mockPageCount(...args),
+    },
+    collection: {
+      findUnique: (...args: unknown[]) => mockCollectionFindUnique(...args),
     },
     publicSlug: {
       deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
@@ -66,6 +72,9 @@ vi.mock('@/lib/adapters/storage/local-storage', () => ({
 
 // ── Helpers ──────────────────────────────────────────────
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeListRequest(params?: Record<string, string>): NextRequest {
   const url = new URL('http://localhost/api/pages');
   if (params) {
@@ -73,14 +82,14 @@ function makeListRequest(params?: Record<string, string>): NextRequest {
       url.searchParams.set(k, v);
     }
   }
-  return new NextRequest(url);
+  return new NextRequest(url, { headers: CS_LOCALE });
 }
 
 function makeRequest(id: string, method: string, body?: unknown): NextRequest {
-  const init: RequestInit = { method };
+  const init: RequestInit = { method, headers: CS_LOCALE };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'Content-Type': 'application/json', ...CS_LOCALE };
   }
   return new NextRequest(new Request(`http://localhost/api/pages/${id}`, init));
 }
@@ -237,6 +246,11 @@ describe('PATCH /api/pages/[id]', () => {
     vi.clearAllMocks();
     // Default: page found and owned by test user
     mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
+    // Přesun do svazku je povolen jen do svazku, který uživatel vlastní (IDOR ochrana)
+    mockCollectionFindUnique.mockImplementation(async (args: { where: { id: string } }) => ({
+      id: args.where.id,
+      userId: 'test-user-id',
+    }));
   });
 
   it('updates collectionId', async () => {
@@ -256,6 +270,24 @@ describe('PATCH /api/pages/[id]', () => {
       where: { id: 'page-1' },
       data: { collectionId: 'col-5' },
     });
+    expect(mockCollectionFindUnique).toHaveBeenCalledWith({
+      where: { id: 'col-5' },
+      select: { id: true, userId: true },
+    });
+  });
+
+  it('returns 404 when moving page into a collection owned by another user', async () => {
+    mockCollectionFindUnique.mockResolvedValue({ id: 'col-cizi', userId: 'other-user-id' });
+
+    const res = await updatePage(
+      makeRequest('page-1', 'PATCH', { collectionId: 'col-cizi' }),
+      routeContext('page-1'),
+    );
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe('Svazek nenalezen');
+    expect(mockPageUpdate).not.toHaveBeenCalled();
   });
 
   it('sets collectionId to null', async () => {
@@ -345,7 +377,7 @@ describe('PATCH /api/pages/[id]', () => {
       new Request('http://localhost/api/pages/page-1', {
         method: 'PATCH',
         body: 'not-json{{{',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
       }),
     );
 
@@ -361,7 +393,7 @@ describe('PATCH /api/pages/[id]', () => {
       new Request('http://localhost/api/pages/page-1', {
         method: 'PATCH',
         body: JSON.stringify('just-a-string'),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
       }),
     );
 
@@ -391,6 +423,8 @@ describe('DELETE /api/pages/[id]', () => {
     vi.clearAllMocks();
     // Default: page found and owned by test user
     mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
+    // Default: soubor nesdílí žádná jiná stránka (deduplikace podle hashe)
+    mockPageCount.mockResolvedValue(0);
     mockStorageDelete.mockResolvedValue(undefined);
     mockPublicSlugDeleteMany.mockResolvedValue({ count: 0 });
     mockPageDelete.mockResolvedValue(FAKE_PAGE);
@@ -410,6 +444,19 @@ describe('DELETE /api/pages/[id]', () => {
     // Verify transaction was used with publicSlug cleanup
     expect(mockTransaction).toHaveBeenCalled();
     expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'page-1' } });
+    expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
+  });
+
+  it('keeps the file when another page still references it', async () => {
+    mockPageCount.mockResolvedValue(1);
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(res.status).toBe(200);
+    expect(mockPageCount).toHaveBeenCalledWith({
+      where: { imageUrl: FAKE_PAGE.imageUrl, id: { not: 'page-1' } },
+    });
+    expect(mockStorageDelete).not.toHaveBeenCalled();
     expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
   });
 

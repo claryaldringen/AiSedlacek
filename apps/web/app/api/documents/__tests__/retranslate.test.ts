@@ -36,12 +36,15 @@ vi.mock('@auth/prisma-adapter', () => ({
 
 // ── Helpers ──────────────────────────────────────────────
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest(
     new Request('http://localhost/api/documents/doc-1/retranslate', {
       method: 'POST',
       body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
     }),
   );
 }
@@ -139,7 +142,7 @@ describe('POST /api/documents/[id]/retranslate', () => {
       new Request('http://localhost/api/documents/doc-1/retranslate', {
         method: 'POST',
         body: 'not json{{{',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
       }),
     );
 
