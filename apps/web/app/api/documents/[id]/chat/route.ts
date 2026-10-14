@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 
 import Anthropic from '@anthropic-ai/sdk';
-import sharp from 'sharp';
+import { sharpForUntrustedInput } from '@/lib/infrastructure/image-validation';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { detectMediaType } from '@ai-sedlacek/ocr';
@@ -137,16 +137,17 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   try {
     let imageBuffer = await storage.read(storagePath);
     const MAX_BYTES = 5 * 1024 * 1024;
+    // Stored uploads are user data – decode with the pixel limit (SEC-13).
     if (imageBuffer.length > MAX_BYTES) {
       imageBuffer = Buffer.from(
-        await sharp(imageBuffer)
+        await sharpForUntrustedInput(imageBuffer)
           .resize({ width: 3000, withoutEnlargement: true })
           .jpeg({ quality: 85 })
           .toBuffer(),
       );
       if (imageBuffer.length > MAX_BYTES) {
         imageBuffer = Buffer.from(
-          await sharp(imageBuffer)
+          await sharpForUntrustedInput(imageBuffer)
             .resize({ width: 2000, withoutEnlargement: true })
             .jpeg({ quality: 75 })
             .toBuffer(),

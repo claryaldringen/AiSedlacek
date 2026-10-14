@@ -320,6 +320,7 @@
     "unsupportedFormatWithType": "Unsupported format: {type}. Allowed: JPEG, PNG, TIFF, WebP",
     "imageTooLarge": "Image too large ({size} MB, max {max} MB)",
     "invalidImage": "The file could not be read as an image (it is damaged or incomplete)",
+    "imageTooManyPixels": "Image resolution is too high (max {max} megapixels)",
     "missingPageIds": "Missing pageIds",
     "pageIdsNotArray": "pageIds must be a non-empty array",
     "somePagesUnauthorized": "Some pages do not belong to the logged-in user",

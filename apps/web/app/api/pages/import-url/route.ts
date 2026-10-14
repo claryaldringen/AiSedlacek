@@ -5,7 +5,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
 import {
   InvalidImageError,
-  invalidImageMessageKey,
+  invalidImageMessage,
   validateImage,
   type ValidatedImage,
 } from '@/lib/infrastructure/image-validation';
@@ -140,7 +140,7 @@ async function handleImport(
     image = await withSharpLimit(() => validateImage(buffer, { allowGif: true }));
   } catch (err) {
     if (!(err instanceof InvalidImageError)) throw err;
-    return NextResponse.json({ error: t(invalidImageMessageKey(err)) }, { status: 422 });
+    return NextResponse.json({ error: invalidImageMessage(err, t) }, { status: 422 });
   }
 
   // Deduplicate by hash

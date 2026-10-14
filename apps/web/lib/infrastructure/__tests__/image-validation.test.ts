@@ -4,8 +4,10 @@ import {
   detectImageFormat,
   InvalidImageError,
   isReusableStoredImageUrl,
+  MAX_INPUT_PIXELS,
   validateImage,
 } from '../image-validation';
+import { pngClaimingSize } from './image-fixtures';
 
 function solid(width = 40, height = 30): sharp.Sharp {
   return sharp({ create: { width, height, channels: 3, background: '#c8b48c' } });
@@ -75,6 +77,20 @@ describe('validateImage', () => {
     // RIFF/WEBP container whose payload is not a WebP bitstream.
     const fake = Buffer.concat([Buffer.from('RIFF\x10\x00\x00\x00WEBP', 'latin1'), HTML]);
     await expect(validateImage(fake)).rejects.toBeInstanceOf(InvalidImageError);
+  });
+});
+
+describe('validateImage – pixel limit (SEC-13)', () => {
+  it('rejects an image above MAX_INPUT_PIXELS before decoding it', async () => {
+    // 12 000 × 12 000 = 144 Mpx: under sharp's default limit (~268 Mpx), over ours.
+    const bomb = await pngClaimingSize(12_000, 12_000);
+    expect(12_000 * 12_000).toBeGreaterThan(MAX_INPUT_PIXELS);
+    expect((await rejection(validateImage(bomb))).reason).toBe('too_many_pixels');
+  });
+
+  it('keeps the limit generous enough for large-format scans', () => {
+    // A3 at 600 dpi ≈ 7 016 × 9 921 px
+    expect(7_016 * 9_921).toBeLessThan(MAX_INPUT_PIXELS);
   });
 });
 

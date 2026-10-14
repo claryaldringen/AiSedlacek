@@ -5,7 +5,7 @@ import { getStorage } from '@/lib/adapters/storage';
 import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
 import {
   InvalidImageError,
-  invalidImageMessageKey,
+  invalidImageMessage,
   isReusableStoredImageUrl,
   validateImage,
   type ValidatedImage,
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         image = await validateImage(buffer);
       } catch (err) {
         if (!(err instanceof InvalidImageError)) throw err;
-        errors.push({ filename, error: t(invalidImageMessageKey(err)) });
+        errors.push({ filename, error: invalidImageMessage(err, t) });
         continue;
       }
 

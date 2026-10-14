@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import cs from '@/messages/cs.json';
+import { pngClaimingSize } from '@/lib/infrastructure/__tests__/image-fixtures';
 
 // SEC-1: every path that stores a user-supplied image (multipart upload, URL
 // import, CLI upload-url) must decide the format from the CONTENT and store it
@@ -143,6 +144,15 @@ describe('POST /api/pages/upload – content validation', () => {
     expect(json.errors[0].error).toBe(cs.api.invalidImage);
     expect(mockUpload).not.toHaveBeenCalled();
     expect(mockPageCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects an image above the pixel limit (SEC-13)', async () => {
+    const bomb = await pngClaimingSize(12_000, 12_000);
+    const res = await upload(uploadRequest(file(bomb, 'bomb.png', { type: 'image/png' })));
+    const json = await res.json();
+
+    expect(json.errors[0].error).toBe(cs.api.imageTooManyPixels.replace('{max}', '100'));
+    expect(mockUpload).not.toHaveBeenCalled();
   });
 
   it('stores a PNG as .png even when the client name and type lie', async () => {

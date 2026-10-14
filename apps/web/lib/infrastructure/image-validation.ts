@@ -21,7 +21,18 @@ const FORMAT_INFO: Record<ImageFormat, { extension: StoredImageExtension; mimeTy
   gif: { extension: 'gif', mimeType: 'image/gif' },
 };
 
-export type InvalidImageReason = 'unsupported_format' | 'undecodable';
+/**
+ * Upper bound on width × height for every sharp call over user data (SEC-13).
+ * sharp's default (~268 Mpx) lets a small, highly compressible PNG/TIFF expand
+ * to ~1 GB when decoded – a decompression bomb for the web process, which PM2
+ * restarts at 500 MB. 100 Mpx still covers large-format manuscript scans
+ * (A3 at 600 dpi ≈ 70 Mpx, 10 000 × 10 000 px) while capping a worst-case full
+ * decode (non-streamable input, 4 B/px) at ~400 MB. Uploads are also capped at
+ * MAX_FILE_SIZE_MB, which in practice keeps legitimate JPEGs well below this.
+ */
+export const MAX_INPUT_PIXELS = 100_000_000;
+
+export type InvalidImageReason = 'unsupported_format' | 'undecodable' | 'too_many_pixels';
 
 export class InvalidImageError extends Error {
   readonly reason: InvalidImageReason;
@@ -33,20 +44,28 @@ export class InvalidImageError extends Error {
   }
 }
 
-/** Translation key (namespace `api`) for an invalid-image rejection. */
-export function invalidImageMessageKey(
-  err: InvalidImageError,
-): 'unsupportedFormat' | 'invalidImage' {
-  return err.reason === 'unsupported_format' ? 'unsupportedFormat' : 'invalidImage';
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+/** Localized message (namespace `api`) for an invalid-image rejection. */
+export function invalidImageMessage(err: InvalidImageError, t: Translate): string {
+  switch (err.reason) {
+    case 'unsupported_format':
+      return t('unsupportedFormat');
+    case 'too_many_pixels':
+      return t('imageTooManyPixels', { max: MAX_INPUT_PIXELS / 1_000_000 });
+    default:
+      return t('invalidImage');
+  }
 }
 
 /**
- * sharp instance for untrusted input. `failOn: 'error'` rejects truncated and
- * corrupt pixel data but tolerates benign decoder warnings (e.g. extraneous
- * bytes after a JPEG marker) that real-world scanners produce.
+ * sharp instance for untrusted input – use it for EVERY sharp call over user
+ * data (uploads, stored uploads). `limitInputPixels` is checked from the header
+ * before decoding. `failOn: 'error'` rejects truncated and corrupt pixel data
+ * but tolerates mere decoder warnings that real-world scanner output triggers.
  */
 export function sharpForUntrustedInput(input: Buffer): sharp.Sharp {
-  return sharp(input, { failOn: 'error' });
+  return sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' });
 }
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -91,7 +110,10 @@ export interface ValidatedImage {
 
 function toInvalidImageError(err: unknown): InvalidImageError {
   if (err instanceof InvalidImageError) return err;
-  return new InvalidImageError('undecodable', err instanceof Error ? err.message : String(err));
+  const message = err instanceof Error ? err.message : String(err);
+  // sharp: "Input image exceeds pixel limit"
+  const reason = /pixel limit/i.test(message) ? 'too_many_pixels' : 'undecodable';
+  return new InvalidImageError(reason, message);
 }
 
 /**
