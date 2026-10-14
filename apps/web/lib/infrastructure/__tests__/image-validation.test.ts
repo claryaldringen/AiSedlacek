@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 import {
   detectImageFormat,
   InvalidImageError,
@@ -9,7 +9,7 @@ import {
 } from '../image-validation';
 import { pngClaimingSize } from './image-fixtures';
 
-function solid(width = 40, height = 30): sharp.Sharp {
+function solid(width = 40, height = 30): Sharp {
   return sharp({ create: { width, height, channels: 3, background: '#c8b48c' } });
 }
 

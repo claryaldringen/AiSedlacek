@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type Metadata, type Sharp } from 'sharp';
 import { STORED_IMAGE_EXTENSIONS, type StoredImageExtension } from '@ai-sedlacek/shared';
 import { renderThumbnail } from './thumbnails';
 
@@ -64,7 +64,7 @@ export function invalidImageMessage(err: InvalidImageError, t: Translate): strin
  * before decoding. `failOn: 'error'` rejects truncated and corrupt pixel data
  * but tolerates mere decoder warnings that real-world scanner output triggers.
  */
-export function sharpForUntrustedInput(input: Buffer): sharp.Sharp {
+export function sharpForUntrustedInput(input: Buffer): Sharp {
   return sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' });
 }
 
@@ -130,7 +130,7 @@ export async function validateImage(
     throw new InvalidImageError('unsupported_format');
   }
 
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharpForUntrustedInput(buffer).metadata();
   } catch (err) {

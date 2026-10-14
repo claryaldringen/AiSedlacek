@@ -1,4 +1,4 @@
-import type sharp from 'sharp';
+import type { Sharp } from 'sharp';
 import { getStorage } from '@/lib/adapters/storage';
 
 const THUMB_WIDTH = 400;
@@ -8,7 +8,7 @@ const THUMB_WIDTH = 400;
  * controls the input limits (see sharpForUntrustedInput). Throws if the image
  * cannot be decoded – image-validation relies on that to reject corrupt files.
  */
-export async function renderThumbnail(image: sharp.Sharp): Promise<Buffer> {
+export async function renderThumbnail(image: Sharp): Promise<Buffer> {
   return image
     .resize(THUMB_WIDTH, undefined, { withoutEnlargement: true })
     .jpeg({ quality: 75 })

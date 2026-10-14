@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const bufferCalls: unknown[] = [];
 
 vi.mock('sharp', async (importOriginal) => {
-  const actual = (await importOriginal<{ default: typeof import('sharp') }>()).default;
+  const actual = (await importOriginal<typeof import('sharp')>()).default;
   const spy = ((...args: Parameters<typeof actual>) => {
     if (Buffer.isBuffer(args[0])) bufferCalls.push(args[1]);
     return actual(...args);
