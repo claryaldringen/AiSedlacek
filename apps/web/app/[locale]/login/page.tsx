@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import HeroCarousel from '@/components/HeroCarousel';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import { safeCallbackUrl } from '@/lib/infrastructure/safe-callback-url';
 
 export default function LoginPage(): React.JSX.Element {
   return (
@@ -23,13 +24,13 @@ function LoginForm(): React.JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawCallbackUrl = searchParams.get('callbackUrl');
-  // Open-redirect ochrana: povol jen interní cesty (ne absolutní URL ani
-  // protocol-relative `//evil.com`). Credentials flow má redirect:false, takže
-  // same-origin kontrola NextAuthu se neuplatní a musíme validovat sami.
-  const callbackUrl =
-    rawCallbackUrl && rawCallbackUrl.startsWith('/') && !rawCallbackUrl.startsWith('//')
-      ? rawCallbackUrl
-      : '/workspace';
+  // Open-redirect ochrana: povol jen interní cesty. Credentials flow má
+  // redirect:false, takže same-origin kontrola NextAuthu se neuplatní a musíme
+  // validovat sami (včetně `/\evil.com`, který prohlížeč čte jako //evil.com).
+  const callbackUrl = safeCallbackUrl(
+    rawCallbackUrl,
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+  );
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -93,7 +94,9 @@ function LoginForm(): React.JSX.Element {
     } catch {
       // ignore — cookie will be set on next locale switch
     }
-    router.push(callbackUrl);
+    // Plná navigace místo router.push z next-intl: ten by k cestě přidal locale
+    // (callbackUrl už locale obsahuje, /auth/cli leží mimo [locale] → 404).
+    window.location.assign(callbackUrl);
   };
 
   const inputClasses =
