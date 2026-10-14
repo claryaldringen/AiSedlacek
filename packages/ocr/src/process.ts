@@ -1,5 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { BATCH_OCR_INSTRUCTION, TRANSLATE_ONLY_SYSTEM_PROMPT } from '@ai-sedlacek/shared';
+import {
+  BATCH_OCR_INSTRUCTION,
+  TRANSLATE_ONLY_SYSTEM_PROMPT,
+  OCR_MODEL,
+} from '@ai-sedlacek/shared';
 import { parseOcrJson, parseOcrJsonBatchChecked } from './parse';
 import { prepareImage } from './prepare-image';
 import type { ImageMediaType, ProcessingMode, StructuredOcrResult } from './types';
@@ -67,7 +71,7 @@ export async function processWithClaude(
   let fullText = '';
 
   const stream = client.messages.stream({
-    model: 'claude-opus-4-6',
+    model: OCR_MODEL,
     max_tokens: 8192,
     temperature: 0.3,
     system: mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT,
@@ -205,7 +209,7 @@ export async function processWithClaudeBatch(
   const maxTokens = batchMaxTokens(images.length);
 
   const stream = client.messages.stream({
-    model: 'claude-opus-4-6',
+    model: OCR_MODEL,
     max_tokens: maxTokens,
     temperature: 0.3,
     system:

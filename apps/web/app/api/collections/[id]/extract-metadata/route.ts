@@ -4,6 +4,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -79,7 +80,7 @@ ${collection.context}`;
 
   const client = new Anthropic();
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: TEXT_MODEL,
     max_tokens: 1024,
     messages: [{ role: 'user', content: prompt }],
   });

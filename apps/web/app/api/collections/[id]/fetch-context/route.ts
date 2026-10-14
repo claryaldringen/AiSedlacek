@@ -5,6 +5,7 @@ import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 const MAX_FETCH_BYTES = 5 * 1024 * 1024; // 5 MB of HTML is plenty for context
 
@@ -144,7 +145,7 @@ ${newContent}`;
     }
 
     response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       // Sloučení dlouhého kontextu s textem z URL se do 4096 tokenů nevešlo
       // a useknutý výsledek přepsal původní kontext.
       max_tokens: 16_000,
@@ -215,7 +216,7 @@ async function extractMetadata(
 ): Promise<void> {
   try {
     const metaResponse = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       max_tokens: 1024,
       messages: [
         {

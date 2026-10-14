@@ -7,6 +7,7 @@ import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -195,7 +196,7 @@ ${glossaryText}`;
     async start(controller) {
       try {
         const anthropicStream = client.messages.stream({
-          model: 'claude-sonnet-4-6',
+          model: TEXT_MODEL,
           max_tokens: 8192,
           temperature: 0.7,
           system: SYSTEM_PROMPT,

@@ -5,6 +5,7 @@
 import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface GenerateContextJobData {
   collectionId: string;
@@ -91,7 +92,7 @@ ${concatenated}`;
 
   // Call Claude Sonnet
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: TEXT_MODEL,
     maxTokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -118,7 +119,7 @@ ${concatenated}`;
 
   try {
     const metadataResponse = await createMessage({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       maxTokens: 1024,
       messages: [
         {

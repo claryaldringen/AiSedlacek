@@ -23,6 +23,7 @@ import {
 } from '../lib/processing-helpers';
 import { resetUnfinishedPages } from '../lib/page-status';
 import { createBatches } from '../lib/batch-utils';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 interface PreparedPage {
   pageId: string;
@@ -702,7 +703,7 @@ ${glossaryText || '(empty)'}
 Return ONLY the JSON object, no markdown fences, no extra text.`;
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: TEXT_MODEL,
     maxTokens: 8192,
     temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],

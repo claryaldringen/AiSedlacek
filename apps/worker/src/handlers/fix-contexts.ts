@@ -6,6 +6,7 @@ import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface FixContextsJobData {
   collectionId: string;
@@ -70,7 +71,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
 
     try {
       const response = await createMessage({
-        model: 'claude-sonnet-4-6',
+        model: TEXT_MODEL,
         maxTokens: 2048,
         messages: [
           {

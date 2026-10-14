@@ -7,6 +7,7 @@ import { LANGUAGE_NAMES, LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 const STEPS_CS = {
   loading: 'Načítám dokument…',
@@ -96,7 +97,7 @@ Return ONLY the updated translation in markdown, nothing else.`;
   }
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: TEXT_MODEL,
     maxTokens: 8192,
     temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],

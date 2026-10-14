@@ -6,6 +6,7 @@ import { createMessage } from '../lib/llm';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface TranslateContextJobData {
   collectionId: string;
@@ -38,7 +39,7 @@ export async function handleTranslateContext(
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
+    model: TEXT_MODEL,
     maxTokens: 4096,
     messages: [
       {
