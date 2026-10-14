@@ -23,6 +23,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     where: { id },
     include: {
       document: {
+        // rawResponse u dávkového OCR obsahuje výstup celé dávky (i dalších
+        // stránek) a UI ho nepotřebuje – reparse ho čte přímo z DB.
+        omit: { rawResponse: true },
         include: {
           translations: true,
           glossary: true,

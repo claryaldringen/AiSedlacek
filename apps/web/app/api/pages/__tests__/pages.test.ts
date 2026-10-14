@@ -221,6 +221,7 @@ describe('GET /api/pages/[id]', () => {
       where: { id: 'page-1' },
       include: {
         document: {
+          omit: { rawResponse: true },
           include: {
             translations: true,
             glossary: true,

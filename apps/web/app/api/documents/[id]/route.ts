@@ -17,6 +17,8 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
 
   const doc = await prisma.document.findUnique({
     where: { id },
+    // rawResponse u dávkového OCR obsahuje výstup celé dávky (i dalších stránek).
+    omit: { rawResponse: true },
     include: { translations: true, glossary: true, page: { select: { userId: true } } },
   });
 
