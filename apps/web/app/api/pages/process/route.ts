@@ -138,8 +138,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   });
 
   // Set all pages to status 'processing'
+  // Prázdné stránky nechat 'blank' – worker je podle stavu přeskakuje; dřív je
+  // tento update přepsal na 'processing' a worker je pak zbytečně posílal do OCR.
   await prisma.page.updateMany({
-    where: { id: { in: pageIds as string[] } },
+    where: { id: { in: pageIds as string[] }, status: { not: 'blank' } },
     data: { status: 'processing', errorMessage: null },
   });
 

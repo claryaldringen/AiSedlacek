@@ -126,7 +126,7 @@ describe('POST /api/pages/process', () => {
 
     // Verify pages were set to processing
     expect(mockPageUpdateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['page-1', 'page-2'] } },
+      where: { id: { in: ['page-1', 'page-2'] }, status: { not: 'blank' } },
       data: { status: 'processing', errorMessage: null },
     });
   });

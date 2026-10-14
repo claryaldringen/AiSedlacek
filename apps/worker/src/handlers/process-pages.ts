@@ -165,6 +165,12 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         (t: { language: string }) => t.language === language,
       );
       if (hasTranslation) {
+        // Web při spuštění jobu přepne stránky na 'processing' – přeskočenou
+        // stránku je nutné vrátit, jinak v UI visí jako zpracovávaná.
+        await prisma.page.update({
+          where: { id: pageId },
+          data: { status: 'done', errorMessage: null },
+        });
         skippedCount.alreadyTranslated++;
         continue;
       }

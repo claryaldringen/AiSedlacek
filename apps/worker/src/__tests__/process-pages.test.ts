@@ -508,6 +508,11 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
 
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    // Přeskočená stránka nesmí zůstat ve stavu 'processing'.
+    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { status: 'done', errorMessage: null },
+    });
   });
 
   it('stránku, kterou tento job už přegeneroval (restart workeru), znovu neposílá', async () => {
