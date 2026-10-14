@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ora from 'ora';
 import { requireAuth } from '../lib/require-auth.js';
-import { imageMimeTypeForFile } from '../lib/mime.js';
+import { detectImageMimeType } from '../lib/mime.js';
 import * as output from '../lib/output.js';
 
 export const uploadCommand = new Command('upload')
@@ -65,10 +65,11 @@ export const uploadCommand = new Command('upload')
       try {
         const buffer = fs.readFileSync(filePath);
         // Server přijímá jen známé obrázkové typy – Blob bez `type` by odmítl (ARCH-4).
-        const type = imageMimeTypeForFile(filePath, buffer);
+        // Typ určujeme z obsahu, ne z přípony.
+        const type = detectImageMimeType(buffer);
         if (!type) {
           spinner.stop();
-          output.error(`  ${filePath}: nepodporovaný formát (povolené: JPEG, PNG, WebP, TIFF)`);
+          output.error(`  ${filePath}: nepodporovaný formát – obsah není JPEG, PNG, WebP ani TIFF`);
           spinner.start();
           totalErrors++;
           continue;

@@ -82,6 +82,16 @@ describe('ais upload', () => {
     expect(errors.join('\n')).toContain('nepodporovaný formát');
   });
 
+  it('does not trust the extension when the content is not an image', async () => {
+    const file = path.join(tmpDir, 'photo.jpg'); // např. HEIC nebo poškozený soubor
+    fs.writeFileSync(file, Buffer.from('not really a jpeg'));
+
+    await uploadCommand.parseAsync([file], { from: 'user' });
+
+    expect(api.postFormData).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
   it('exits with an error when the server rejects a file', async () => {
     const file = path.join(tmpDir, 'scan.png');
     fs.writeFileSync(file, PNG);
