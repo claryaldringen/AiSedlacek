@@ -28,3 +28,6 @@ export {
   BATCH_OCR_INSTRUCTION,
   TRANSLATE_ONLY_SYSTEM_PROMPT,
 } from './prompts';
+
+export { TRANSLATION_LANGUAGES, isTranslationLanguage } from './languages';
+export type { TranslationLanguage } from './languages';

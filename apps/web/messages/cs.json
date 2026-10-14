@@ -279,6 +279,8 @@
     "invalidJson": "Neplatný JSON",
     "serverError": "Interní chyba serveru",
     "invalidBody": "Neplatné tělo požadavku",
+    "unsupportedLanguage": "Nepodporovaný jazyk překladu",
+    "invalidMessages": "Neplatný formát zpráv",
     "invalidStatus": "Neplatný stav stránky",
     "nothingToUpdate": "Nic k aktualizaci",
     "pageNotFound": "Stránka nenalezena",

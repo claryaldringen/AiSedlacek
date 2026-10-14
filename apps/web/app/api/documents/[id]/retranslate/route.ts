@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
 import { checkBalance } from '@/lib/infrastructure/billing';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+
+const MAX_PREVIOUS_TRANSLATION_CHARS = 100_000;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -30,10 +33,23 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   const { language, previousTranslation } =
     (body as {
-      language?: string;
-      previousTranslation?: string;
+      language?: unknown;
+      previousTranslation?: unknown;
     }) ?? {};
-  const targetLang = typeof language === 'string' ? language : 'cs';
+  if (language !== undefined && !isTranslationLanguage(language)) {
+    return NextResponse.json({ error: t('unsupportedLanguage') }, { status: 400 });
+  }
+  const targetLang = language ?? 'cs';
+  // previousTranslation jde do promptu – omezit velikost (náklady na tokeny).
+  if (previousTranslation !== undefined && typeof previousTranslation !== 'string') {
+    return NextResponse.json({ error: t('invalidBody') }, { status: 400 });
+  }
+  if (
+    typeof previousTranslation === 'string' &&
+    previousTranslation.length > MAX_PREVIOUS_TRANSLATION_CHARS
+  ) {
+    return NextResponse.json({ error: t('messageTooLong') }, { status: 400 });
+  }
 
   // Verify document exists and belongs to user
   const doc = await prisma.document.findUnique({

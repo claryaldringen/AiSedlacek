@@ -97,10 +97,20 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (messages.length > MAX_MESSAGES) {
     return Response.json({ error: t('tooManyMessages') }, { status: 400 });
   }
-  const totalChars = messages.reduce(
-    (n, m) => n + (typeof m?.content === 'string' ? m.content.length : 0),
-    0,
+  // Jen textové zprávy s povolenou rolí – pole content bloků dřív obešlo limit
+  // znaků (počítal jen stringy) a role šla do API nevalidovaná.
+  const valid = messages.every(
+    (m: unknown) =>
+      typeof m === 'object' &&
+      m !== null &&
+      ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant') &&
+      typeof (m as ChatMessage).content === 'string' &&
+      (m as ChatMessage).content.trim() !== '',
   );
+  if (!valid || messages[0]!.role !== 'user') {
+    return Response.json({ error: t('invalidMessages') }, { status: 400 });
+  }
+  const totalChars = messages.reduce((n, m) => n + m.content.length, 0);
   if (totalChars > MAX_TOTAL_CHARS) {
     return Response.json({ error: t('messageTooLong') }, { status: 400 });
   }

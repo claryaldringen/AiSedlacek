@@ -5,6 +5,7 @@ import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance } from '@/lib/infrastructure/billing';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 // ── POST: Start processing (worker picks up queued ProcessingJob) ──
@@ -65,8 +66,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: t('insufficientCredit'), balance }, { status: 402 });
   }
 
-  const targetLang =
-    typeof language === 'string' && language.trim() !== '' ? language.trim() : 'cs';
+  if (language !== undefined && language !== '' && !isTranslationLanguage(language)) {
+    return Response.json({ error: t('unsupportedLanguage') }, { status: 400 });
+  }
+  const targetLang = isTranslationLanguage(language) ? language : 'cs';
   const processingMode: ProcessingMode =
     rawMode === 'translate' ? 'translate' : 'transcribe+translate';
   const collectionId =
