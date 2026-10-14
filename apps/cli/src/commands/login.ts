@@ -20,7 +20,11 @@ export const loginCommand = new Command('login')
 
     const { port, tokenPromise, server } = await startCallbackServer(state);
 
-    const authUrl = `${config.server}/auth/cli?state=${state}&redirect=${encodeURIComponent(`http://localhost:${port}/callback`)}`;
+    // Callback server poslouchá jen na 127.0.0.1, proto redirect míří přímo na tuto adresu
+    // ("localhost" se v prohlížeči může přeložit na ::1, kde nikdo neposlouchá). Stránka
+    // /auth/cli povoluje jen http: na loopback s explicitním portem a cestou /callback.
+    const redirect = `http://127.0.0.1:${port}/callback`;
+    const authUrl = `${config.server}/auth/cli?state=${state}&redirect=${encodeURIComponent(redirect)}`;
 
     const spinner = ora('Otevírám prohlížeč pro přihlášení...').start();
 
