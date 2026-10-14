@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { computeCostFromTokens } from '@/lib/pricing';
@@ -33,15 +34,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Sync user's collections to workspace items (home workspace only)
+  // Sync user's collections to workspace items (home workspace only). Zapisuje
+  // se jen chybějící – listing se volá po většině akcí v UI a dřív každé čtení
+  // dělalo createMany přes všechny svazky uživatele.
   if (ws.type === 'home') {
-    const userCollections = await prisma.collection.findMany({
-      where: { userId },
+    const missing = await prisma.collection.findMany({
+      where: { userId, workspaceItems: { none: { workspaceId } } },
       select: { id: true },
     });
-    if (userCollections.length > 0) {
+    if (missing.length > 0) {
       await prisma.workspaceItem.createMany({
-        data: userCollections.map((c) => ({ workspaceId, collectionId: c.id })),
+        data: missing.map((c) => ({ workspaceId, collectionId: c.id })),
         skipDuplicates: true,
       });
     }
@@ -53,50 +56,65 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     },
     orderBy: { createdAt: 'desc' },
     include: {
-      _count: { select: { pages: true } },
+      // Archivované („smazané") stránky se nepočítají.
+      _count: { select: { pages: { where: { status: { not: 'archived' } } } } },
     },
   });
 
-  // Add stats for each collection
-  const collectionsWithStats = await Promise.all(
-    collections.map(async (c) => {
-      const [statusCounts, tokenAgg] = await Promise.all([
+  // Statistiky všech svazků dvěma dotazy místo dvou dotazů na každý svazek (N+1).
+  const collectionIds = collections.map((c) => c.id);
+  const [statusCounts, tokenSums] = collectionIds.length
+    ? await Promise.all([
         prisma.page.groupBy({
-          by: ['status'],
-          where: { collectionId: c.id },
+          by: ['collectionId', 'status'],
+          where: { collectionId: { in: collectionIds } },
           _count: true,
         }),
-        prisma.document.aggregate({
-          where: { page: { collectionId: c.id } },
-          _sum: { inputTokens: true, outputTokens: true },
-        }),
-      ]);
+        prisma.$queryRaw<
+          { collectionId: string; inputTokens: bigint | null; outputTokens: bigint | null }[]
+        >(Prisma.sql`
+          SELECT p."collectionId" AS "collectionId",
+                 SUM(d."inputTokens") AS "inputTokens",
+                 SUM(d."outputTokens") AS "outputTokens"
+          FROM "Document" d
+          JOIN "Page" p ON p."id" = d."pageId"
+          WHERE p."collectionId" IN (${Prisma.join(collectionIds)})
+          GROUP BY p."collectionId"
+        `),
+      ])
+    : [[], []];
 
-      const byStatus: Record<string, number> = {};
-      for (const s of statusCounts) {
-        byStatus[s.status] = s._count;
-      }
+  const statusByCollection = new Map<string, Record<string, number>>();
+  for (const s of statusCounts) {
+    if (!s.collectionId) continue;
+    const byStatus = statusByCollection.get(s.collectionId) ?? {};
+    byStatus[s.status] = s._count;
+    statusByCollection.set(s.collectionId, byStatus);
+  }
+  const tokensByCollection = new Map(tokenSums.map((row) => [row.collectionId, row]));
 
-      const inputTokens = tokenAgg._sum.inputTokens ?? 0;
-      const outputTokens = tokenAgg._sum.outputTokens ?? 0;
-      const costUsd = computeCostFromTokens(inputTokens, outputTokens);
+  const collectionsWithStats = collections.map((c) => {
+    const byStatus = statusByCollection.get(c.id) ?? {};
+    const tokens = tokensByCollection.get(c.id);
+    const inputTokens = Number(tokens?.inputTokens ?? 0);
+    const outputTokens = Number(tokens?.outputTokens ?? 0);
+    const costUsd = computeCostFromTokens(inputTokens, outputTokens);
 
-      return {
-        ...c,
-        processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
-        stats: {
-          done: byStatus['done'] ?? 0,
-          pending: byStatus['pending'] ?? 0,
-          error: byStatus['error'] ?? 0,
-          processing: byStatus['processing'] ?? 0,
-          blank: byStatus['blank'] ?? 0,
-          inputTokens,
-          outputTokens,
-          costUsd: Math.round(costUsd * 100) / 100,
-        },
-      };
-    }),
-  );
+    return {
+      ...c,
+      processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
+      stats: {
+        done: byStatus['done'] ?? 0,
+        pending: byStatus['pending'] ?? 0,
+        error: byStatus['error'] ?? 0,
+        processing: byStatus['processing'] ?? 0,
+        blank: byStatus['blank'] ?? 0,
+        inputTokens,
+        outputTokens,
+        costUsd: Math.round(costUsd * 100) / 100,
+      },
+    };
+  });
 
   return NextResponse.json(collectionsWithStats);
 }

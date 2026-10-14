@@ -11,6 +11,7 @@ const mockDelete = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
 const mockPageGroupBy = vi.fn();
 const mockDocumentAggregate = vi.fn();
+const mockQueryRaw = vi.fn();
 const mockWorkspaceFindUnique = vi.fn();
 const mockWorkspaceMemberFindUnique = vi.fn();
 const mockWorkspaceItemCreateMany = vi.fn();
@@ -48,6 +49,7 @@ vi.mock('@/lib/infrastructure/db', () => ({
     document: {
       aggregate: (...args: unknown[]) => mockDocumentAggregate(...args),
     },
+    $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
     workspace: {
       findUnique: (...args: unknown[]) => mockWorkspaceFindUnique(...args),
     },
@@ -157,13 +159,14 @@ describe('GET /api/collections', () => {
     mockFindMany
       .mockResolvedValueOnce([{ id: 'col-1' }, { id: 'col-2' }])
       .mockResolvedValueOnce(collections);
+    // Statistiky se počítají hromadně pro všechny svazky (dřív 2 dotazy na svazek).
     mockPageGroupBy.mockResolvedValue([
-      { status: 'done', _count: 2 },
-      { status: 'pending', _count: 1 },
+      { collectionId: 'col-1', status: 'done', _count: 2 },
+      { collectionId: 'col-1', status: 'pending', _count: 1 },
     ]);
-    mockDocumentAggregate.mockResolvedValue({
-      _sum: { inputTokens: 1000, outputTokens: 500 },
-    });
+    mockQueryRaw.mockResolvedValue([
+      { collectionId: 'col-1', inputTokens: BigInt(1000), outputTokens: BigInt(500) },
+    ]);
 
     const res = await listCollections(
       new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
@@ -180,6 +183,15 @@ describe('GET /api/collections', () => {
     expect(json[0].stats.outputTokens).toBe(500);
     expect(json[0].stats.costUsd).toBeGreaterThan(0);
     expect(json[1].name).toBe('Druhy svazek');
+    expect(json[1].stats.done).toBe(0);
+    expect(json[1].stats.inputTokens).toBe(0);
+    expect(mockPageGroupBy).toHaveBeenCalledTimes(1);
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    // Synchronizace do home workspace zapisuje jen svazky, které tam ještě nejsou.
+    expect(mockFindMany.mock.calls[0]![0]).toEqual({
+      where: { userId: 'test-user-id', workspaceItems: { none: { workspaceId: 'ws-1' } } },
+      select: { id: true },
+    });
 
     expect(mockWorkspaceMemberFindUnique).toHaveBeenCalledWith({
       where: { workspaceId_userId: { workspaceId: 'ws-1', userId: 'test-user-id' } },
@@ -194,7 +206,7 @@ describe('GET /api/collections', () => {
     expect(mockFindMany).toHaveBeenLastCalledWith({
       where: { workspaceItems: { some: { workspaceId: 'ws-1' } } },
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { pages: true } } },
+      include: { _count: { select: { pages: { where: { status: { not: 'archived' } } } } } },
     });
   });
 
