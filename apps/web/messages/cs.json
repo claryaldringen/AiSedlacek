@@ -319,6 +319,7 @@
     "urlMustBeHttp": "URL musí začínat http:// nebo https://",
     "unsupportedFormatWithType": "Nepodporovaný formát: {type}. Povolené: JPEG, PNG, TIFF, WebP",
     "imageTooLarge": "Obrázek je příliš velký ({size} MB, max {max} MB)",
+    "invalidImage": "Soubor se nepodařilo načíst jako obrázek (je poškozený nebo neúplný)",
     "missingPageIds": "Chybí pageIds",
     "pageIdsNotArray": "pageIds musí být neprázdné pole",
     "somePagesUnauthorized": "Některé stránky nepatří přihlášenému uživateli",

@@ -1,27 +1,22 @@
-import sharp from 'sharp';
+import type sharp from 'sharp';
 import { getStorage } from '@/lib/adapters/storage';
 
 const THUMB_WIDTH = 400;
 
 /**
- * Generate a JPEG thumbnail from image buffer and save it to storage.
- * Returns the thumbnail URL or null if generation fails.
+ * Render a JPEG thumbnail. Takes a prepared sharp instance so the caller
+ * controls the input limits (see sharpForUntrustedInput). Throws if the image
+ * cannot be decoded – image-validation relies on that to reject corrupt files.
  */
-export async function generateThumbnail(
-  buffer: Buffer,
-  originalFilename: string,
-): Promise<string | null> {
-  try {
-    const thumbBuffer = await sharp(buffer)
-      .resize(THUMB_WIDTH, undefined, { withoutEnlargement: true })
-      .jpeg({ quality: 75 })
-      .toBuffer();
+export async function renderThumbnail(image: sharp.Sharp): Promise<Buffer> {
+  return image
+    .resize(THUMB_WIDTH, undefined, { withoutEnlargement: true })
+    .jpeg({ quality: 75 })
+    .toBuffer();
+}
 
-    const storage = getStorage();
-    const thumbFilename = originalFilename.replace(/\.[^.]+$/, '') + '_thumb.jpg';
-    const result = await storage.upload(thumbBuffer, thumbFilename);
-    return result.url;
-  } catch {
-    return null;
-  }
+/** Store a rendered thumbnail and return its URL. */
+export async function saveThumbnail(thumbnail: Buffer): Promise<string> {
+  const result = await getStorage().upload(thumbnail, 'jpg');
+  return result.url;
 }

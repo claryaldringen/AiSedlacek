@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
-import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
+import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
+import {
+  InvalidImageError,
+  invalidImageMessageKey,
+  isReusableStoredImageUrl,
+  validateImage,
+  type ValidatedImage,
+} from '@/lib/infrastructure/image-validation';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -52,15 +57,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const file = entry as File;
+    // Client filename is kept for display only – it never reaches the disk.
     const filename = file.name ?? 'upload';
-
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      errors.push({
-        filename,
-        error: t('unsupportedFormat'),
-      });
-      continue;
-    }
 
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       errors.push({ filename, error: t('fileTooLarge', { max: MAX_SIZE_MB }) });
@@ -69,6 +67,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
+
+      // Format is detected from the content, never from file.type (SEC-1).
+      let image: ValidatedImage;
+      try {
+        image = await validateImage(buffer);
+      } catch (err) {
+        if (!(err instanceof InvalidImageError)) throw err;
+        errors.push({ filename, error: t(invalidImageMessageKey(err)) });
+        continue;
+      }
+
       const hash = crypto.createHash('sha256').update(buffer).digest('hex');
 
       // Check for duplicate by hash (scoped to user)
@@ -85,45 +94,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      // Cross-user dedup: reuse storage file if any user already uploaded this hash
+      // Cross-user dedup: reuse storage file if any user already uploaded this hash,
+      // but only if it is stored under an image extension (files stored before
+      // content validation may carry the client's extension, e.g. .html).
       const existingGlobal = await prisma.page.findFirst({
         where: { hash },
         select: { imageUrl: true },
       });
 
-      const storageResult = existingGlobal
-        ? { url: existingGlobal.imageUrl }
-        : await storage.upload(buffer, filename);
-      const thumbnailUrl = await generateThumbnail(buffer, filename);
+      const imageUrl =
+        existingGlobal && isReusableStoredImageUrl(existingGlobal.imageUrl)
+          ? existingGlobal.imageUrl
+          : (await storage.upload(buffer, image.extension)).url;
+      const thumbnailUrl = await saveThumbnail(image.thumbnail);
 
       // Detect blank pages (parchment without writing)
       const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
       const detectedBlank = await isBlankPage(buffer);
-
-      // Extract image metadata
-      let width: number | undefined;
-      let height: number | undefined;
-      try {
-        const metadata = await sharp(buffer).metadata();
-        width = metadata.width;
-        height = metadata.height;
-      } catch {
-        // not a valid image for sharp – skip metadata
-      }
 
       const page = await prisma.page.create({
         data: {
           userId,
           filename,
           hash,
-          imageUrl: storageResult.url,
+          imageUrl,
           thumbnailUrl,
           collectionId: resolvedCollectionId,
           status: detectedBlank ? 'blank' : 'pending',
-          mimeType: file.type,
+          mimeType: image.mimeType,
           fileSize: buffer.length,
-          width,
-          height,
+          width: image.width,
+          height: image.height,
         },
       });
 

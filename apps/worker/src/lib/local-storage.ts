@@ -1,4 +1,5 @@
-import type { IStorageProvider, StorageResult } from '@ai-sedlacek/shared';
+import { STORED_IMAGE_EXTENSIONS } from '@ai-sedlacek/shared';
+import type { IStorageProvider, StorageResult, StoredImageExtension } from '@ai-sedlacek/shared';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
@@ -20,10 +21,13 @@ export class LocalStorageProvider implements IStorageProvider {
     return full;
   }
 
-  async upload(file: Buffer, filename: string): Promise<StorageResult> {
+  /** Store under `<uuid>.<extension>`; only image extensions (see IStorageProvider). */
+  async upload(file: Buffer, extension: StoredImageExtension): Promise<StorageResult> {
+    if (!(STORED_IMAGE_EXTENSIONS as readonly string[]).includes(extension)) {
+      throw new Error(`Refusing to store file with extension "${String(extension)}"`);
+    }
     await fs.mkdir(this.uploadDir, { recursive: true });
-    const safeName = filename.replace(/[/\\]/g, '_');
-    const uniqueName = `${crypto.randomUUID()}-${safeName}`;
+    const uniqueName = `${crypto.randomUUID()}.${extension}`;
     const filePath = path.join(this.uploadDir, uniqueName);
     await fs.writeFile(filePath, file);
     return { url: `/uploads/${uniqueName}`, path: uniqueName };
