@@ -56,16 +56,30 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     context?: string;
   };
 
+  // Validujeme před jakýmkoli zápisem, aby 400 znamenalo „nic se neuložilo". Pole jiného
+  // typu než string by se jinak tiše ignorovala a klient by dostal 200.
+  const fields = { transcription, translation, translationLanguage, context };
+  const invalidField = Object.entries(fields).find(
+    ([, value]) => value !== undefined && typeof value !== 'string',
+  );
+  if (invalidField) {
+    return NextResponse.json(
+      { error: `${t('invalidBody')}: ${invalidField[0]} must be a string` },
+      { status: 400 },
+    );
+  }
+
   // Překlad se ukládá per jazyk – bez jazyka ho nelze uložit. Dříve se v tom případě
   // tiše ignoroval a klient (CLI push) dostal 200, takže změnu považoval za uloženou.
-  // Validujeme před jakýmkoli zápisem, aby 400 znamenalo „nic se neuložilo".
   if (
     translation !== undefined &&
     (typeof translationLanguage !== 'string' || translationLanguage.trim() === '')
   ) {
     return NextResponse.json(
       {
-        error: `${t('invalidBody')}: translationLanguage is required when translation is provided`,
+        error:
+          `${t('invalidBody')}: translationLanguage is required when translation is provided` +
+          ' (ais CLI: update to the latest version)',
       },
       { status: 400 },
     );

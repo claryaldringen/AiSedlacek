@@ -57,6 +57,63 @@ export function pickTranslation(
   return { language: first.language, text: first.text, available };
 }
 
+export type PushLanguageResolution =
+  | { ok: true; language: string; warning?: string }
+  | { ok: false; error: string; hint?: string };
+
+/**
+ * Určí jazyk, pod kterým push uloží translation.md.
+ * - Metadata z pull mají přednost (`--lang` se pak jen ohlásí jako ignorovaný).
+ * - Workspace ze starší verze CLI jazyk nemají: použije se `--lang`, ale jen pokud na
+ *   serveru existuje (překlep by jinak tiše založil nový překlad), jinak jediný překlad
+ *   na serveru. Víc překladů bez `--lang` = chyba, nehádáme.
+ */
+export function resolvePushLanguage(
+  metaLanguage: string | undefined,
+  cliLanguage: string | undefined,
+  serverLanguages: string[] | undefined,
+): PushLanguageResolution {
+  if (metaLanguage) {
+    if (cliLanguage && cliLanguage !== metaLanguage) {
+      return {
+        ok: true,
+        language: metaLanguage,
+        warning: `--lang ${cliLanguage} ignoruji – translation.md je stažený v jazyce ${metaLanguage}`,
+      };
+    }
+    return { ok: true, language: metaLanguage };
+  }
+
+  const languages = [...new Set(serverLanguages ?? [])].sort();
+  const available = languages.length > 0 ? languages.join(', ') : 'žádné';
+
+  if (cliLanguage) {
+    if (!languages.includes(cliLanguage)) {
+      return {
+        ok: false,
+        error: `dokument nemá překlad v jazyce ${cliLanguage} (dostupné: ${available})`,
+        hint: 'Nový jazyk založíte přes `ais pull <pageId> --lang <kód>`',
+      };
+    }
+    return { ok: true, language: cliLanguage };
+  }
+
+  if (languages.length === 1) {
+    const language = languages[0] as string;
+    return {
+      ok: true,
+      language,
+      warning: `jazyk překladu převzat ze serveru (jediný existující): ${language}`,
+    };
+  }
+
+  return {
+    ok: false,
+    error: `nelze určit jazyk překladu (dostupné: ${available})`,
+    hint: 'Zadejte jazyk přes --lang <kód>, např. ais push <pageId> --lang cs',
+  };
+}
+
 export interface DocumentPatch {
   transcription?: string;
   translation?: string;

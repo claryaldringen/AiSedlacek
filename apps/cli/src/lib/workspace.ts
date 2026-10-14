@@ -88,12 +88,20 @@ export function updateMetaAfterPush(
   pushedFiles: WorkspaceFile[],
   serverUpdatedAt?: string,
   translationLanguage?: string,
+  sentContents?: Partial<Record<WorkspaceFile, string>>,
 ): void {
   const meta = readMeta(pageId);
   if (!meta) return;
 
   const dir = getPageDir(pageId);
   for (const file of pushedFiles) {
+    // Hash z obsahu, který byl skutečně odeslán – editace uložená během PATCH
+    // tak zůstane označená jako neodeslaná.
+    const sent = sentContents?.[file];
+    if (sent !== undefined) {
+      meta.hashes[file] = sha256(sent);
+      continue;
+    }
     const filePath = path.join(dir, file);
     if (!fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, 'utf-8');

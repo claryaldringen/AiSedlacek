@@ -45,18 +45,40 @@ export const pullCommand = new Command('pull')
 
       try {
         // Neodeslané lokální změny nepřepisuj – pull by je jinak tiše zahodil.
-        const localChanges = options.force ? [] : getChangedFiles(pageId);
-        if (localChanges.length > 0) {
-          spinner.stop();
-          output.error(
-            `  ${pageId}: lokálně změněné soubory (${localChanges
-              .map((c) => c.file)
-              .join(', ')}) – přeskakuji, aby se nepřepsaly`,
-          );
-          output.info(`    Nejdřív je odešlete (ais push), nebo použijte --force pro přepsání`);
-          spinner.start();
-          hadError = true;
-          continue;
+        // glossary.md je jen pro čtení (push ho neodesílá), jeho přepsání jen ohlásíme.
+        if (!options.force) {
+          let localChanges: string[];
+          try {
+            localChanges = getChangedFiles(pageId).map((c) => c.file);
+          } catch (e: unknown) {
+            spinner.stop();
+            output.error(
+              `  ${pageId}: nelze přečíst lokální metadata (${(e as Error).message}) – přeskakuji`,
+            );
+            output.info(`    Stránku znovu stáhnete přes --force (přepíše lokální soubory)`);
+            spinner.start();
+            hadError = true;
+            continue;
+          }
+
+          const blocking = localChanges.filter((f) => f !== 'glossary.md');
+          if (blocking.length > 0) {
+            spinner.stop();
+            output.error(
+              `  ${pageId}: lokálně změněné soubory (${blocking.join(', ')}) – přeskakuji, aby se nepřepsaly`,
+            );
+            output.info(`    Nejdřív je odešlete (ais push), nebo použijte --force pro přepsání`);
+            spinner.start();
+            hadError = true;
+            continue;
+          }
+          if (localChanges.includes('glossary.md')) {
+            spinner.stop();
+            output.warn(
+              `  ${pageId}: lokální úpravy glossary.md se přepíšou (glosář nelze pushovat)`,
+            );
+            spinner.start();
+          }
         }
 
         const page = await api.get(`/api/pages/${pageId}`);
@@ -121,7 +143,7 @@ function readPreviousLanguage(pageId: string): string | undefined {
   try {
     return readMeta(pageId)?.translationLanguage;
   } catch {
-    // Poškozená metadata – pull je stejně přepíše.
+    // Poškozená metadata – pull je přepíše (bez --force se k tomu ani nedostaneme).
     return undefined;
   }
 }

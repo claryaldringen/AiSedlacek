@@ -3,6 +3,7 @@ import {
   pickTranslation,
   buildDocumentPatch,
   findUnconfirmedFiles,
+  resolvePushLanguage,
   type ServerTranslation,
 } from '../lib/document-sync.js';
 import type { ChangedFile, WorkspaceFile } from '../lib/workspace.js';
@@ -116,5 +117,36 @@ describe('findUnconfirmedFiles', () => {
       'context.md',
       'translation.md',
     ]);
+  });
+});
+
+describe('resolvePushLanguage', () => {
+  it('uses the language from metadata', () => {
+    expect(resolvePushLanguage('cs', undefined, undefined)).toEqual({ ok: true, language: 'cs' });
+  });
+
+  it('warns and ignores --lang that differs from metadata', () => {
+    expect(resolvePushLanguage('cs', 'en', undefined)).toMatchObject({
+      ok: true,
+      language: 'cs',
+      warning: expect.stringContaining('--lang en'),
+    });
+  });
+
+  it('accepts --lang for a legacy workspace only when the translation exists', () => {
+    expect(resolvePushLanguage(undefined, 'en', ['cs', 'en'])).toEqual({
+      ok: true,
+      language: 'en',
+    });
+    expect(resolvePushLanguage(undefined, 'cz', ['cs', 'en'])).toMatchObject({ ok: false });
+  });
+
+  it('infers the only server translation and refuses to guess between several', () => {
+    expect(resolvePushLanguage(undefined, undefined, ['de'])).toMatchObject({
+      ok: true,
+      language: 'de',
+    });
+    expect(resolvePushLanguage(undefined, undefined, ['cs', 'en'])).toMatchObject({ ok: false });
+    expect(resolvePushLanguage(undefined, undefined, [])).toMatchObject({ ok: false });
   });
 });

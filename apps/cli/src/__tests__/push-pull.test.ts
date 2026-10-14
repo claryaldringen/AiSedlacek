@@ -122,6 +122,31 @@ describe('ais pull', () => {
     await run(pullCommand, [PAGE_ID, '--force']);
     expect(fs.readFileSync(path.join(pageDir(), 'translation.md'), 'utf-8')).toBe('Český překlad');
   });
+  it('overwrites a locally edited glossary.md (read-only) instead of blocking', async () => {
+    api.get.mockResolvedValue(serverPage({ glossary: [{ term: 'slovo', definition: 'význam' }] }));
+    await run(pullCommand, [PAGE_ID]);
+    fs.writeFileSync(path.join(pageDir(), 'glossary.md'), 'lokální poznámka');
+
+    await run(pullCommand, [PAGE_ID]);
+
+    expect(fs.readFileSync(path.join(pageDir(), 'glossary.md'), 'utf-8')).toBe('**slovo**: význam');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('skips a page with corrupt metadata unless --force is used', async () => {
+    api.get.mockResolvedValue(serverPage());
+    await run(pullCommand, [PAGE_ID]);
+    fs.writeFileSync(path.join(pageDir(), '.meta.json'), '{ broken');
+
+    await run(pullCommand, [PAGE_ID]);
+    expect(process.exitCode).toBe(1);
+    expect(errors.join('\n')).toContain('nelze přečíst lokální metadata');
+
+    process.exitCode = undefined;
+    await run(pullCommand, [PAGE_ID, '--force']);
+    expect(readMetaFile()).toMatchObject({ documentId: 'doc-1', translationLanguage: 'cs' });
+    expect(process.exitCode).toBeUndefined();
+  });
 });
 
 describe('ais push', () => {
@@ -215,5 +240,95 @@ describe('ais push', () => {
     });
     expect(readMetaFile().translationLanguage).toBe('en');
     expect(process.exitCode).toBeUndefined();
+  });
+
+  function dropLanguageFromMeta(): void {
+    const meta = readMetaFile();
+    delete meta.translationLanguage;
+    fs.writeFileSync(path.join(pageDir(), '.meta.json'), JSON.stringify(meta));
+  }
+
+  it('infers the language for a legacy workspace when the server has a single translation', async () => {
+    await pullAndEditTranslation('Opravený překlad');
+    dropLanguageFromMeta();
+    const single = serverPage({ translations: [{ language: 'de', text: 'Deutsch' }] });
+    api.get.mockResolvedValue(single);
+    api.patchJson.mockResolvedValue({
+      ...(single.document as object),
+      translations: [{ language: 'de', text: 'Opravený překlad' }],
+    });
+
+    await run(pushCommand, []);
+
+    expect(api.patchJson).toHaveBeenCalledWith('/api/documents/doc-1', {
+      translation: 'Opravený překlad',
+      translationLanguage: 'de',
+    });
+    expect(readMetaFile().translationLanguage).toBe('de');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('rejects --lang that does not exist on the server for a legacy workspace', async () => {
+    await pullAndEditTranslation('Opravený překlad');
+    dropLanguageFromMeta();
+    api.get.mockResolvedValue(serverPage());
+
+    await run(pushCommand, ['--lang', 'cz']);
+
+    expect(api.patchJson).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    expect(errors.join('\n')).toContain('nemá překlad v jazyce cz');
+  });
+
+  it('refuses to push when the document changed on the server since pull', async () => {
+    await pullAndEditTranslation('Opravený překlad');
+    api.get.mockResolvedValue(serverPage({ updatedAt: '2026-10-02T10:00:00.000Z' }));
+
+    await run(pushCommand, []);
+
+    expect(api.patchJson).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    expect(errors.join('\n')).toContain('konflikt');
+  });
+
+  it('with --force skips the conflict check and still sends the language', async () => {
+    await pullAndEditTranslation('Opravený překlad');
+    api.patchJson.mockResolvedValue({
+      ...(serverPage().document as object),
+      translations: [{ language: 'cs', text: 'Opravený překlad' }],
+    });
+
+    await run(pushCommand, ['--force']);
+
+    expect(api.get).not.toHaveBeenCalled();
+    expect(api.patchJson).toHaveBeenCalledWith('/api/documents/doc-1', {
+      translation: 'Opravený překlad',
+      translationLanguage: 'cs',
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('marks only the fields the server confirmed when the save is partial', async () => {
+    await pullAndEditTranslation('Opravený překlad');
+    fs.writeFileSync(path.join(pageDir(), 'transcription.md'), 'Opravený přepis');
+    api.get.mockResolvedValue(serverPage());
+    const NEW_UPDATED_AT = '2026-10-03T10:00:00.000Z';
+    // Přepis uložen, překlad ne.
+    api.patchJson.mockResolvedValue({
+      ...(serverPage().document as object),
+      transcription: 'Opravený přepis',
+      updatedAt: NEW_UPDATED_AT,
+    });
+    const hashesBefore = readMetaFile().hashes as Record<string, string>;
+
+    await run(pushCommand, []);
+
+    const meta = readMetaFile();
+    const hashes = meta.hashes as Record<string, string>;
+    expect(hashes['transcription.md']).not.toBe(hashesBefore['transcription.md']);
+    expect(hashes['translation.md']).toBe(hashesBefore['translation.md']);
+    expect(meta.serverUpdatedAt).toBe(NEW_UPDATED_AT);
+    expect(process.exitCode).toBe(1);
+    expect(errors.join('\n')).toContain('translation.md');
   });
 });

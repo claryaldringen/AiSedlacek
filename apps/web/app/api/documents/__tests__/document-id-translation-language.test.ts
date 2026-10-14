@@ -100,6 +100,21 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     expectNothingWritten();
   });
 
+  it.each([
+    ['translation', { translation: null, translationLanguage: 'cs' }],
+    ['translationLanguage', { translation: 'Nový překlad', translationLanguage: 42 }],
+    ['transcription', { transcription: 123 }],
+    ['context', { context: { text: 'x' } }],
+  ])('returns 400 when %s is not a string', async (field, body) => {
+    mockFindUnique.mockResolvedValue(FAKE_DOC);
+
+    const res = await PATCH(makePatchRequest(body), routeContext);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain(field);
+    expectNothingWritten();
+  });
+
   it('returns 400 for a non-object JSON body', async () => {
     const res = await PATCH(makePatchRequest(null), routeContext);
 

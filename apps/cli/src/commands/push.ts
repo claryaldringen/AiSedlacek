@@ -11,9 +11,16 @@ import {
 import {
   buildDocumentPatch,
   findUnconfirmedFiles,
+  resolvePushLanguage,
   type ServerDocument,
 } from '../lib/document-sync.js';
 import * as output from '../lib/output.js';
+
+// `ais pull` stránku s lokálními změnami bez --force nepřepíše, proto nápověda musí
+// vést k záloze lokálních souborů, ne k prostému pull.
+const CONFLICT_HINT =
+  'Použijte --force pro přepsání serveru, nebo si zálohujte lokální soubory, stáhněte ' +
+  'serverovou verzi přes `ais pull <pageId> --force` a úpravy aplikujte znovu';
 
 export const pushCommand = new Command('push')
   .description('Odeslat lokální změny na server')
@@ -73,7 +80,7 @@ export const pushCommand = new Command('push')
             output.error(
               `  ${pageId}: chybí referenční verze ze serveru (serverUpdatedAt) — nelze ověřit konflikt`,
             );
-            output.info(`    Použijte --force pro přepsání, nebo pull pro aktualizaci`);
+            output.info(`    ${CONFLICT_HINT}`);
             spinner.start();
             hadError = true;
             continue;
@@ -88,7 +95,7 @@ export const pushCommand = new Command('push')
             output.error(
               `  ${pageId}: konflikt — dokument byl změněn na serveru (nebo verzi nelze ověřit) od posledního pull`,
             );
-            output.info(`    Použijte --force pro přepsání, nebo pull pro aktualizaci`);
+            output.info(`    ${CONFLICT_HINT}`);
             spinner.start();
             hadError = true;
             continue;
@@ -96,40 +103,34 @@ export const pushCommand = new Command('push')
         }
 
         // Jazyk překladu: z metadat pull. Workspace ze starší verze CLI ho nemají –
-        // pak --lang, případně jediný existující překlad na serveru. Při nejednoznačnosti
-        // raději neodesíláme nic, než abychom přepsali překlad v jiném jazyce.
-        let translationLanguage = meta.translationLanguage;
-        const translationChanged = pushableChanges.some((c) => c.file === 'translation.md');
-        if (translationChanged && !translationLanguage) {
-          translationLanguage = options.lang;
-          if (!translationLanguage) {
+        // pak --lang (jen existující jazyk), případně jediný překlad na serveru.
+        // Při nejednoznačnosti raději neodesíláme nic, než abychom přepsali jiný jazyk.
+        let translationLanguage: string | undefined;
+        if (pushableChanges.some((c) => c.file === 'translation.md')) {
+          let serverLanguages: string[] | undefined;
+          if (!meta.translationLanguage) {
             if (!currentDoc) {
               const currentPage = await api.get(`/api/pages/${pageId}`);
               currentDoc = currentPage?.document ?? undefined;
             }
-            const languages = [...new Set((currentDoc?.translations ?? []).map((t) => t.language))];
-            if (languages.length === 1) {
-              translationLanguage = languages[0];
-              spinner.stop();
-              output.info(`  ${pageId}: jazyk překladu převzat ze serveru: ${translationLanguage}`);
-              spinner.start();
-            } else {
-              spinner.stop();
-              output.error(
-                `  ${pageId}: nelze určit jazyk překladu (${
-                  languages.length === 0
-                    ? 'dokument nemá žádný překlad'
-                    : `dostupné: ${languages.sort().join(', ')}`
-                }) – stránka NEBYLA odeslána`,
-              );
-              output.info(
-                `    Zadejte jazyk přes --lang <kód>, např. ais push ${pageId} --lang cs`,
-              );
-              spinner.start();
-              hadError = true;
-              continue;
-            }
+            serverLanguages = (currentDoc?.translations ?? []).map((t) => t.language);
           }
+          const resolved = resolvePushLanguage(
+            meta.translationLanguage,
+            options.lang,
+            serverLanguages,
+          );
+          spinner.stop();
+          if (!resolved.ok) {
+            output.error(`  ${pageId}: ${resolved.error} – stránka NEBYLA odeslána`);
+            if (resolved.hint) output.info(`    ${resolved.hint}`);
+            spinner.start();
+            hadError = true;
+            continue;
+          }
+          if (resolved.warning) output.warn(`  ${pageId}: ${resolved.warning}`);
+          spinner.start();
+          translationLanguage = resolved.language;
         }
 
         const patch = buildDocumentPatch(pushableChanges, files, translationLanguage);
@@ -157,6 +158,7 @@ export const pushCommand = new Command('push')
             confirmed,
             newServerUpdatedAt,
             confirmed.includes('translation.md') ? translationLanguage : undefined,
+            files,
           );
         }
 
