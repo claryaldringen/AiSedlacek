@@ -10,8 +10,6 @@
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "FIO_API_TOKEN",
-    "TOKEN_MULTIPLIER",
-    "TOKEN_PRICE_PER_MILLION",
     "UPLOAD_DIR",
   ],
   "tasks": {
@@ -21,6 +19,13 @@
     "format:check": {},
     "format": { "cache": false },
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"] }
+    "test": { "dependsOn": ["^build"] },
+    // packages/db potřebuje vlastní prisma generate (build) i pro typecheck/lint/test –
+    // ^build pokrývá jen závislosti. Klient se generuje do node_modules, kam cache
+    // turba nesahá, proto bez cache.
+    "@ai-sedlacek/db#build": { "dependsOn": ["^build"], "cache": false },
+    "@ai-sedlacek/db#typecheck": { "dependsOn": ["build"] },
+    "@ai-sedlacek/db#lint": { "dependsOn": ["build"] },
+    "@ai-sedlacek/db#test": { "dependsOn": ["build"] }
   }
 }

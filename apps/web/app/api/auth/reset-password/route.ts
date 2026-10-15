@@ -3,16 +3,15 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/infrastructure/db';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { bodyErrorResponse, readJsonBody } from '@/lib/infrastructure/read-body';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
-  }
+  // Nepřihlášená routa – tělo jen se stropem velikosti (viz read-body.ts).
+  const parsed = await readJsonBody(request);
+  if (!parsed.ok) return bodyErrorResponse(parsed.error, t);
+  const body = parsed.value;
 
   const { token, password } = (body as { token?: string; password?: string }) ?? {};
 

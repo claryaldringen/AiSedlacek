@@ -11,6 +11,13 @@ const mockDelete = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
 const mockPageGroupBy = vi.fn();
 const mockDocumentAggregate = vi.fn();
+const mockQueryRaw = vi.fn();
+const mockWorkspaceItemFindFirst = vi.fn();
+const mockWorkspaceFindUnique = vi.fn();
+const mockWorkspaceMemberFindUnique = vi.fn();
+const mockWorkspaceItemCreateMany = vi.fn();
+const mockWorkspaceItemCreate = vi.fn();
+const mockEnsureWorkspaces = vi.fn();
 
 // tx object passed into $transaction callback
 const txMock = {
@@ -43,11 +50,29 @@ vi.mock('@/lib/infrastructure/db', () => ({
     document: {
       aggregate: (...args: unknown[]) => mockDocumentAggregate(...args),
     },
+    $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
+    workspace: {
+      findUnique: (...args: unknown[]) => mockWorkspaceFindUnique(...args),
+    },
+    workspaceMember: {
+      findUnique: (...args: unknown[]) => mockWorkspaceMemberFindUnique(...args),
+    },
+    workspaceItem: {
+      createMany: (...args: unknown[]) => mockWorkspaceItemCreateMany(...args),
+      create: (...args: unknown[]) => mockWorkspaceItemCreate(...args),
+      findFirst: (...args: unknown[]) => mockWorkspaceItemFindFirst(...args),
+    },
     publicSlug: {
       deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
     },
     $transaction: (...args: unknown[]) => mockTransaction(...args),
   },
+}));
+
+// Nový svazek se po vytvoření zařadí do home workspace uživatele.
+vi.mock('@/lib/infrastructure/workspace', () => ({
+  ensureWorkspaces: (...args: unknown[]) => mockEnsureWorkspaces(...args),
+  PUBLIC_WORKSPACE_ID: 'public-workspace',
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -69,11 +94,14 @@ vi.mock('@auth/prisma-adapter', () => ({
 
 // -- Helpers --------------------------------------------------------------
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeRequest(url: string, method: string, body?: unknown): NextRequest {
-  const init: RequestInit = { method };
+  const init: RequestInit = { method, headers: CS_LOCALE };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'Content-Type': 'application/json', ...CS_LOCALE };
   }
   return new NextRequest(new Request(url, init));
 }
@@ -83,7 +111,7 @@ function makeRawRequest(url: string, method: string, rawBody: string): NextReque
     new Request(url, {
       method,
       body: rawBody,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
     }),
   );
 }
@@ -110,26 +138,58 @@ import {
 
 // -- Tests ----------------------------------------------------------------
 
+// Seznam svazků se od zavedení workspaců načítá pro konkrétní workspace –
+// parametr ?workspaceId= je povinný a u ne-veřejného workspace se ověřuje členství.
 describe('GET /api/collections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkspaceFindUnique.mockResolvedValue({ type: 'home' });
+    mockWorkspaceMemberFindUnique.mockResolvedValue({
+      workspaceId: 'ws-1',
+      userId: 'test-user-id',
+      role: 'owner',
+    });
+    mockWorkspaceItemCreateMany.mockResolvedValue({ count: 0 });
   });
 
   it('returns a list of collections', async () => {
     const collections = [
       { ...FAKE_COLLECTION, _count: { pages: 3 } },
-      { ...FAKE_COLLECTION, id: 'col-2', name: 'Druhy svazek', _count: { pages: 0 } },
+      {
+        ...FAKE_COLLECTION,
+        id: 'col-2',
+        name: 'Druhy svazek',
+        userId: 'other-user',
+        _count: { pages: 0 },
+      },
     ];
-    mockFindMany.mockResolvedValue(collections);
+    // 1. volání: synchronizace vlastních svazků do home workspace, 2. volání: výpis
+    mockFindMany
+      .mockResolvedValueOnce([{ id: 'col-1' }, { id: 'col-2' }])
+      .mockResolvedValueOnce(collections);
+    // Statistiky se počítají hromadně pro všechny svazky (dřív 2 dotazy na svazek).
     mockPageGroupBy.mockResolvedValue([
-      { status: 'done', _count: 2 },
-      { status: 'pending', _count: 1 },
+      { collectionId: 'col-1', status: 'done', _count: 2 },
+      { collectionId: 'col-1', status: 'pending', _count: 1 },
     ]);
-    mockDocumentAggregate.mockResolvedValue({
-      _sum: { inputTokens: 1000, outputTokens: 500 },
-    });
+    mockQueryRaw.mockResolvedValue([
+      {
+        collectionId: 'col-1',
+        model: 'claude-opus-4-6',
+        inputTokens: BigInt(600),
+        outputTokens: BigInt(300),
+      },
+      {
+        collectionId: 'col-1',
+        model: 'claude-opus-5-5',
+        inputTokens: BigInt(400),
+        outputTokens: BigInt(200),
+      },
+    ]);
 
-    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
+    );
 
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -140,30 +200,83 @@ describe('GET /api/collections', () => {
     expect(json[0].processableCount).toBe(1);
     expect(json[0].stats.inputTokens).toBe(1000);
     expect(json[0].stats.outputTokens).toBe(500);
-    expect(json[0].stats.costUsd).toBeGreaterThan(0);
+    // Cena pro uživatele po modelech (náklad API × kurz 23 × marže 2), ne surové USD:
+    // Opus 4.6: 600 × $5 + 300 × $25 = $0.0105 → 0,483 Kč = 9 660 kreditů
+    // Opus 5.5: 400 × $4 + 200 × $20 = $0.0056 → 0,2576 Kč = 5 152 kreditů
+    expect(json[0].stats.chargeCzk).toBe(0.7406);
+    expect(json[0].stats.chargeCredits).toBe(14812);
+    expect(json[0].stats).not.toHaveProperty('costUsd');
     expect(json[1].name).toBe('Druhy svazek');
+    // Cizí svazek ve workspace je jen pro čtení
+    expect(json[0].canEdit).toBe(true);
+    expect(json[1].canEdit).toBe(false);
+    expect(json[1].stats.done).toBe(0);
+    expect(json[1].stats.inputTokens).toBe(0);
+    expect(json[1].stats.chargeCzk).toBe(0);
+    expect(json[1].stats.chargeCredits).toBe(0);
+    expect(mockPageGroupBy).toHaveBeenCalledTimes(1);
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    // Synchronizace do home workspace zapisuje jen svazky, které tam ještě nejsou.
+    expect(mockFindMany.mock.calls[0]![0]).toEqual({
+      where: { userId: 'test-user-id', workspaceItems: { none: { workspaceId: 'ws-1' } } },
+      select: { id: true },
+    });
 
-    expect(mockFindMany).toHaveBeenCalledWith({
-      where: { userId: 'test-user-id' },
+    expect(mockWorkspaceMemberFindUnique).toHaveBeenCalledWith({
+      where: { workspaceId_userId: { workspaceId: 'ws-1', userId: 'test-user-id' } },
+    });
+    expect(mockWorkspaceItemCreateMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: 'ws-1', collectionId: 'col-1' },
+        { workspaceId: 'ws-1', collectionId: 'col-2' },
+      ],
+      skipDuplicates: true,
+    });
+    expect(mockFindMany).toHaveBeenLastCalledWith({
+      where: { workspaceItems: { some: { workspaceId: 'ws-1' } } },
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { pages: true } } },
+      include: { _count: { select: { pages: { where: { status: { not: 'archived' } } } } } },
     });
   });
 
   it('returns an empty array when no collections exist', async () => {
     mockFindMany.mockResolvedValue([]);
 
-    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
+    );
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual([]);
+    expect(mockWorkspaceItemCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when workspaceId is missing', async () => {
+    const res = await listCollections(new NextRequest('http://localhost/api/collections'));
+
+    expect(res.status).toBe(400);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when user is not a member of a non-public workspace', async () => {
+    mockWorkspaceFindUnique.mockResolvedValue({ type: 'shared' });
+    mockWorkspaceMemberFindUnique.mockResolvedValue(null);
+
+    const res = await listCollections(
+      new NextRequest('http://localhost/api/collections?workspaceId=ws-cizi'),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockFindMany).not.toHaveBeenCalled();
   });
 });
 
 describe('POST /api/collections', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnsureWorkspaces.mockResolvedValue({ homeId: 'ws-home', publicId: 'public-workspace' });
+    mockWorkspaceItemCreate.mockResolvedValue({ id: 'wi-1' });
   });
 
   it('creates a collection with name and description', async () => {
@@ -185,6 +298,9 @@ describe('POST /api/collections', () => {
         name: 'Testovaci svazek',
         description: 'Popis svazku',
       },
+    });
+    expect(mockWorkspaceItemCreate).toHaveBeenCalledWith({
+      data: { workspaceId: 'ws-home', collectionId: 'col-1' },
     });
   });
 
@@ -277,7 +393,7 @@ describe('GET /api/collections/[id]', () => {
     };
     mockFindUnique.mockResolvedValue(collectionWithPages);
 
-    const req = new NextRequest('http://localhost/api/collections/col-1');
+    const req = new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE });
     const res = await getCollection(req, routeContext);
 
     expect(res.status).toBe(200);
@@ -290,6 +406,7 @@ describe('GET /api/collections/[id]', () => {
       where: { id: 'col-1' },
       include: {
         pages: {
+          where: { status: { not: 'archived' } },
           orderBy: { order: 'asc' },
           include: {
             document: {
@@ -305,10 +422,47 @@ describe('GET /api/collections/[id]', () => {
     });
   });
 
+  it('lets a member of a shared workspace read a foreign collection (read-only)', async () => {
+    mockFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      userId: 'other-user',
+      isPublic: false,
+      pages: [],
+    });
+    mockWorkspaceItemFindFirst.mockResolvedValue({ id: 'item-1' });
+
+    const res = await getCollection(
+      new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).canEdit).toBe(false);
+  });
+
+  it("returns 404 for a foreign collection outside the user's workspaces", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      userId: 'other-user',
+      isPublic: false,
+      pages: [],
+    });
+    mockWorkspaceItemFindFirst.mockResolvedValue(null);
+
+    const res = await getCollection(
+      new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(404);
+  });
+
   it('returns 404 when collection does not exist', async () => {
     mockFindUnique.mockResolvedValue(null);
 
-    const req = new NextRequest('http://localhost/api/collections/nonexistent');
+    const req = new NextRequest('http://localhost/api/collections/nonexistent', {
+      headers: CS_LOCALE,
+    });
     const res = await getCollection(req, routeContext);
 
     expect(res.status).toBe(404);
@@ -425,6 +579,7 @@ describe('DELETE /api/collections/[id]', () => {
   it('deletes collection and returns ok', async () => {
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',
+      headers: CS_LOCALE,
     });
     const res = await deleteCollection(req, routeContext);
 
@@ -442,6 +597,7 @@ describe('DELETE /api/collections/[id]', () => {
 
     const req = new NextRequest('http://localhost/api/collections/col-1', {
       method: 'DELETE',
+      headers: CS_LOCALE,
     });
     const res = await deleteCollection(req, routeContext);
 

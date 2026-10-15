@@ -5,6 +5,9 @@ import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { canReadPage } from '@/lib/infrastructure/authz';
+
+const CLIENT_SETTABLE_STATUSES = new Set(['pending', 'blank', 'archived']);
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -21,6 +24,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     where: { id },
     include: {
       document: {
+        // rawResponse u dávkového OCR obsahuje výstup celé dávky (i dalších
+        // stránek) a UI ho nepotřebuje – reparse ho čte přímo z DB.
+        omit: { rawResponse: true },
         include: {
           translations: true,
           glossary: true,
@@ -29,11 +35,12 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     },
   });
 
-  if (!page || page.userId !== userId) {
+  // Číst smí i členové sdíleného workspace (canReadPage); upravovat jen vlastník.
+  if (!page || !(await canReadPage(userId, page))) {
     return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json(page);
+  return NextResponse.json({ ...page, canEdit: page.userId === userId });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
@@ -92,7 +99,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     data.order = order;
   }
 
-  if (typeof status === 'string') {
+  // Klient smí nastavit jen tyto stavy – done/processing/error zapisuje server
+  // a worker. Dřív šlo nastavit cokoli (např. done bez dokumentu).
+  if (status !== undefined) {
+    if (typeof status !== 'string' || !CLIENT_SETTABLE_STATUSES.has(status)) {
+      return NextResponse.json({ error: t('invalidStatus') }, { status: 400 });
+    }
     data.status = status;
   }
 
@@ -142,6 +154,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     }
   }
 
+  // Archivace („smazání" zpracované stránky) ruší i veřejné sdílení – jinak by
+  // stránka zůstala dostupná na /view/<slug> proti vůli uživatele.
+  if (data.status === 'archived') {
+    data.isPublic = false;
+    data.slug = null;
+    resolvedSlug = null;
+    sharingFieldsPresent = true;
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: t('nothingToUpdate') }, { status: 400 });
   }
@@ -163,8 +184,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
         // Remove old PublicSlug for this entity
         await tx.publicSlug.deleteMany({ where: { targetId: id } });
 
-        // Create new PublicSlug if now public
-        if (data.isPublic && resolvedSlug) {
+        // Create new PublicSlug if (still) public – u PATCH se samotným slugem
+        // isPublic v requestu chybí a rozhoduje stávající stav stránky.
+        if ((data.isPublic ?? page.isPublic) && resolvedSlug) {
           await tx.publicSlug.create({
             data: {
               slug: resolvedSlug,
@@ -200,6 +222,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 }
 
+// Stavy, ve kterých stránka má (nebo právě dostává) placený výsledek OCR.
+const ARCHIVE_ON_DELETE_STATUSES = ['processing', 'done'];
+
+/** Uložené soubory (obrázek, náhled) – jen lokální, externí URL nemažeme. */
+function storedFileUrls(page: { imageUrl: string; thumbnailUrl: string | null }): string[] {
+  return [page.imageUrl, page.thumbnailUrl].filter(
+    (url): url is string =>
+      typeof url === 'string' && (url.startsWith('/uploads/') || url.startsWith('/api/images/')),
+  );
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: RouteContext,
@@ -212,34 +245,65 @@ export async function DELETE(
 
   const { id } = await params;
 
+  const page = await prisma.page.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      imageUrl: true,
+      thumbnailUrl: true,
+      document: { select: { id: true } },
+    },
+  });
+  if (!page || page.userId !== userId) {
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
+  }
+
+  // O archivaci vs. smazání rozhoduje server, ne (možná zastaralý) stav v klientovi.
+  // Stránka s dokumentem nebo rozpracovaná/hotová se jen archivuje – stejně jako
+  // PATCH status=archived, vč. zrušení veřejného sdílení. Tvrdě se maže jen stránka
+  // bez výsledku, aby se zaplacené zpracování a historie verzí nikdy neztratily.
+  const mustArchive = page.document !== null || ARCHIVE_ON_DELETE_STATUSES.includes(page.status);
+
+  let archived: boolean;
   try {
-    const page = await prisma.page.findUnique({ where: { id } });
-    if (!page || page.userId !== userId) {
-      return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
-    }
-
-    // Delete file from storage. Skip when another page still references the same
-    // file (cross-user dedup reuses one stored file for an identical hash).
-    const storage = getStorage();
-    const sharesFile = await prisma.page.count({
-      where: { imageUrl: page.imageUrl, id: { not: page.id } },
-    });
-    if (sharesFile === 0) {
-      const filename = storageKeyFromImageUrl(page.imageUrl);
-      try {
-        await storage.delete(filename);
-      } catch {
-        // File may already be missing – continue
-      }
-    }
-
-    await prisma.$transaction(async (tx) => {
+    archived = await prisma.$transaction(async (tx) => {
       await tx.publicSlug.deleteMany({ where: { targetId: id } });
-      await tx.page.delete({ where: { id } });
+      if (!mustArchive) {
+        // Podmíněně – worker mohl mezitím začít stránku zpracovávat nebo vytvořit
+        // dokument; v tom případě stránku místo smazání archivujeme.
+        const { count } = await tx.page.deleteMany({
+          where: { id, document: { is: null }, status: { notIn: ARCHIVE_ON_DELETE_STATUSES } },
+        });
+        if (count > 0) return false;
+      }
+      await tx.page.update({
+        where: { id },
+        data: { status: 'archived', isPublic: false, slug: null },
+      });
+      return true;
     });
-
-    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
+
+  // Soubory až po úspěšném commitu – dřív se mazaly před transakcí a při její
+  // chybě zůstala stránka bez obrázku. Soubor sdílený jinou stránkou (deduplikace
+  // podle hashe napříč uživateli) zůstává.
+  if (!archived) {
+    const storage = getStorage();
+    for (const url of storedFileUrls(page)) {
+      try {
+        const sharedBy = await prisma.page.count({
+          where: { OR: [{ imageUrl: url }, { thumbnailUrl: url }] },
+        });
+        if (sharedBy === 0) await storage.delete(storageKeyFromImageUrl(url));
+      } catch {
+        // Soubor už může chybět – stránka je smazaná, osiřelý soubor nevadí.
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, archived });
 }

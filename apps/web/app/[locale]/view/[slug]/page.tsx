@@ -56,6 +56,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
       where: { id: ps.targetId },
       include: {
         pages: {
+          where: { status: { not: 'archived' } },
           orderBy: { order: 'asc' },
           select: {
             id: true,
@@ -224,7 +225,7 @@ export default async function PublicSlugPage({ params }: Props): Promise<React.J
       },
     });
 
-    if (!page || !page.isPublic) notFound();
+    if (!page || !page.isPublic || page.status === 'archived') notFound();
 
     const displayName =
       page.displayName ?? page.filename.replace(/^[a-f0-9-]+-/, '') ?? t('pageTitle', { n: 1 });

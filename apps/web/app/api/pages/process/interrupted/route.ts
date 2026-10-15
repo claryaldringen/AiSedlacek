@@ -25,10 +25,16 @@ export async function POST(): Promise<NextResponse> {
   if (auth.error) return auth.error;
   const { userId } = auth;
 
-  const result = await prisma.page.updateMany({
+  // Stejně jako worker (resetUnfinishedPages): stránka s dokumentem do `done`,
+  // bez dokumentu do `pending`. Archivované stránky filtr na `processing` nezasáhne.
+  const withDocument = await prisma.page.updateMany({
+    where: { userId, status: 'processing', document: { isNot: null } },
+    data: { status: 'done', errorMessage: null },
+  });
+  const withoutDocument = await prisma.page.updateMany({
     where: { userId, status: 'processing' },
-    data: { status: 'pending' },
+    data: { status: 'pending', errorMessage: null },
   });
 
-  return NextResponse.json({ reset: result.count });
+  return NextResponse.json({ reset: withDocument.count + withoutDocument.count });
 }

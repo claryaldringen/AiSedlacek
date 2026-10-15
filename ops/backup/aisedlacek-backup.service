@@ -1,0 +1,8 @@
+[Unit]
+Description=AiSedlacek – denní záloha DB a uploadů
+After=postgresql.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/aisedlacek-backup
+ExecStart=/usr/local/bin/aisedlacek-backup

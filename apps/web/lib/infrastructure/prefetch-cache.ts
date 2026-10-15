@@ -18,8 +18,14 @@ const cache = new Map<string, CacheEntry>();
 const pending = new Map<string, Promise<CacheEntry | null>>();
 
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_ENTRY_BYTES = 25 * 1024 * 1024; // 25 MB per entry
+// Per entry: import-url rejects anything above MAX_FILE_SIZE_MB anyway.
+const MAX_ENTRY_BYTES = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024; // cap whole cache to bound memory
+// Downloads in progress are not counted in MAX_TOTAL_BYTES, so bound them by
+// count (≤ MAX_IN_FLIGHT × MAX_ENTRY_BYTES buffered at once). Prefetch is only
+// an optimisation – URLs over the limit are skipped and import-url downloads
+// them on demand.
+const MAX_IN_FLIGHT = 4;
 
 function totalBytes(): number {
   let sum = 0;
@@ -53,12 +59,14 @@ export function getCached(url: string): CacheEntry | null {
 }
 
 /**
- * Prefetch a URL in the background. If already cached or in-flight, skips.
+ * Prefetch a URL in the background. Skips it if already cached or in flight,
+ * or if MAX_IN_FLIGHT downloads are already running.
  */
 export function prefetch(url: string): void {
   evictExpired();
   const key = urlKey(url);
   if (cache.has(key) || pending.has(key)) return;
+  if (pending.size >= MAX_IN_FLIGHT) return;
 
   const promise = (async (): Promise<CacheEntry | null> => {
     try {

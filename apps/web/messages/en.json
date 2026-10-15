@@ -59,6 +59,7 @@
     "emailNotVerified": "Email is not verified.",
     "resendVerificationEmail": "Resend verification email",
     "wrongCredentials": "Incorrect email or password",
+    "tooManyLoginAttempts": "Too many sign-in attempts, please try again in a moment.",
     "loginButton": "Sign in",
     "registerButton": "Create account",
     "noAccount": "Don't have an account?",
@@ -122,7 +123,8 @@
     "fixContextFromCollection": "Fix document context using work context",
     "callingModel": "Calling model…",
     "generationFailed": "Context generation failed",
-    "renameCollectionPrompt": "New volume name:"
+    "renameCollectionPrompt": "New volume name:",
+    "readOnlyCollection": "Read-only – this volume belongs to another user"
   },
   "document": {
     "document": "Document",
@@ -143,6 +145,7 @@
     "translationUpdating": "(updating…)",
     "glossary": "Glossary",
     "noTerms": "No terms",
+    "savingFailed": "Saving failed",
     "context": "Context",
     "metadata": "Metadata",
     "processingSection": "Processing",
@@ -155,6 +158,7 @@
     "translationSection": "Translation",
     "grandTotal": "Total",
     "totalGrandPrice": "Grand total",
+    "chargeValue": "{czk} CZK ({credits} tokens)",
     "imageSection": "Image",
     "format": "Format",
     "dimensions": "Dimensions",
@@ -163,11 +167,15 @@
     "sha256": "SHA-256",
     "versionHistory": "Version history",
     "translationUpdatingFromTranscription": "Translation is updating based on the edited transcription…",
+    "editLockedWhileRetranslating": "Editing will be available once the translation update finishes.",
+    "retranslationFailed": "Retranslation failed – the translation was left unchanged.",
+    "retranslationInsufficientCredit": "Insufficient credit – the translation was not updated (the transcription is saved).",
     "chat": "Chat",
     "clickToRename": "Click to rename",
     "original": "Original",
     "cancelSaving": "Cancel",
-    "savingInProgress": "Saving…"
+    "savingInProgress": "Saving…",
+    "readOnly": "Read-only"
   },
   "collection": {
     "newCollection": "New volume",
@@ -278,6 +286,13 @@
     "invalidJson": "Invalid JSON",
     "serverError": "Internal server error",
     "invalidBody": "Invalid request body",
+    "requestTooLarge": "Request is too large",
+    "tooManyFiles": "Only one file can be uploaded per request",
+    "tooManyUrls": "At most {max} URLs can be uploaded at once. If you use the CLI, update to version 0.2.0 or later (npm i -g ai-sedlacek-cli) – it sends URLs in batches.",
+    "contextIncomplete": "The model did not return a complete context – the existing context was left unchanged. Try a shorter text.",
+    "unsupportedLanguage": "Unsupported translation language",
+    "invalidMessages": "Invalid message format",
+    "invalidStatus": "Invalid page status",
     "nothingToUpdate": "Nothing to update",
     "pageNotFound": "Page not found",
     "documentNotFound": "Document not found",
@@ -314,6 +329,8 @@
     "urlMustBeHttp": "URL must start with http:// or https://",
     "unsupportedFormatWithType": "Unsupported format: {type}. Allowed: JPEG, PNG, TIFF, WebP",
     "imageTooLarge": "Image too large ({size} MB, max {max} MB)",
+    "invalidImage": "The file could not be read as an image (it is damaged or incomplete)",
+    "imageTooManyPixels": "Image resolution is too high (max {max} megapixels)",
     "missingPageIds": "Missing pageIds",
     "pageIdsNotArray": "pageIds must be a non-empty array",
     "somePagesUnauthorized": "Some pages do not belong to the logged-in user",
@@ -339,6 +356,10 @@
     "missingJobId": "Missing jobId",
     "missingUrls": "Missing urls",
     "noProcessedDocuments": "No processed documents",
+    "pageAlreadyProcessed": "The page has already been processed",
+    "pageArchived": "The page has been deleted",
+    "transcriptionTranslationRequired": "transcription and translation are required",
+    "translationLanguageRequired": "translationLanguage is missing – the document has several translations (or none). Update the CLI to version 0.2.0 or newer: npm i -g ai-sedlacek-cli",
     "forgotPasswordSuccess": "If an account exists with this email, you will receive a password reset link.",
     "sendVerificationSuccess": "If an unverified account exists, we have sent a verification email."
   },
@@ -623,6 +644,7 @@
     "daysAgo": "{n} days ago",
     "loading": "Loading history…",
     "noHistory": "No version history.",
+    "historyUnavailable": "Version history is not available.",
     "restore": "Restore this version"
   }
 }

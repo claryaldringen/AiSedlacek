@@ -1,15 +1,19 @@
 import { NextRequest } from 'next/server';
 
 import Anthropic from '@anthropic-ai/sdk';
-import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
-import { detectMediaType } from '@ai-sedlacek/ocr';
+import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+/** Odhad výstupních tokenů z textu přerušené odpovědi (stejně jako worker). */
+const CHARS_PER_TOKEN = 4;
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -97,10 +101,20 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (messages.length > MAX_MESSAGES) {
     return Response.json({ error: t('tooManyMessages') }, { status: 400 });
   }
-  const totalChars = messages.reduce(
-    (n, m) => n + (typeof m?.content === 'string' ? m.content.length : 0),
-    0,
+  // Jen textové zprávy s povolenou rolí – pole content bloků dřív obešlo limit
+  // znaků (počítal jen stringy) a role šla do API nevalidovaná.
+  const valid = messages.every(
+    (m: unknown) =>
+      typeof m === 'object' &&
+      m !== null &&
+      ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant') &&
+      typeof (m as ChatMessage).content === 'string' &&
+      (m as ChatMessage).content.trim() !== '',
   );
+  if (!valid || messages[0]!.role !== 'user') {
+    return Response.json({ error: t('invalidMessages') }, { status: 400 });
+  }
+  const totalChars = messages.reduce((n, m) => n + m.content.length, 0);
   if (totalChars > MAX_TOTAL_CHARS) {
     return Response.json({ error: t('messageTooLong') }, { status: 400 });
   }
@@ -123,28 +137,17 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const storage = getStorage();
   const storagePath = storageKeyFromImageUrl(doc.page.imageUrl);
   let imageBase64: string | null = null;
-  let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg';
+  let mediaType: ImageMediaType = 'image/jpeg';
   try {
-    let imageBuffer = await storage.read(storagePath);
-    const MAX_BYTES = 5 * 1024 * 1024;
-    if (imageBuffer.length > MAX_BYTES) {
-      imageBuffer = Buffer.from(
-        await sharp(imageBuffer)
-          .resize({ width: 3000, withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer(),
-      );
-      if (imageBuffer.length > MAX_BYTES) {
-        imageBuffer = Buffer.from(
-          await sharp(imageBuffer)
-            .resize({ width: 2000, withoutEnlargement: true })
-            .jpeg({ quality: 75 })
-            .toBuffer(),
-        );
-      }
-    }
-    imageBase64 = imageBuffer.toString('base64');
-    mediaType = detectMediaType(imageBuffer);
+    // Stejná příprava jako u OCR: limit velikosti pro API, převod TIFF a dalších
+    // nepodporovaných formátů, EXIF orientace a limit pixelů (SEC-13). Dřív se
+    // TIFF poslal jako image/jpeg a API odmítlo celý chat.
+    // Dekódování skenu sdílí semafor s uploady – jinak by souběžné chaty a uploady
+    // mohly přesáhnout paměťový limit procesu.
+    const original = await storage.read(storagePath);
+    const prepared = await withSharpLimit(() => prepareImage(original));
+    imageBase64 = prepared.buffer.toString('base64');
+    mediaType = prepared.mediaType;
   } catch {
     // Image not available — continue without it
   }
@@ -169,7 +172,6 @@ ${doc.context || '(žádný)'}
 ${glossaryText}`;
 
   // Build messages for Claude
-  type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
   type ContentBlock =
     | { type: 'text'; text: string }
     | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } };
@@ -197,22 +199,67 @@ ${glossaryText}`;
   const client = new Anthropic();
   const encoder = new TextEncoder();
 
-  const stream = new ReadableStream({
+  // Klient může spojení kdykoli zavřít – pak enqueue/close vyhodí výjimku. Příznak
+  // `closed` chrání zápisy do streamu a cancel() zastaví generování, aby model
+  // nepsal (a my neplatili) text, který už nikdo nečte.
+  let closed = false;
+  let anthropicStream: { abort(): void; currentMessage: Anthropic.Message | undefined } | null =
+    null;
+
+  const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      const send = (payload: Record<string, unknown>): void => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch {
+          // Stream už je zavřený (klient odešel) – další zápisy přeskočíme.
+          closed = true;
+          anthropicStream?.abort();
+        }
+      };
+
+      // Spotřeba se účtuje nejvýš jednou – ani selhání účtování v hlavní cestě
+      // nesmí vést k druhému (částečnému) stržení v chybové cestě.
+      let charged = false;
+      const charge = async (
+        inputTokens: number,
+        outputTokens: number,
+        model: string,
+        description: string,
+      ): Promise<void> => {
+        if (charged) return;
+        charged = true;
+        const deductResult = await deductTokensIfSufficient(
+          userId,
+          inputTokens,
+          outputTokens,
+          description,
+          `chat-${id}-${Date.now()}`,
+          model,
+        );
+        if (!deductResult.success) {
+          console.warn(`[Chat] Insufficient balance for user ${userId}, response already streamed`);
+        }
+      };
+
+      let streamedChars = 0;
       try {
-        const anthropicStream = client.messages.stream({
-          model: 'claude-sonnet-4-6',
+        const messageStream = client.messages.stream({
+          model: TEXT_MODEL,
           max_tokens: 8192,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: claudeMessages,
         });
+        anthropicStream = messageStream;
 
-        anthropicStream.on('text', (text) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text })}\n\n`));
+        messageStream.on('text', (text) => {
+          streamedChars += text.length;
+          send({ type: 'text', text });
         });
 
-        const finalMsg = await anthropicStream.finalMessage();
+        const finalMsg = await messageStream.finalMessage();
         const usage = {
           inputTokens: finalMsg.usage.input_tokens,
           outputTokens: finalMsg.usage.output_tokens,
@@ -220,27 +267,60 @@ ${glossaryText}`;
         };
 
         // Atomically check balance and deduct tokens
-        const deductResult = await deductTokensIfSufficient(
-          userId,
+        await charge(
           finalMsg.usage.input_tokens,
           finalMsg.usage.output_tokens,
+          finalMsg.model,
           `Chat s dokumentem ${id}`,
-          `chat-${id}-${Date.now()}`,
         );
 
-        if (!deductResult.success) {
-          console.warn(`[Chat] Insufficient balance for user ${userId}, response already streamed`);
+        send({ type: 'done', usage });
+      } catch (err) {
+        // Přerušená odpověď (klient zavřel spojení, chyba API uprostřed streamu) už
+        // stála peníze – naúčtujeme spotřebu, která vznikla. Vstup a model známe
+        // z message_start (snapshot `currentMessage`), výstup z posledního
+        // message_delta; dokud nepřišel, odhadneme ho z odeslaného textu (4 znaky
+        // na token – spíš podhodnocuje, uživatel nezaplatí víc, než spotřeboval).
+        // Bez snapshotu (chyba před message_start) žádná spotřeba nevznikla.
+        const partial = anthropicStream?.currentMessage;
+        if (partial && !charged) {
+          const outputTokens = Math.max(
+            partial.usage.output_tokens,
+            Math.ceil(streamedChars / CHARS_PER_TOKEN),
+          );
+          console.warn(
+            `[Chat] Odpověď přerušena (${closed ? 'klient zavřel spojení' : 'chyba'}) – ` +
+              `účtuji částečnou spotřebu: model=${partial.model} ` +
+              `in=${partial.usage.input_tokens} out=${outputTokens}`,
+          );
+          try {
+            await charge(
+              partial.usage.input_tokens,
+              outputTokens,
+              partial.model,
+              `Chat s dokumentem ${id} (přerušeno)`,
+            );
+          } catch (billingErr) {
+            console.error('[Chat] Částečnou spotřebu se nepodařilo naúčtovat:', billingErr);
+          }
         }
 
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', usage })}\n\n`));
-      } catch (err) {
         const message = err instanceof Error ? err.message : t('serverError');
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: 'error', error: message })}\n\n`),
-        );
+        send({ type: 'error', error: message });
       } finally {
-        controller.close();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // Stream už mezitím zavřel klient.
+          }
+        }
       }
+    },
+    cancel() {
+      closed = true;
+      anthropicStream?.abort();
     },
   });
 

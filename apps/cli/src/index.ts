@@ -11,11 +11,12 @@ import { diffCommand } from './commands/diff.js';
 import { collectionsCommand } from './commands/collections.js';
 import { promptCommand } from './commands/prompt.js';
 import { submitCommand } from './commands/submit.js';
+import { CLI_VERSION } from './version.js';
 
 export const program = new Command()
   .name('ais')
   .description('CLI klient pro čtečku starých textů')
-  .version('0.0.0')
+  .version(CLI_VERSION)
   .addHelpText(
     'after',
     `

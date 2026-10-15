@@ -5,6 +5,7 @@ import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 const MAX_FETCH_BYTES = 5 * 1024 * 1024; // 5 MB of HTML is plenty for context
 
@@ -144,8 +145,10 @@ ${newContent}`;
     }
 
     response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      model: TEXT_MODEL,
+      // Sloučení dlouhého kontextu s textem z URL se do 4096 tokenů nevešlo
+      // a useknutý výsledek přepsal původní kontext.
+      max_tokens: 16_000,
       messages: [{ role: 'user', content: prompt }],
     });
   } catch (err) {
@@ -159,9 +162,23 @@ ${newContent}`;
     response.usage.input_tokens,
     response.usage.output_tokens,
     'fetch-context',
+    undefined,
+    response.model,
   );
 
-  const context = response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const context = response.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('')
+    .trim();
+
+  // Kontext svazku nemá historii – přepsat ho smí jen kompletní, neprázdný výstup.
+  // Useknutý (max_tokens) nebo prázdný výsledek by stávající kontext nenávratně zničil.
+  if (response.stop_reason !== 'end_turn' || context === '') {
+    console.warn(
+      `[fetch-context] Neúplný výstup modelu (stop_reason=${response.stop_reason}, ${context.length} znaků) – kontext svazku ${id} se nemění`,
+    );
+    return NextResponse.json({ error: t('contextIncomplete') }, { status: 422 });
+  }
 
   // Update URLs list only when a URL was provided
   const updatedUrls = hasUrl
@@ -201,7 +218,7 @@ async function extractMetadata(
 ): Promise<void> {
   try {
     const metaResponse = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       max_tokens: 1024,
       messages: [
         {
@@ -230,6 +247,8 @@ ${context}`,
       metaResponse.usage.input_tokens,
       metaResponse.usage.output_tokens,
       'fetch-context-metadata',
+      undefined,
+      metaResponse.model,
     );
 
     const text = metaResponse.content[0]?.type === 'text' ? metaResponse.content[0].text : '';

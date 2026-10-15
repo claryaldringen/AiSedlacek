@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import { sharpForUntrustedInput } from './image-validation';
 
 /**
  * Detect whether an image is a blank page (parchment/paper with no writing).
@@ -12,7 +12,8 @@ import sharp from 'sharp';
 export async function isBlankPage(buffer: Buffer): Promise<boolean> {
   try {
     // Down-scale to speed up analysis (256 px wide is plenty)
-    const edgeBuffer = await sharp(buffer)
+    // Pixel-limited decode – the buffer is user data (SEC-13).
+    const edgeBuffer = await sharpForUntrustedInput(buffer)
       .resize(256, undefined, { withoutEnlargement: true })
       .greyscale()
       .convolve({

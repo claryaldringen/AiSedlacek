@@ -18,6 +18,12 @@ module.exports = {
       script: 'apps/worker/src/index.ts',
       interpreter: 'node',
       interpreter_args: '--import tsx/esm --env-file=/opt/AiSedlacek/.env',
+      // NODE_ENV nastavujeme tady – .env ho neobsahuje a worker podle něj odmítne
+      // start s LLM_PROVIDER=claude-cli (SEC-12). Jediný další vliv: Prisma vrací
+      // stručnější chybové hlášky (errorFormat "minimal", bez výpisu zdrojáku).
+      env: {
+        NODE_ENV: 'production',
+      },
       max_memory_restart: '500M',
     },
   ],

@@ -15,6 +15,8 @@ export interface PageData {
   context: string;
   glossary: string;
   serverUpdatedAt?: string;
+  /** Jazyk překladu uloženého v translation.md (např. "cs"). */
+  translationLanguage?: string;
 }
 
 export interface PageMeta {
@@ -22,6 +24,11 @@ export interface PageMeta {
   pageId: string;
   pulledAt: string;
   serverUpdatedAt?: string;
+  /**
+   * Jazyk překladu v translation.md. Server ukládá překlad per jazyk, takže push
+   * ho musí poslat spolu s textem. Workspace stažené starší verzí CLI ho nemají.
+   */
+  translationLanguage?: string;
   hashes: Record<string, string>;
 }
 
@@ -64,6 +71,7 @@ export function writePageFiles(data: PageData): void {
     pageId: data.pageId,
     pulledAt: new Date().toISOString(),
     serverUpdatedAt: data.serverUpdatedAt,
+    translationLanguage: data.translationLanguage,
     hashes,
   };
   fs.writeFileSync(path.join(dir, '.meta.json'), JSON.stringify(meta, null, 2));
@@ -73,17 +81,27 @@ export function writePageFiles(data: PageData): void {
  * Aktualizuje pouze metadata reálně pushnutých polí — přepočítá hash z aktuálního
  * lokálního obsahu daných souborů a uloží novou serverUpdatedAt. Lokální obsah souborů
  * (zejm. glossary.md, který je read-only/nepushovatelný) se NEPŘEPISUJE.
+ * Volat jen po tom, co server změny prokazatelně uložil.
  */
 export function updateMetaAfterPush(
   pageId: string,
   pushedFiles: WorkspaceFile[],
   serverUpdatedAt?: string,
+  translationLanguage?: string,
+  sentContents?: Partial<Record<WorkspaceFile, string>>,
 ): void {
   const meta = readMeta(pageId);
   if (!meta) return;
 
   const dir = getPageDir(pageId);
   for (const file of pushedFiles) {
+    // Hash z obsahu, který byl skutečně odeslán – editace uložená během PATCH
+    // tak zůstane označená jako neodeslaná.
+    const sent = sentContents?.[file];
+    if (sent !== undefined) {
+      meta.hashes[file] = sha256(sent);
+      continue;
+    }
     const filePath = path.join(dir, file);
     if (!fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -92,6 +110,9 @@ export function updateMetaAfterPush(
 
   if (serverUpdatedAt !== undefined) {
     meta.serverUpdatedAt = serverUpdatedAt;
+  }
+  if (translationLanguage !== undefined) {
+    meta.translationLanguage = translationLanguage;
   }
   meta.pulledAt = new Date().toISOString();
 

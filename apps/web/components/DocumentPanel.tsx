@@ -23,6 +23,11 @@ interface DocumentPanelProps {
   hasPrevious?: boolean;
   hasNext?: boolean;
   highlightQuery?: string;
+  /**
+   * Cizí dokument – jen čtení: bez přejmenování, přegenerování/zpracování,
+   * editace textů, obnovy verzí a chatu (stojí kredity a navrhuje úpravy).
+   */
+  readOnly?: boolean;
 }
 
 function cleanFilename(raw: string): string {
@@ -50,6 +55,7 @@ export function DocumentPanel({
   hasPrevious,
   hasNext,
   highlightQuery,
+  readOnly = false,
 }: DocumentPanelProps): React.JSX.Element | null {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -105,11 +111,11 @@ export function DocumentPanel({
   );
 
   const handleTitleClick = useCallback((): void => {
-    if (!page) return;
+    if (!page || readOnly) return;
     setTitleDraft(page.displayName || cleanFilename(page.filename));
     setEditingTitle(true);
     setTimeout(() => titleInputRef.current?.select(), 0);
-  }, [page]);
+  }, [page, readOnly]);
 
   const handleTitleSave = useCallback((): void => {
     if (!page) return;
@@ -141,7 +147,8 @@ export function DocumentPanel({
 
   const status = page?.status ?? 'pending';
   const title = getDisplayTitle(page, t('document'));
-  const showRegenerate = page && onRegenerate && (status === 'done' || status === 'error');
+  const canRegenerate = !readOnly && onRegenerate !== undefined;
+  const showRegenerate = page && canRegenerate && (status === 'done' || status === 'error');
 
   return (
     <>
@@ -197,7 +204,7 @@ export function DocumentPanel({
               </button>
             </div>
             <div className="ml-1">
-              {editingTitle ? (
+              {editingTitle && !readOnly ? (
                 <input
                   ref={titleInputRef}
                   value={titleDraft}
@@ -210,6 +217,8 @@ export function DocumentPanel({
                   }}
                   className="w-48 rounded bg-slate-700 px-1.5 py-0.5 text-sm font-semibold text-white outline-none ring-1 ring-slate-500 focus:ring-blue-400"
                 />
+              ) : readOnly ? (
+                <h2 className="text-sm font-semibold text-white">{title}</h2>
               ) : (
                 <h2
                   className="cursor-text text-sm font-semibold text-white hover:text-slate-200"
@@ -219,11 +228,16 @@ export function DocumentPanel({
                   {title}
                 </h2>
               )}
-              <p className="text-xs text-slate-400">
+              <p className="flex items-center gap-1.5 text-xs text-slate-400">
                 {status === 'done' && t('processed')}
                 {status === 'pending' && t('pendingProcessing')}
                 {status === 'processing' && t('processingInProgress')}
                 {status === 'error' && t('processingError')}
+                {readOnly && (
+                  <span className="rounded bg-slate-700 px-1.5 py-px text-[10px] font-medium text-slate-300">
+                    {t('readOnly')}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -232,7 +246,7 @@ export function DocumentPanel({
           <div className="flex items-center gap-1">
             {showRegenerate && (
               <button
-                onClick={() => onRegenerate(page.id)}
+                onClick={() => onRegenerate?.(page.id)}
                 disabled={isRegenerating}
                 className="flex items-center gap-1.5 rounded px-2.5 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 hover:text-white disabled:opacity-50"
               >
@@ -369,27 +383,34 @@ export function DocumentPanel({
               </div>
             ) : status === 'done' && result ? (
               <div className="flex flex-1 flex-col overflow-y-auto">
-                <ResultViewer result={result} onUpdate={onResultUpdate} highlightQuery={highlightQuery} />
-                {/* Chat */}
-                <div className="border-t border-slate-200">
-                  <DocumentChat
-                    documentId={result.id}
-                    currentFields={{
-                      transcription: result.transcription,
-                      translation: result.translation,
-                      context: result.context,
-                    }}
-                    onApplyUpdate={handleChatApplyUpdate}
-                    onTokenUsage={(usage) => {
-                      onResultUpdate?.({
-                        ...result,
-                        chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
-                        chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
-                        chatModel: usage.model,
-                      });
-                    }}
-                  />
-                </div>
+                <ResultViewer
+                  result={result}
+                  onUpdate={onResultUpdate}
+                  highlightQuery={highlightQuery}
+                  readOnly={readOnly}
+                />
+                {/* Chat – stojí kredity a navrhuje úpravy; u cizího dokumentu ho API odmítne */}
+                {!readOnly && (
+                  <div className="border-t border-slate-200">
+                    <DocumentChat
+                      documentId={result.id}
+                      currentFields={{
+                        transcription: result.transcription,
+                        translation: result.translation,
+                        context: result.context,
+                      }}
+                      onApplyUpdate={handleChatApplyUpdate}
+                      onTokenUsage={(usage) => {
+                        onResultUpdate?.({
+                          ...result,
+                          chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
+                          chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
+                          chatModel: usage.model,
+                        });
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             ) : status === 'error' ? (
               <div className="p-4">
@@ -403,9 +424,9 @@ export function DocumentPanel({
             ) : (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <p className="mb-4 text-sm text-slate-500">{t('notProcessedYet')}</p>
-                {page && onRegenerate && (
+                {page && canRegenerate && (
                   <button
-                    onClick={() => onRegenerate(page.id)}
+                    onClick={() => onRegenerate?.(page.id)}
                     className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
                     {t('processButton')}

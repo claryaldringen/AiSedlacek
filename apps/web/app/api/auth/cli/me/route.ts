@@ -3,9 +3,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserFromToken } from '@/lib/infrastructure/api-auth';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const userId = await resolveUserFromToken(
-    request.headers.get('authorization'),
-  );
+  const userId = await resolveUserFromToken(request.headers.get('authorization'));
   if (!userId) {
     return NextResponse.json({ error: 'Neplatný token' }, { status: 401 });
   }

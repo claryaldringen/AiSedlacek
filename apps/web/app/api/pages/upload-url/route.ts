@@ -1,32 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
-import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
+import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
+import {
+  InvalidImageError,
+  invalidImageMessage,
+  validateImage,
+  type ValidatedImage,
+} from '@/lib/infrastructure/image-validation';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
+import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
 const MAX_SIZE = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
+// URL se stahují sekvenčně v jednom requestu (každá až 30 s a 20 MB) – strop
+// drží délku requestu i počet dekódování obrázků v rozumných mezích. CLI ≥ 0.2.0
+// posílá po 50; staré CLI posílá všechny URL najednou – 200 ho u běžných svazků
+// nerozbije.
+const MAX_URLS_PER_REQUEST = 200;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const t = await getApiTranslations(request, 'api');
+
   const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
 
-  let body: { urls: string[]; collectionId?: string };
+  let body: { urls?: unknown; collectionId?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { urls, collectionId } = body;
+  const { urls, collectionId } = body ?? {};
 
   if (!Array.isArray(urls) || urls.length === 0) {
     return NextResponse.json({ error: 'Pole urls je povinné' }, { status: 400 });
+  }
+  if (urls.length > MAX_URLS_PER_REQUEST) {
+    return NextResponse.json(
+      { error: t('tooManyUrls', { max: MAX_URLS_PER_REQUEST }) },
+      { status: 400 },
+    );
+  }
+  if (!urls.every((url): url is string => typeof url === 'string')) {
+    return NextResponse.json({ error: t('invalidUrl') }, { status: 400 });
   }
 
   const resolvedCollectionId =
@@ -52,13 +74,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      // Validate content type
-      const contentType = res.headers.get('content-type')?.split(';')[0]?.trim();
-      if (!contentType || !ALLOWED_TYPES.includes(contentType)) {
-        errors.push({ url, error: `Nepodporovaný typ: ${contentType}` });
-        continue;
-      }
-
       let buffer: Buffer;
       try {
         buffer = await readBodyWithLimit(res, MAX_SIZE);
@@ -67,6 +82,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           url,
           error: `Soubor je příliš velký (max ${Math.round(MAX_SIZE / 1024 / 1024)} MB)`,
         });
+        continue;
+      }
+
+      // Format is detected from the content, never from Content-Type (SEC-1).
+      let image: ValidatedImage;
+      try {
+        image = await withSharpLimit(() => validateImage(buffer));
+      } catch (err) {
+        if (!(err instanceof InvalidImageError)) throw err;
+        errors.push({ url, error: invalidImageMessage(err, t) });
         continue;
       }
 
@@ -80,22 +105,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      // Extract filename from URL
+      // Display filename from URL – the file on disk is `<uuid>.<detected extension>`
       const filename = decodeURIComponent(parsed.pathname.split('/').pop() || 'image.jpg');
 
-      // Store
-      const stored = await storage.upload(buffer, filename);
-
-      // Get dimensions
-      const meta = await sharp(buffer).metadata();
-
-      // Generate thumbnail
-      let thumbnailUrl: string | null = null;
-      try {
-        thumbnailUrl = await generateThumbnail(buffer, filename);
-      } catch {
-        // Non-critical
-      }
+      const stored = await storage.upload(buffer, image.extension);
+      const thumbnailUrl = await saveThumbnail(image.thumbnail);
 
       // Create page
       const page = await prisma.page.create({
@@ -107,10 +121,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           imageUrl: stored.url,
           thumbnailUrl,
           status: 'pending',
-          mimeType: contentType,
+          mimeType: image.mimeType,
           fileSize: buffer.length,
-          width: meta.width ?? null,
-          height: meta.height ?? null,
+          width: image.width,
+          height: image.height,
         },
       });
 

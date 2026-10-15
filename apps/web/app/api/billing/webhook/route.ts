@@ -1,15 +1,27 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createTransaction, czkToTokens } from '@/lib/infrastructure/billing';
+import { readTextBody } from '@/lib/infrastructure/read-body';
+
+// Události Stripe mají jednotky až desítky kB; strop chrání nepřihlášenou routu
+// před obřím tělem (viz read-body.ts).
+const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
 
 export async function POST(request: Request): Promise<NextResponse> {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-  const body = await request.text();
   const sig = request.headers.get('stripe-signature');
 
   if (!sig) {
     return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
   }
+
+  const raw = await readTextBody(request, MAX_WEBHOOK_BODY_BYTES);
+  if (!raw.ok) {
+    return raw.error === 'too_large'
+      ? NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+      : NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+  }
+  const body = raw.value;
 
   let event: Stripe.Event;
   try {

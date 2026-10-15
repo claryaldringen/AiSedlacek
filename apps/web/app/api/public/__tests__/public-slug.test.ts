@@ -193,6 +193,85 @@ describe('GET /api/public/[slug]', () => {
     expect(json.document?.batchId).toBeUndefined();
   });
 
+  // Fixtury výše citlivá pole vůbec neobsahují, takže jejich aserce selhat nemůžou.
+  // Tady je DB vrací – route je musí vynechat.
+  const SENSITIVE_PAGE_FIELDS = {
+    userId: 'owner-1',
+    hash: 'sha256-abc',
+    fileSize: 123_456,
+    mimeType: 'image/jpeg',
+  };
+  const SENSITIVE_DOCUMENT_FIELDS = {
+    inputTokens: 1000,
+    outputTokens: 500,
+    processingTimeMs: 4200,
+    model: 'claude-opus-4-6',
+    rawResponse: '{"transcription":"…"}',
+    batchId: 'job-1',
+  };
+
+  function expectNoSensitiveFields(
+    page: Record<string, unknown>,
+    document: Record<string, unknown>,
+  ): void {
+    for (const key of Object.keys(SENSITIVE_PAGE_FIELDS)) expect(page).not.toHaveProperty(key);
+    for (const key of Object.keys(SENSITIVE_DOCUMENT_FIELDS)) {
+      expect(document).not.toHaveProperty(key);
+    }
+  }
+
+  it('omits sensitive fields of a collection page even when the DB returns them', async () => {
+    mockPublicSlugFindUnique.mockResolvedValue({
+      slug: 'testovaci-svazek',
+      targetType: 'collection',
+      targetId: 'col-1',
+      createdAt: new Date(),
+    });
+    const [page] = FAKE_COLLECTION.pages;
+    mockCollectionFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      userId: 'owner-1',
+      contextUrls: ['https://example.org/rukopis'],
+      pages: [
+        {
+          ...page,
+          ...SENSITIVE_PAGE_FIELDS,
+          document: { ...page!.document, ...SENSITIVE_DOCUMENT_FIELDS },
+        },
+      ],
+    });
+
+    const res = await GET(makeRequest('testovaci-svazek'), routeContext('testovaci-svazek'));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).not.toHaveProperty('userId');
+    expect(json).not.toHaveProperty('contextUrls');
+    expect(json.pages[0].document.transcription).toBe('Text rukopisu...');
+    expectNoSensitiveFields(json.pages[0], json.pages[0].document);
+  });
+
+  it('omits sensitive fields of a public page even when the DB returns them', async () => {
+    mockPublicSlugFindUnique.mockResolvedValue({
+      slug: 'jednotliva-stranka',
+      targetType: 'page',
+      targetId: 'page-2',
+      createdAt: new Date(),
+    });
+    mockPageFindUnique.mockResolvedValue({
+      ...FAKE_PAGE,
+      ...SENSITIVE_PAGE_FIELDS,
+      document: { ...FAKE_PAGE.document, ...SENSITIVE_DOCUMENT_FIELDS },
+    });
+
+    const res = await GET(makeRequest('jednotliva-stranka'), routeContext('jednotliva-stranka'));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.document.transcription).toBe('Text jednotlivé stránky...');
+    expectNoSensitiveFields(json, json.document);
+  });
+
   it('returns 404 when page exists but isPublic is false', async () => {
     mockPublicSlugFindUnique.mockResolvedValue({
       slug: 'privatni-stranka',

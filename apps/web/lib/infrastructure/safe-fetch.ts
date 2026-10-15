@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
+import os from 'node:os';
 
 /**
  * SSRF defenses for endpoints that fetch attacker-supplied URLs (URL import,
@@ -37,21 +38,115 @@ function ipv4IsBlocked(ip: string): boolean {
   return false;
 }
 
+/**
+ * Parse an IPv6 address into its 8 16-bit groups. Handles `::` compression,
+ * a dotted IPv4 tail (`::ffff:1.2.3.4`) and a zone id (`fe80::1%eth0`).
+ * Returns null for malformed input.
+ */
+function parseIPv6(ip: string): number[] | null {
+  const s = ip.toLowerCase().replace(/%.*$/, '');
+  if (net.isIP(s) !== 6) return null;
+
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const toGroups = (part: string): number[] | null => {
+    if (part === '') return [];
+    const groups: number[] = [];
+    for (const token of part.split(':')) {
+      if (token.includes('.')) {
+        if (net.isIP(token) !== 4) return null;
+        const [a, b, c, d] = token.split('.').map(Number) as [number, number, number, number];
+        groups.push((a << 8) | b, (c << 8) | d);
+      } else {
+        if (!/^[0-9a-f]{1,4}$/.test(token)) return null;
+        groups.push(parseInt(token, 16));
+      }
+    }
+    return groups;
+  };
+  const head = toGroups(halves[0]!);
+  const tail = halves.length === 2 ? toGroups(halves[1]!) : [];
+  if (!head || !tail) return null;
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
+  return [...head, ...new Array<number>(missing).fill(0), ...tail];
+}
+
+function ipv4FromGroups(hi: number, lo: number): string {
+  return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.');
+}
+
+/**
+ * IPv4 vložená do IPv6 adresy (::ffff:0:0/96 mapped, ::/96 IPv4-compatible,
+ * NAT64 64:ff9b::/96, 6to4 2002::/16), jinak null.
+ */
+function embeddedIPv4(g: number[]): string | null {
+  const firstFiveZero = g.slice(0, 5).every((x) => x === 0);
+  if (firstFiveZero && g[5] === 0xffff) return ipv4FromGroups(g[6]!, g[7]!);
+  if (firstFiveZero && g[5] === 0 && g[6] !== 0) return ipv4FromGroups(g[6]!, g[7]!);
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) {
+    return ipv4FromGroups(g[6]!, g[7]!);
+  }
+  if (g[0] === 0x2002) return ipv4FromGroups(g[1]!, g[2]!);
+  return null;
+}
+
+/**
+ * Kanonický tvar IP pro porovnání: IPv4 tečkově (i vložená v IPv6), IPv6 jako
+ * 8 rozbalených skupin – různé zápisy téže adresy se tak shodují.
+ */
+function canonicalIp(ip: string): string | null {
+  if (net.isIP(ip) === 4) return ip;
+  const g = parseIPv6(ip);
+  if (!g) return null;
+  return embeddedIPv4(g) ?? g.map((x) => x.toString(16)).join(':');
+}
+
+function ipv6IsBlocked(ip: string): boolean {
+  const g = parseIPv6(ip);
+  if (!g) return true; // malformed → treat as unsafe
+
+  // Embedded IPv4 musí projít IPv4 pravidly – jinak lze blocklist obejít zápisem
+  // `::ffff:a9fe:a9fe`, na který WHATWG URL normalizuje `[::ffff:169.254.169.254]`.
+  const v4 = embeddedIPv4(g);
+  if (v4 !== null) return ipv4IsBlocked(v4);
+  if (g.slice(0, 7).every((x) => x === 0)) return true; // :: a ::1 (unspecified, loopback)
+  if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo 2001::/32
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return true; // documentation 2001:db8::/32
+
+  const first = g[0]!;
+  if ((first & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
+  if ((first & 0xffc0) === 0xfec0) return true; // deprecated site-local fec0::/10
+  if ((first & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+  if ((first & 0xff00) === 0xff00) return true; // multicast ff00::/8
+  return false;
+}
+
 /** True if the IP is in a private/loopback/link-local/reserved range. */
 export function isBlockedAddress(ip: string): boolean {
   if (net.isIP(ip) === 4) return ipv4IsBlocked(ip);
-
-  const s = ip.toLowerCase();
-  // IPv4-mapped IPv6, e.g. ::ffff:169.254.169.254
-  const mapped = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return ipv4IsBlocked(mapped[1]!);
-  if (s === '::1' || s === '::') return true; // loopback / unspecified
-  if (/^fe[89ab]/.test(s)) return true; // link-local fe80::/10
-  if (/^f[cd]/.test(s)) return true; // unique-local fc00::/7
-  if (/^fe[cdef]/.test(s)) return true; // deprecated site-local fec0::/10
-  if (s.startsWith('ff')) return true; // multicast ff00::/8
-  return false;
+  return ipv6IsBlocked(ip);
 }
+
+/**
+ * Adresy vlastních síťových rozhraní (včetně veřejné IP VPS). Request na vlastní
+ * veřejnou IP jde přes loopback, kde firewall neplatí – bez této kontroly by šlo
+ * přes import z URL dosáhnout na služby ostatních aplikací na sdíleném serveru.
+ */
+function localInterfaceAddresses(): Set<string> {
+  const addresses = new Set<string>();
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      const canonical = canonicalIp(entry.address);
+      if (canonical) addresses.add(canonical);
+    }
+  }
+  return addresses;
+}
+
+// Uživatelské URL (IIIF servery, digitální knihovny) běží na standardních portech;
+// ostatní porty blokujeme, aby šlo hůř sondovat interní služby.
+const ALLOWED_PORTS = new Set(['', '80', '443', '8080', '8443']);
 
 /**
  * Validate a URL is safe to fetch server-side. Throws UnsafeUrlError otherwise.
@@ -66,6 +161,9 @@ export async function assertSafeUrl(rawUrl: string): Promise<URL> {
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     throw new UnsafeUrlError('only http/https is allowed');
+  }
+  if (!ALLOWED_PORTS.has(u.port)) {
+    throw new UnsafeUrlError(`port not allowed: ${u.port}`);
   }
   const host = u.hostname.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
 
@@ -82,8 +180,14 @@ export async function assertSafeUrl(rawUrl: string): Promise<URL> {
     ips = resolved.map((r) => r.address);
     if (ips.length === 0) throw new UnsafeUrlError('cannot resolve host');
   }
+  const local = localInterfaceAddresses();
   for (const ip of ips) {
-    if (isBlockedAddress(ip)) throw new UnsafeUrlError(`blocked address: ${ip}`);
+    // Kanonický tvar: `[::ffff:<vlastní IPv4>]` nebo jiný zápis vlastní IPv6
+    // by jinak blokaci vlastních rozhraní obešel.
+    const canonical = canonicalIp(ip);
+    if (isBlockedAddress(ip) || canonical === null || local.has(canonical)) {
+      throw new UnsafeUrlError(`blocked address: ${ip}`);
+    }
   }
   return u;
 }

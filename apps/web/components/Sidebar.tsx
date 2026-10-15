@@ -17,6 +17,8 @@ export interface Collection {
   createdAt: string;
   isPublic: boolean;
   slug: string | null;
+  /** false u cizího svazku ve sdíleném/veřejném workspace (jen pro čtení). */
+  canEdit?: boolean;
   _count: { pages: number };
   processableCount: number;
   stats: {
@@ -27,7 +29,10 @@ export interface Collection {
     blank: number;
     inputTokens: number;
     outputTokens: number;
-    costUsd: number;
+    /** Cena pro uživatele v Kč (náklad API × marže) – stejně jako u dokumentu. */
+    chargeCzk: number;
+    /** Kredity odečtené za zpracování dokumentů svazku. */
+    chargeCredits: number;
   };
   title?: string | null;
   author?: string | null;

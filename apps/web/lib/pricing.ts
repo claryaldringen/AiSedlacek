@@ -1,67 +1,30 @@
 /**
- * Model pricing constants and cost calculation utilities.
- *
- * Centralized pricing for Claude models so that both UI components
- * (ResultViewer) and API routes (collections) use the same rates.
+ * Zobrazení nákladů v UI – stejný výpočet jako účtování kreditů
+ * (`@ai-sedlacek/shared` pricing), aby UI ukazovalo, co uživatel skutečně platí.
  */
+import { MODEL_PRICING_USD, creditsForUsage, usagePriceCzk } from '@ai-sedlacek/shared';
 
-// Token multiplier applied to display values (billing uses the same multiplier)
-export const TOKEN_MULTIPLIER = parseInt(process.env.TOKEN_MULTIPLIER ?? '2');
+export const MODEL_PRICING = MODEL_PRICING_USD;
 
-// Pricing per million tokens (USD), May 2025
-export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-opus-4-6': { input: 15, output: 75 },
-  'claude-opus-4-20250514': { input: 15, output: 75 },
-  'claude-sonnet-4-6': { input: 3, output: 15 },
-  'claude-sonnet-4-20250514': { input: 3, output: 15 },
-};
-
-/**
- * Compute the raw USD cost for a model invocation.
- * Returns 0 when model or token counts are missing/unknown.
- */
-export function computeCostRaw(
+/** Cena volání pro uživatele v Kč a v kreditech, nebo null bez spotřeby. */
+export function chargeForUsage(
   model: string | null | undefined,
   inputTokens: number | null | undefined,
   outputTokens: number | null | undefined,
-): number {
-  if (!model || inputTokens == null || outputTokens == null) return 0;
-  const pricing = MODEL_PRICING[model];
-  if (!pricing) return 0;
-  return (
-    ((inputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.input +
-    ((outputTokens * TOKEN_MULTIPLIER) / 1_000_000) * pricing.output
-  );
+): { czk: number; credits: number } | null {
+  const input = inputTokens ?? 0;
+  const output = outputTokens ?? 0;
+  if (input <= 0 && output <= 0) return null;
+  return {
+    czk: usagePriceCzk(model, input, output),
+    credits: creditsForUsage(model, input, output),
+  };
 }
 
-/**
- * Format a cost as a human-readable dollar string, or return null when cost is zero.
- */
-export function formatCost(
-  model: string | null | undefined,
-  inputTokens: number | null | undefined,
-  outputTokens: number | null | undefined,
-): string | null {
-  const cost = computeCostRaw(model, inputTokens, outputTokens);
-  if (cost === 0) return null;
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(3)}`;
-}
-
-/**
- * Compute the USD cost using raw token counts and a fallback pricing rate
- * (useful when the model name is not stored per-row, e.g. collection aggregates).
- *
- * Default rates correspond to Claude Opus: $15/1M input, $75/1M output.
- */
-export function computeCostFromTokens(
-  inputTokens: number,
-  outputTokens: number,
-  inputRate: number = 15,
-  outputRate: number = 75,
-): number {
-  return (
-    (inputTokens * TOKEN_MULTIPLIER * inputRate + outputTokens * TOKEN_MULTIPLIER * outputRate) /
-    1_000_000
-  );
+/** Částka v Kč na 2 desetinná místa (u velmi malých částek víc, ať není „0,00"). */
+export function formatCzk(czk: number, locale: string): string {
+  return czk.toLocaleString(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: czk < 0.01 ? 4 : 2,
+  });
 }

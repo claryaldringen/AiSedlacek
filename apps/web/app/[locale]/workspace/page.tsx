@@ -23,7 +23,9 @@ import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { apiFetch } from '@/lib/infrastructure/api-client';
+import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
+import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
+import { formatCzk } from '@/lib/pricing';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -48,6 +50,8 @@ interface DocApiResponse {
   processingTimeMs?: number;
   createdAt?: string;
   updatedAt?: string;
+  /** Jen vlastník; chybí-li (starší API), bere se true. */
+  canEdit?: boolean;
 }
 
 /** Map a document API response + page metadata into a DocumentResult */
@@ -63,7 +67,11 @@ function mapDocToResult(
   locale: string,
   cached: boolean,
 ): DocumentResult | null {
-  const translation = doc.translations.find((tr) => tr.language === locale);
+  // Cizí dokument (canEdit false) si uživatel nemůže nechat přeložit do svého
+  // jazyka – ukázat aspoň existující překlad v jiném jazyce.
+  const translation =
+    doc.translations.find((tr) => tr.language === locale) ??
+    (doc.canEdit === false ? doc.translations[0] : undefined);
   if (!translation) return null;
   const context = translation?.context || doc.context;
   const glossary: { term: string; definition: string }[] = translation?.glossaryJson
@@ -107,6 +115,7 @@ export default function HomePage(): React.JSX.Element {
 
 function WorkspaceContent(): React.JSX.Element {
   const t = useTranslations('workspace');
+  const tDoc = useTranslations('document');
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -125,6 +134,10 @@ function WorkspaceContent(): React.JSX.Element {
   // Pages
   const [pages, setPages] = useState<PageItem[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
+
+  // Oprávnění k úpravám otevřeného svazku (canEdit z GET /api/collections/:id) –
+  // cizí svazek ze sdíleného workspace se zobrazí jen pro čtení.
+  const [collectionAccess, setCollectionAccess] = useState<EditAccess | null>(null);
 
   // View mode
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -160,7 +173,17 @@ function WorkspaceContent(): React.JSX.Element {
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>>(new Map());
+  const [searchResults, setSearchResults] = useState<
+    Map<
+      string,
+      {
+        matches: number;
+        snippet: string;
+        collectionId: string | null;
+        collectionName: string | null;
+      }
+    >
+  >(new Map());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Document panel
@@ -170,6 +193,8 @@ function WorkspaceContent(): React.JSX.Element {
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
   const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
+  // canEdit otevřené stránky (z GET /api/documents/:id, resp. /api/pages/:id).
+  const [panelAccess, setPanelAccess] = useState<EditAccess | null>(null);
 
   // Drag-over for whole content area
   const [contentDragOver, setContentDragOver] = useState(false);
@@ -193,9 +218,22 @@ function WorkspaceContent(): React.JSX.Element {
         const res = await apiFetch(`/api/pages/search?${params}`);
         if (!res.ok) return;
         const data = await res.json();
-        const map = new Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }>();
+        const map = new Map<
+          string,
+          {
+            matches: number;
+            snippet: string;
+            collectionId: string | null;
+            collectionName: string | null;
+          }
+        >();
         for (const r of data.results) {
-          map.set(r.pageId, { matches: r.matches, snippet: r.snippet, collectionId: r.collectionId, collectionName: r.collectionName });
+          map.set(r.pageId, {
+            matches: r.matches,
+            snippet: r.snippet,
+            collectionId: r.collectionId,
+            collectionName: r.collectionName,
+          });
         }
         setSearchResults(map);
       } catch {
@@ -318,13 +356,20 @@ function WorkspaceContent(): React.JSX.Element {
         const data = (await res.json()) as
           | PageItem[]
           | { pages: PageItem[] }
-          | { id: string; pages: PageItem[] };
+          | { id: string; pages: PageItem[]; canEdit?: boolean };
+        const canEditCollection = collectionId === null || readCanEdit(data);
+        if (collectionId !== null) {
+          setCollectionAccess({ id: collectionId, canEdit: canEditCollection });
+        }
 
         // Pages with status 'done' but no translation in the current locale
         // should appear as 'pending' (needs translation)
+        // U cizího svazku (jen pro čtení) neměnit – uživatel překlad doplnit nemůže
+        // a stránku by viděl jako nezpracovanou.
         const adjustStatus = (pages: PageItem[]): PageItem[] =>
           pages.map((p) => {
             if (
+              canEditCollection &&
               p.status === 'done' &&
               p.document &&
               !p.document.translations.some((tr) => tr.language === locale)
@@ -351,6 +396,15 @@ function WorkspaceContent(): React.JSX.Element {
   useEffect(() => {
     void loadPages(selectedCollectionId);
   }, [loadPages, selectedCollectionId]);
+
+  // Oprávnění z detailu svazku; než se pro aktuální svazek načte, platí canEdit
+  // ze seznamu svazků (ať cizí svazek ani krátce nenabízí úpravy). Kořenový
+  // pohled obsahuje jen vlastní stránky.
+  const readOnly = isReadOnly(
+    collectionAccess,
+    selectedCollectionId,
+    collections.find((c) => c.id === selectedCollectionId)?.canEdit === false,
+  );
 
   // ---- Workspace navigation ----
   const handleWorkspaceSelect = useCallback(
@@ -460,6 +514,10 @@ function WorkspaceContent(): React.JSX.Element {
     }
     return null;
   }, [selectedCollectionId, collections, selected]);
+  // Přejmenovat a sdílet z kořene workspace jde jen vlastní svazek – cizí svazek
+  // ze sdíleného workspace je jen pro čtení (API by vrátilo 404).
+  const editableGridCollection =
+    selectedGridCollection?.canEdit !== false ? selectedGridCollection : null;
 
   // ---- Upload ----
   const handleFilesUploaded = useCallback(
@@ -468,6 +526,8 @@ function WorkspaceContent(): React.JSX.Element {
         id: p.id,
         filename: p.filename,
         imageUrl: p.imageUrl,
+        // Bez náhledu grid stahoval a dekódoval plné originály (3–20 MB na kartu).
+        thumbnailUrl: p.thumbnailUrl ?? null,
         status: p.status,
         order: p.order,
         collectionId: p.collectionId,
@@ -492,18 +552,17 @@ function WorkspaceContent(): React.JSX.Element {
       setPages((prev) =>
         prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: newStatus } : p)),
       );
-      await Promise.all(
+      const results = await Promise.allSettled(
         pageIds.map((id) =>
-          apiFetch(`/api/pages/${id}`, {
+          apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus }),
-          }).catch(() => {
-            // Revert on error
-            void loadPages(selectedCollectionId);
           }),
         ),
       );
+      // Revert on error – jeden reload, ne jeden za každý neúspěšný request.
+      if (results.some((r) => r.status === 'rejected')) void loadPages(selectedCollectionId);
     },
     [selectedCollectionId, loadPages],
   );
@@ -580,10 +639,10 @@ function WorkspaceContent(): React.JSX.Element {
   // ---- Rename collection ----
   const handleRenameCollection = useCallback(async (): Promise<void> => {
     // Determine which collection to rename: the one navigated into, or the one selected in grid
-    const colId = selectedCollectionId ?? selectedGridCollection?.id;
+    const colId = selectedCollectionId ?? editableGridCollection?.id;
     if (!colId) return;
     const col = collections.find((c) => c.id === colId);
-    if (!col) return;
+    if (!col || col.canEdit === false) return;
 
     // Use the title from metadata if available, otherwise the current name
     const currentName = col.title ?? col.name;
@@ -591,20 +650,19 @@ function WorkspaceContent(): React.JSX.Element {
     if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
 
     try {
-      const res = await apiFetch(`/api/collections/${colId}`, {
+      await apiFetchOk(`/api/collections/${colId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName.trim() }),
       });
-      if (res.ok) {
-        setCollections((prev) =>
-          prev.map((c) => (c.id === colId ? { ...c, name: newName.trim() } : c)),
-        );
-      }
-    } catch {
-      // ignore
+      setCollections((prev) =>
+        prev.map((c) => (c.id === colId ? { ...c, name: newName.trim() } : c)),
+      );
+    } catch (err) {
+      // Neprovedené přejmenování se nesmí tvářit jako úspěšné.
+      setError(err instanceof Error ? err.message : t('error'));
     }
-  }, [selectedCollectionId, selectedGridCollection, collections]);
+  }, [selectedCollectionId, editableGridCollection, collections, setError, t]);
 
   // ---- Search toggle ----
   const handleSearchToggle = useCallback(() => {
@@ -636,18 +694,17 @@ function WorkspaceContent(): React.JSX.Element {
       setPages((prev) => prev.filter((p) => !pageIds.includes(p.id)));
 
       // Fire API calls
-      await Promise.all(
+      const results = await Promise.allSettled(
         pageIds.map((id) =>
-          apiFetch(`/api/pages/${id}`, {
+          apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ collectionId: targetCollectionId }),
-          }).catch(() => {
-            // On error, reload pages to restore correct state
-            void loadPages(selectedCollectionId);
           }),
         ),
       );
+      // On error, reload pages to restore correct state – jednou, ne za každou chybu.
+      if (results.some((r) => r.status === 'rejected')) void loadPages(selectedCollectionId);
 
       // Refresh collection counts
       void loadCollections();
@@ -665,11 +722,7 @@ function WorkspaceContent(): React.JSX.Element {
       if (targetIndex === -1) return;
 
       const insertAt = position === 'before' ? targetIndex : targetIndex + 1;
-      const reordered = [
-        ...remaining.slice(0, insertAt),
-        ...dragged,
-        ...remaining.slice(insertAt),
-      ];
+      const reordered = [...remaining.slice(0, insertAt), ...dragged, ...remaining.slice(insertAt)];
 
       // Optimistic update
       const withOrder = reordered.map((p, i) => ({ ...p, order: i }));
@@ -682,7 +735,7 @@ function WorkspaceContent(): React.JSX.Element {
       try {
         await Promise.all(
           changed.map((p) =>
-            apiFetch(`/api/pages/${p.id}`, {
+            apiFetchOk(`/api/pages/${p.id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ order: p.order }),
@@ -702,31 +755,28 @@ function WorkspaceContent(): React.JSX.Element {
       const page = pages.find((p) => p.id === pageId);
       if (!page) return;
 
-      if (page.status === 'done' || page.document) {
-        try {
-          await apiFetch(`/api/pages/${pageId}`, {
+      try {
+        if (page.status === 'done' || page.document) {
+          await apiFetchOk(`/api/pages/${pageId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'archived' }),
           });
-          setPages((prev) => prev.filter((p) => p.id !== pageId));
-        } catch {
-          // ignore
+        } else {
+          await apiFetchOk(`/api/pages/${pageId}`, { method: 'DELETE' });
         }
-      } else {
-        try {
-          await apiFetch(`/api/pages/${pageId}`, { method: 'DELETE' });
-          setPages((prev) => prev.filter((p) => p.id !== pageId));
-        } catch {
-          // ignore
-        }
+        setPages((prev) => prev.filter((p) => p.id !== pageId));
+      } catch (err) {
+        // Stránka zůstane v seznamu – uživatel musí vidět, že smazání neproběhlo.
+        setError(err instanceof Error ? err.message : t('error'));
+        return;
       }
       if (panelPage?.id === pageId) {
         setPanelPage(null);
         setPanelResult(null);
       }
     },
-    [pages, panelPage],
+    [pages, panelPage, t],
   );
 
   const handleDeleteSelected = useCallback(async (): Promise<void> => {
@@ -761,6 +811,7 @@ function WorkspaceContent(): React.JSX.Element {
           const res = await apiFetch(`/api/documents/${page.document.id}`);
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as DocApiResponse;
+          setPanelAccess({ id: page.id, canEdit: readCanEdit(doc) });
           setPanelResult(mapDocToResult(doc, page, locale, true));
         } catch (err) {
           setError(err instanceof Error ? err.message : t('error'));
@@ -778,6 +829,7 @@ function WorkspaceContent(): React.JSX.Element {
               fileSize?: number;
               errorMessage?: string;
             };
+            setPanelAccess({ id: page.id, canEdit: readCanEdit(fullPage) });
             setPanelPage(fullPage);
           }
         } catch {
@@ -818,14 +870,33 @@ function WorkspaceContent(): React.JSX.Element {
       void handlePageDoubleClick(page);
     },
     onDeleteSelected: () => {
-      void handleDeleteSelected();
+      if (!readOnly) void handleDeleteSelected();
     },
     isPanelOpen: panelPage !== null,
   });
 
+  // Otevřený dokument: canEdit z jeho detailu, do načtení podle svazku.
+  const panelReadOnly = isReadOnly(panelAccess, panelPage?.id, readOnly);
+
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
+      const reloadPanel = async (): Promise<PageItem | null> => {
+        const pageRes = await apiFetch(`/api/pages/${pageId}`);
+        if (!pageRes.ok) return null;
+        const updatedPage = (await pageRes.json()) as PageItem;
+        setPanelPage(updatedPage);
+        setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+        if (updatedPage.document) {
+          const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
+          if (docRes.ok) {
+            const doc = (await docRes.json()) as DocApiResponse;
+            setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+          }
+        }
+        return updatedPage;
+      };
+
       setRegenerating(true);
       setRegenerateStep(t('preparingRetranslation'));
       setRegenerateProgress(0);
@@ -841,40 +912,28 @@ function WorkspaceContent(): React.JSX.Element {
             const hasLocaleTranslation = doc.translations.some((tr) => tr.language === locale);
             if (!hasLocaleTranslation && doc.transcription) {
               setRegenerateStep(t('callingModel'));
-              const retransRes = await apiFetch(
-                `/api/documents/${page.document.id}/retranslate`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ language: locale }),
-                },
-              );
+              const retransRes = await apiFetch(`/api/documents/${page.document.id}/retranslate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ language: locale }),
+              });
               if (!retransRes.ok) {
                 const errData = (await retransRes.json()) as { error?: string };
                 throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
               }
               const { jobId } = (await retransRes.json()) as { jobId: string };
-              await pollJob(jobId, {
+              const outcome = await pollJob(jobId, {
                 onStep: (step) => setRegenerateStep(step),
                 onProgress: (completed, total) => {
                   if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
                 },
               });
               // Reload page and document with new translation
-              const pageRes = await apiFetch(`/api/pages/${pageId}`);
-              if (pageRes.ok) {
-                const updatedPage = (await pageRes.json()) as PageItem;
-                setPanelPage(updatedPage);
-                setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-                if (updatedPage.document) {
-                  const reloadDoc = await apiFetch(
-                    `/api/documents/${updatedPage.document.id}`,
-                  );
-                  if (reloadDoc.ok) {
-                    const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
-                    setPanelResult(mapDocToResult(updatedDoc, updatedPage, locale, false));
-                  }
-                }
+              await reloadPanel();
+              // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
+              // musí vidět, že překlad nevznikl.
+              if (outcome !== 'completed') {
+                setError(t('regenerationFailed'));
               }
               return;
             }
@@ -890,37 +949,25 @@ function WorkspaceContent(): React.JSX.Element {
           });
           if (reparseRes.ok) {
             // Re-parse succeeded — reload document
-            const pageRes = await apiFetch(`/api/pages/${pageId}`);
-            if (pageRes.ok) {
-              const updatedPage = (await pageRes.json()) as PageItem;
-              setPanelPage(updatedPage);
-              setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-              if (updatedPage.document) {
-                const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
-                if (docRes.ok) {
-                  const doc = (await docRes.json()) as DocApiResponse;
-                  setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
-                }
-              }
-            }
+            await reloadPanel();
             return; // Done — no API call needed
           }
-          // Re-parse failed — fall through to full regeneration
+          // Re-parse failed — fall through to full regeneration. Dokument se NEmaže:
+          // worker ho s `regenerate: true` přepíše na místě a předchozí obsah uloží
+          // jako verze. (Dřív se tu volal DELETE, který kaskádou smazal i historii
+          // verzí, a když /process vrátil 402/409, uživatel přišel o vše.)
           console.log('[Regenerate] Re-parse failed, falling back to full regeneration');
-          await apiFetch(`/api/documents/${page.document.id}`, { method: 'DELETE' });
         }
-        // Reset page status
-        await apiFetch(`/api/pages/${pageId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'pending' }),
-        });
-        // Process again via Inngest background job
+        // Process again via worker job
         setRegenerateStep(t('callingModel'));
         const response = await apiFetch('/api/pages/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pageIds: [pageId], language: locale }),
+          body: JSON.stringify({
+            pageIds: [pageId],
+            language: locale,
+            regenerate: Boolean(page?.document),
+          }),
         });
         if (!response.ok) {
           const errData = (await response.json()) as { error?: string };
@@ -928,7 +975,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await response.json()) as { jobId: string };
 
-        await pollJob(jobId, {
+        const outcome = await pollJob(jobId, {
           onStep: (step) => setRegenerateStep(step),
           onProgress: (completed, total) => {
             if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
@@ -936,21 +983,16 @@ function WorkspaceContent(): React.JSX.Element {
         });
 
         // Reload the document after job completes
-        const pageRes = await apiFetch(`/api/pages/${pageId}`);
-        if (pageRes.ok) {
-          const updatedPage = (await pageRes.json()) as PageItem;
-          setPanelPage(updatedPage);
-          setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-          if (updatedPage.document) {
-            const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
-            if (docRes.ok) {
-              const doc = (await docRes.json()) as DocApiResponse;
-              setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
-            }
-          }
+        const updatedPage = await reloadPanel();
+        // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
+        // uživatel musí vidět, že se nic nezměnilo.
+        if (outcome !== 'completed' || updatedPage?.errorMessage) {
+          setError(updatedPage?.errorMessage ?? t('regenerationFailed'));
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : t('regenerationFailed'));
+        // Panel se na začátku vyprázdnil – vrátit původní dokument (nic se nesmazalo).
+        await reloadPanel().catch(() => undefined);
       } finally {
         setRegenerating(false);
         setRegenerateStep(undefined);
@@ -970,9 +1012,10 @@ function WorkspaceContent(): React.JSX.Element {
     for (const id of selectedIds) {
       if (collectionIds.has(id)) {
         // In root view, pages of this collection are NOT in `pages` array.
-        // Use _count as estimate so the button is enabled.
+        // Use _count as estimate so the button is enabled. Cizí svazky se
+        // nezpracují (useProcessingJob je přeskočí), takže se nepočítají.
         const col = collections.find((c) => c.id === id);
-        if (col) collectionPageEstimate += col.processableCount;
+        if (col && col.canEdit !== false) collectionPageEstimate += col.processableCount;
       } else {
         expandedPageIds.add(id);
       }
@@ -994,13 +1037,16 @@ function WorkspaceContent(): React.JSX.Element {
   }, [selected, pages]);
 
   // Drag-and-drop on content area to open upload
-  const handleContentDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    setContentDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      setUploadOpen(true);
-    }
-  }, []);
+  const handleContentDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>): void => {
+      e.preventDefault();
+      setContentDragOver(false);
+      if (!readOnly && e.dataTransfer.files.length > 0) {
+        setUploadOpen(true);
+      }
+    },
+    [readOnly],
+  );
 
   // ---- Share item ----
   const handleShareItem = useCallback(
@@ -1055,7 +1101,10 @@ function WorkspaceContent(): React.JSX.Element {
     const collectionMatches = new Map<string, number>();
     for (const [, result] of searchMatchIds) {
       if (result.collectionId) {
-        collectionMatches.set(result.collectionId, (collectionMatches.get(result.collectionId) ?? 0) + result.matches);
+        collectionMatches.set(
+          result.collectionId,
+          (collectionMatches.get(result.collectionId) ?? 0) + result.matches,
+        );
       }
     }
     return collectionMatches;
@@ -1082,8 +1131,9 @@ function WorkspaceContent(): React.JSX.Element {
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
         onCreateCollection={() => setCreateCollectionDialogOpen(true)}
+        readOnly={readOnly}
         onSortByName={
-          selectedCollectionId
+          selectedCollectionId && !readOnly
             ? async () => {
                 const sorted = [...pages].sort((a, b) => {
                   const nameA = (a.displayName || a.filename).toLowerCase();
@@ -1091,19 +1141,23 @@ function WorkspaceContent(): React.JSX.Element {
                   return nameA.localeCompare(nameB, 'cs', { numeric: true });
                 });
                 setPages(sorted);
-                await Promise.all(
-                  sorted.map((p, i) =>
-                    apiFetch(`/api/pages/${p.id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ order: i }),
-                    }),
-                  ),
-                );
+                try {
+                  await Promise.all(
+                    sorted.map((p, i) =>
+                      apiFetchOk(`/api/pages/${p.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ order: i }),
+                      }),
+                    ),
+                  );
+                } catch {
+                  void loadPages(selectedCollectionId);
+                }
               }
             : undefined
         }
-        onEditContext={() => setContextDialogOpen(true)}
+        onEditContext={readOnly ? undefined : () => setContextDialogOpen(true)}
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}
         processingProgress={processingProgress}
@@ -1111,25 +1165,29 @@ function WorkspaceContent(): React.JSX.Element {
         onPauseProcessing={undefined}
         onResumeProcessing={undefined}
         isPaused={false}
-        onDetectBlank={() => void handleDetectBlank()}
+        onDetectBlank={readOnly ? undefined : () => void handleDetectBlank()}
         detectingBlank={detectingBlank}
         onShareCollection={
-          selectedCollectionId
-            ? () => handleShareItem(selectedCollectionId, 'collection')
-            : selectedGridCollection
-              ? () => handleShareItem(selectedGridCollection.id, 'collection')
-              : undefined
+          readOnly
+            ? undefined
+            : selectedCollectionId
+              ? () => handleShareItem(selectedCollectionId, 'collection')
+              : editableGridCollection
+                ? () => handleShareItem(editableGridCollection.id, 'collection')
+                : undefined
         }
         isCollectionPublic={
           selectedCollectionId
             ? (collections.find((c) => c.id === selectedCollectionId)?.isPublic ?? false)
             : (selectedGridCollection?.isPublic ?? false)
         }
-        onGenerateContext={selectedCollectionId ? () => void handleGenerateContext() : undefined}
+        onGenerateContext={
+          selectedCollectionId && !readOnly ? () => void handleGenerateContext() : undefined
+        }
         generatingContext={generatingContext}
         doneSelectedCount={doneSelectedCount}
         onRenameCollection={
-          (selectedCollectionId ?? selectedGridCollection)
+          !readOnly && (selectedCollectionId ?? editableGridCollection)
             ? () => void handleRenameCollection()
             : undefined
         }
@@ -1139,6 +1197,27 @@ function WorkspaceContent(): React.JSX.Element {
         onSearchChange={setSearchQuery}
         searchResultCount={searchResults.size}
       />
+
+      {/* Cizí svazek (sdílený workspace, veřejný obsah) – jen pro čtení */}
+      {readOnly && (
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+          <svg
+            className="h-3.5 w-3.5 shrink-0 text-slate-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
+            />
+          </svg>
+          {t('readOnlyCollection')}
+        </div>
+      )}
 
       {/* Generating context banner */}
       {generatingContext && (
@@ -1197,7 +1276,7 @@ function WorkspaceContent(): React.JSX.Element {
           e.preventDefault();
           // Only show upload overlay for OS file drags, not internal page-card drags
           const isPageDrag = e.dataTransfer.types.includes('application/x-page-ids');
-          if (!isPageDrag) setContentDragOver(true);
+          if (!isPageDrag && !readOnly) setContentDragOver(true);
         }}
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
@@ -1224,6 +1303,7 @@ function WorkspaceContent(): React.JSX.Element {
                     }}
                     hasContext={!!selectedCollection.context}
                     onSaved={() => void loadCollections()}
+                    readOnly={readOnly}
                   />
                 </div>
               </details>
@@ -1231,7 +1311,7 @@ function WorkspaceContent(): React.JSX.Element {
 
             {/* Kontext díla — 1/3 */}
             {selectedCollection.context &&
-            (selectedCollection.contextLanguage ?? 'cs') === locale ? (
+            ((selectedCollection.contextLanguage ?? 'cs') === locale || readOnly) ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
@@ -1242,51 +1322,57 @@ function WorkspaceContent(): React.JSX.Element {
                       {selectedCollection.context}
                     </ReactMarkdown>
                   </div>
-                  <div className="border-t border-slate-100 px-4 py-2.5">
-                    <button
-                      onClick={() => void fixDocumentContexts(selectedCollection.id)}
-                      disabled={fixingContexts}
-                      className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      {fixingContexts ? (
-                        <>
-                          <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
+                  {!readOnly && (
+                    <div className="border-t border-slate-100 px-4 py-2.5">
+                      <button
+                        onClick={() => void fixDocumentContexts(selectedCollection.id)}
+                        disabled={fixingContexts}
+                        className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        {fixingContexts ? (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                              />
+                            </svg>
+                            {fixingContextsProgress ?? t('fixing')}
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
                               stroke="currentColor"
-                              strokeWidth="4"
-                            />
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                            />
-                          </svg>
-                          {fixingContextsProgress ?? t('fixing')}
-                        </>
-                      ) : (
-                        <>
-                          <svg
-                            className="h-3.5 w-3.5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
-                            />
-                          </svg>
-                          {t('fixContextFromCollection')}
-                        </>
-                      )}
-                    </button>
-                  </div>
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
+                              />
+                            </svg>
+                            {t('fixContextFromCollection')}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </details>
               </div>
             ) : selectedCollection.context &&
@@ -1446,9 +1532,14 @@ function WorkspaceContent(): React.JSX.Element {
                         </div>
                         <div className="flex justify-between border-t border-slate-100 pt-1">
                           <span className="font-medium text-slate-600">{t('price')}</span>
+                          {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
                           <span className="font-semibold text-slate-800">
-                            {'$'}
-                            {selectedCollection.stats?.costUsd.toFixed(2)}
+                            {tDoc('chargeValue', {
+                              czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
+                              credits: (
+                                selectedCollection.stats?.chargeCredits ?? 0
+                              ).toLocaleString(locale),
+                            })}
                           </span>
                         </div>
                       </div>
@@ -1488,8 +1579,14 @@ function WorkspaceContent(): React.JSX.Element {
             onCollectionDoubleClick={handleCollectionSelect}
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
-            onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
-            onReorderPages={(ids, targetId, pos) => void handleReorderPages(ids, targetId, pos)}
+            onMovePages={
+              readOnly ? undefined : (ids, targetId) => void handleMovePages(ids, targetId)
+            }
+            onReorderPages={
+              readOnly
+                ? undefined
+                : (ids, targetId, pos) => void handleReorderPages(ids, targetId, pos)
+            }
             onSetSelected={setSelected}
             onSelectAll={handleSelectAll}
             onDeselectAll={handleDeselectAll}
@@ -1498,10 +1595,13 @@ function WorkspaceContent(): React.JSX.Element {
             onImportClick={() => setUploadOpen(true)}
             focusedItemId={focusedItemId}
             onColumnsChange={setColumnsCount}
-            onToggleBlank={(ids, blank) => void handleToggleBlank(ids, blank)}
-            onShareItem={handleShareItem}
+            onToggleBlank={
+              readOnly ? undefined : (ids, blank) => void handleToggleBlank(ids, blank)
+            }
+            onShareItem={readOnly ? undefined : handleShareItem}
             searchMatchIds={searchMatchIds}
             searchMatchCollectionIds={searchMatchCollectionIds}
+            readOnly={readOnly}
           />
         ) : (
           <FileList
@@ -1524,6 +1624,7 @@ function WorkspaceContent(): React.JSX.Element {
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
             searchMatchIds={searchMatchIds}
+            readOnly={readOnly}
           />
         )}
 
@@ -1539,7 +1640,7 @@ function WorkspaceContent(): React.JSX.Element {
 
       {/* Upload modal */}
       <ImportDialog
-        isOpen={uploadOpen}
+        isOpen={uploadOpen && !readOnly}
         onClose={() => setUploadOpen(false)}
         onPagesImported={handleFilesUploaded}
         collectionId={selectedCollectionId}
@@ -1548,7 +1649,7 @@ function WorkspaceContent(): React.JSX.Element {
       {/* Collection context dialog */}
       {selectedCollection && (
         <CollectionContextDialog
-          isOpen={contextDialogOpen}
+          isOpen={contextDialogOpen && !readOnly}
           onClose={() => setContextDialogOpen(false)}
           collectionId={selectedCollection.id}
           collectionName={selectedCollection.name}
@@ -1615,7 +1716,7 @@ function WorkspaceContent(): React.JSX.Element {
           setPanelPage(updated);
           setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
         }}
-        onRegenerate={(pageId) => void handleRegenerate(pageId)}
+        onRegenerate={panelReadOnly ? undefined : (pageId) => void handleRegenerate(pageId)}
         isRegenerating={regenerating}
         regenerateStep={regenerateStep}
         regenerateProgress={regenerateProgress}
@@ -1640,6 +1741,7 @@ function WorkspaceContent(): React.JSX.Element {
           if (idx >= 0 && idx < pages.length - 1) void handlePageDoubleClick(pages[idx + 1]!);
         }}
         highlightQuery={isSearchOpen ? searchQuery : undefined}
+        readOnly={panelReadOnly}
       />
     </AppShell>
   );

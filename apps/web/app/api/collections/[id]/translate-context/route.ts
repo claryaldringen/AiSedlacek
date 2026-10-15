@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { checkBalance } from '@/lib/infrastructure/billing';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -17,6 +19,13 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  // Jediný LLM endpoint, který dřív zůstatek nekontroloval – fungoval i se
+  // záporným zůstatkem.
+  const { balance, sufficient } = await checkBalance(userId);
+  if (!sufficient) {
+    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
+  }
+
   const { id } = await params;
 
   let body: unknown;
@@ -26,9 +35,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
   }
 
-  const { targetLanguage } = (body as { targetLanguage?: string }) ?? {};
-  if (typeof targetLanguage !== 'string' || !targetLanguage.trim()) {
-    return NextResponse.json({ error: 'Missing targetLanguage' }, { status: 400 });
+  const { targetLanguage } = (body as { targetLanguage?: unknown }) ?? {};
+  if (!isTranslationLanguage(targetLanguage)) {
+    return NextResponse.json({ error: t('unsupportedLanguage') }, { status: 400 });
   }
 
   const collection = await prisma.collection.findUnique({ where: { id } });

@@ -64,8 +64,17 @@ interface FileGridProps {
   onShareItem?: (id: string, type: 'page' | 'collection') => void;
   /** Reorder pages via drag and drop */
   onReorderPages?: (pageIds: string[], targetPageId: string, position: 'before' | 'after') => void;
-  searchMatchIds?: Map<string, { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }> | null;
+  searchMatchIds?: Map<
+    string,
+    { matches: number; snippet: string; collectionId: string | null; collectionName: string | null }
+  > | null;
   searchMatchCollectionIds?: Map<string, number> | null;
+  /**
+   * Cizí svazek – kontextové menu nabízí jen otevření, stránky nejdou přetahovat
+   * a skryje se nahrávání. Přesun/řazení/sdílení/prázdné stránky vypne předání
+   * `undefined` u příslušných handlerů.
+   */
+  readOnly?: boolean;
 }
 
 function cleanFilename(raw: string): string {
@@ -331,6 +340,7 @@ function ShareIcon(): React.JSX.Element {
 // ---------- Memoized page card ----------
 interface PageCardProps {
   page: PageItem;
+  draggable: boolean;
   isSelected: boolean;
   isFocused: boolean;
   effectiveStatus: string;
@@ -354,6 +364,7 @@ interface PageCardProps {
 
 const PageCard = memo(function PageCard({
   page,
+  draggable,
   isSelected,
   isFocused,
   effectiveStatus,
@@ -378,8 +389,10 @@ const PageCard = memo(function PageCard({
   return (
     <div
       ref={(el) => registerRef(page.id, el)}
-      draggable
-      onDragStart={(e) => onDragStart(e, page, isSelected)}
+      draggable={draggable}
+      onDragStart={(e) => {
+        if (draggable) onDragStart(e, page, isSelected);
+      }}
       onDragOver={(e) => onDragOver(e, page.id)}
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, page.id)}
@@ -411,7 +424,7 @@ const PageCard = memo(function PageCard({
         isFocused ? 'outline outline-2 outline-offset-2 outline-blue-400' : '',
         isSearchActive && !isMatch ? 'opacity-20' : '',
       ].join(' ')}
-      style={{ WebkitUserDrag: 'element' } as React.CSSProperties}
+      style={draggable ? ({ WebkitUserDrag: 'element' } as React.CSSProperties) : undefined}
     >
       {/* Drop indicator */}
       {dropIndicatorPosition === 'before' && (
@@ -586,6 +599,7 @@ export function FileGrid({
   onReorderPages,
   searchMatchIds,
   searchMatchCollectionIds,
+  readOnly = false,
 }: FileGridProps): React.JSX.Element {
   const t = useTranslations('fileGrid');
   const [dragOverCollectionId, setDragOverCollectionId] = useState<string | null>(null);
@@ -693,6 +707,9 @@ export function FileGrid({
         onClick: () => onPageDoubleClick(page),
       });
 
+      // Cizí svazek – zbytek menu jsou zápisové akce, které by API odmítlo.
+      if (readOnly) return items;
+
       items.push({
         label: t('contextMenuProcess'),
         icon: <ProcessIcon />,
@@ -746,6 +763,7 @@ export function FileGrid({
     [
       t,
       selected,
+      readOnly,
       onPageDoubleClick,
       onProcessSelected,
       onDeleteSelected,
@@ -772,7 +790,7 @@ export function FileGrid({
         },
       ];
 
-      if (onShareItem) {
+      if (onShareItem && col.canEdit !== false) {
         items.push({ type: 'divider' });
         items.push({
           label: col.isPublic ? t('contextMenuShareSettings') : t('contextMenuSharePublic'),
@@ -798,19 +816,22 @@ export function FileGrid({
   );
 
   const buildEmptyContextMenu = useCallback((): ContextMenuEntry[] => {
-    return [
+    const items: ContextMenuEntry[] = [
       {
         label: t('contextMenuSelectAll'),
         icon: <SelectAllIcon />,
         onClick: onSelectAll,
       },
-      {
+    ];
+    if (!readOnly) {
+      items.push({
         label: t('contextMenuUpload'),
         icon: <UploadIcon />,
         onClick: onImportClick,
-      },
-    ];
-  }, [t, onSelectAll, onImportClick]);
+      });
+    }
+    return items;
+  }, [t, readOnly, onSelectAll, onImportClick]);
 
   // ---------- Right-click handler ----------
   const handleContextMenu = useCallback(
@@ -1068,7 +1089,7 @@ export function FileGrid({
           />
         </svg>
         <p className="text-slate-500">{t('emptyFolder')}</p>
-        <p className="mt-1 text-sm text-slate-400">{t('emptyFolderHint')}</p>
+        {!readOnly && <p className="mt-1 text-sm text-slate-400">{t('emptyFolderHint')}</p>}
       </div>
     );
   }
@@ -1119,6 +1140,9 @@ export function FileGrid({
                     handleContextMenu(e, 'collection', col);
                   }}
                   onDragOver={(e) => {
+                    // Do cizího svazku (jen pro čtení) přesouvat nelze – bez
+                    // preventDefault prohlížeč drop nepovolí.
+                    if (col.canEdit === false) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     setDragOverCollectionId(col.id);
@@ -1128,7 +1152,7 @@ export function FileGrid({
                     e.preventDefault();
                     setDragOverCollectionId(null);
                     const ids = getDraggedPageIds(e);
-                    if (ids.length > 0) onMovePages?.(ids, col.id);
+                    if (ids.length > 0 && col.canEdit !== false) onMovePages?.(ids, col.id);
                   }}
                   className={[
                     'group relative cursor-pointer rounded-lg border-2 transition-all',
@@ -1207,6 +1231,7 @@ export function FileGrid({
                 <PageCard
                   key={page.id}
                   page={page}
+                  draggable={!readOnly}
                   isSelected={selected.has(page.id)}
                   isFocused={focusedItemId === page.id}
                   effectiveStatus={processingPageIds.has(page.id) ? 'processing' : page.status}

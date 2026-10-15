@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { TRANSLATE_ONLY_SYSTEM_PROMPT, BATCH_OCR_INSTRUCTION } from '@ai-sedlacek/shared';
 import { parseOcrJson } from './parse';
 import { SYSTEM_PROMPT } from './process';
+import type { OcrAttemptUsage } from './process';
 import type { ProcessingMode, StructuredOcrResult } from './types';
 
 const OCR_JSON_SCHEMA = JSON.stringify({
@@ -188,6 +189,7 @@ export async function processWithClaudeCli(
   model: string;
   inputTokens: number;
   outputTokens: number;
+  declinedAttempts: OcrAttemptUsage[];
 }> {
   const startTime = Date.now();
   const estimated = estimatedOutputTokens ?? 1500;
@@ -221,6 +223,8 @@ export async function processWithClaudeCli(
       model: 'claude-cli',
       inputTokens: 0,
       outputTokens: 0,
+      // CLI nemá serverový fallback
+      declinedAttempts: [],
     };
   } finally {
     await unlink(tmpPath).catch(() => {});
@@ -248,6 +252,10 @@ export async function processWithClaudeBatchCli(
   model: string;
   inputTokens: number;
   outputTokens: number;
+  stopReason: string | null;
+  truncated: boolean;
+  parseProblem: string | null;
+  declinedAttempts: OcrAttemptUsage[];
 }> {
   const startTime = Date.now();
   const totalEstimated = options?.estimatedOutputTokens ?? 2500 * images.length;
@@ -292,6 +300,13 @@ export async function processWithClaudeBatchCli(
     model: 'claude-cli',
     inputTokens: 0,
     outputTokens: 0,
+    // CLI zpracovává stránky po jedné se structured output – useknutí nehrozí
+    stopReason: 'end_turn',
+    truncated: false,
+    // Index stránky určuje volající (stránky jdou po jedné), ne model
+    parseProblem: null,
+    // CLI nemá serverový fallback
+    declinedAttempts: [],
   };
 }
 

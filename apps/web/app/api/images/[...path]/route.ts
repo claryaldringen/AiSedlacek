@@ -21,7 +21,11 @@ export async function GET(
           ? 'image/jpeg'
           : ext === '.webp'
             ? 'image/webp'
-            : 'application/octet-stream';
+            : ext === '.tif' || ext === '.tiff'
+              ? 'image/tiff'
+              : ext === '.gif'
+                ? 'image/gif'
+                : 'application/octet-stream';
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600' },

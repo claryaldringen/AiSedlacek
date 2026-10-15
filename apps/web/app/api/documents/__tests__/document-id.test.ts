@@ -45,9 +45,13 @@ vi.mock('@auth/prisma-adapter', () => ({
 
 const routeContext = { params: Promise.resolve({ id: 'doc-1' }) };
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+const CS_LOCALE = { 'x-locale': 'cs' };
+
 function makeGetRequest(): NextRequest {
   return new NextRequest('http://localhost/api/documents/doc-1', {
     method: 'GET',
+    headers: CS_LOCALE,
   });
 }
 
@@ -56,7 +60,7 @@ function makePatchRequest(body: unknown): NextRequest {
     new Request('http://localhost/api/documents/doc-1', {
       method: 'PATCH',
       body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
     }),
   );
 }
@@ -64,6 +68,7 @@ function makePatchRequest(body: unknown): NextRequest {
 function makeDeleteRequest(): NextRequest {
   return new NextRequest('http://localhost/api/documents/doc-1', {
     method: 'DELETE',
+    headers: CS_LOCALE,
   });
 }
 
@@ -99,7 +104,14 @@ describe('GET /api/documents/[id]', () => {
 
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
-      include: { translations: true, glossary: true, page: { select: { userId: true } } },
+      omit: { rawResponse: true },
+      include: {
+        translations: true,
+        glossary: true,
+        page: {
+          select: { id: true, userId: true, isPublic: true, status: true, collectionId: true },
+        },
+      },
     });
   });
 
@@ -166,7 +178,7 @@ describe('PATCH /api/documents/[id]', () => {
       new Request('http://localhost/api/documents/doc-1', {
         method: 'PATCH',
         body: 'not json{{{',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CS_LOCALE },
       }),
     );
 
@@ -232,7 +244,22 @@ describe('PATCH /api/documents/[id]', () => {
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: { context: 'Nový kontext' },
+      select: { id: true },
     });
+  });
+
+  it('never reads rawResponse – neither in the pre-read nor in the returned re-read', async () => {
+    // rawResponse u dávek obsahuje celý batch JSONL (i výstup cizích stránek).
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC);
+    mockFindUnique.mockResolvedValueOnce({ ...FAKE_DOC, transcription: 'Nový text' });
+
+    const res = await PATCH(makePatchRequest({ transcription: 'Nový text' }), routeContext);
+
+    expect(res.status).toBe(200);
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
+    const [preRead, reRead] = mockFindUnique.mock.calls.map((c) => c[0]);
+    expect(preRead).toMatchObject({ where: { id: 'doc-1' }, omit: { rawResponse: true } });
+    expect(reRead).toMatchObject({ where: { id: 'doc-1' }, omit: { rawResponse: true } });
   });
 });
 

@@ -16,9 +16,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const page = await prisma.page.findUnique({
     where: { id: pageId },
-    select: { displayName: true, filename: true, collectionId: true },
+    select: { displayName: true, filename: true, collectionId: true, status: true },
   });
-  if (!page || page.collectionId !== ps.targetId) return { title: t('notFound') };
+  // Archivovaná stránka vrací 404 (viz níže) – titulek nesmí prozradit její název.
+  if (!page || page.collectionId !== ps.targetId || page.status === 'archived') {
+    return { title: t('notFound') };
+  }
 
   return { title: `${page.displayName ?? 'Dokument'} — AiSedlacek` };
 }
@@ -39,7 +42,7 @@ export default async function PublicCollectionPageView({
   if (!collection || !collection.isPublic) notFound();
 
   const allPages = await prisma.page.findMany({
-    where: { collectionId: collection.id },
+    where: { collectionId: collection.id, status: { not: 'archived' } },
     orderBy: { order: 'asc' },
     select: { id: true, displayName: true, filename: true, order: true },
   });

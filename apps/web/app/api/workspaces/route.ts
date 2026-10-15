@@ -26,7 +26,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     orderBy: { createdAt: 'asc' },
   });
 
-  return NextResponse.json(workspaces);
+  // Pozvánkový kód je klíč k členství – vidí ho jen vlastník, ne každý člen.
+  return NextResponse.json(
+    workspaces.map((w) => ({ ...w, inviteCode: w.ownerId === userId ? w.inviteCode : null })),
+  );
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

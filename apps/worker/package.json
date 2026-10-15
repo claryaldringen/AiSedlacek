@@ -16,8 +16,8 @@
     "@ai-sedlacek/db": "*",
     "@ai-sedlacek/ocr": "*",
     "@ai-sedlacek/shared": "*",
-    "@anthropic-ai/sdk": "^0.78.0",
-    "sharp": "^0.33"
+    "@anthropic-ai/sdk": "^0.134.0",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/node": "^22",

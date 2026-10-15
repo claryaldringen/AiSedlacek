@@ -25,6 +25,11 @@ vi.mock('@/lib/auth', () => ({
   requireUserId: vi.fn().mockResolvedValue('test-user-id'),
 }));
 
+const mockGetOwnedCollection = vi.fn();
+vi.mock('@/lib/infrastructure/authz', () => ({
+  getOwnedCollection: (...args: unknown[]) => mockGetOwnedCollection(...args),
+}));
+
 vi.mock('@/lib/infrastructure/billing', () => ({
   checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
@@ -32,11 +37,12 @@ vi.mock('@/lib/infrastructure/billing', () => ({
 
 // ── Helpers ──────────────────────────────────────────────
 
+// Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/pages/process', {
     method: 'POST',
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-locale': 'cs' },
   });
 }
 
@@ -52,6 +58,9 @@ describe('POST /api/pages/process', () => {
     mockPageUpdateMany.mockResolvedValue({ count: 0 });
     mockProcessingJobFindFirst.mockResolvedValue(null); // No running job
     mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'queued' });
+    mockGetOwnedCollection.mockImplementation((userId: string, id: string) =>
+      Promise.resolve({ id, userId }),
+    );
     // Default: ownership check returns matching pages
     mockPageFindMany.mockImplementation((args: Record<string, unknown>) => {
       const where = args?.where as Record<string, unknown> | undefined;
@@ -117,7 +126,7 @@ describe('POST /api/pages/process', () => {
 
     // Verify pages were set to processing
     expect(mockPageUpdateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['page-1', 'page-2'] } },
+      where: { id: { in: ['page-1', 'page-2'] }, status: { notIn: ['blank', 'archived'] } },
       data: { status: 'processing', errorMessage: null },
     });
   });
@@ -156,6 +165,53 @@ describe('POST /api/pages/process', () => {
         }),
       }),
     );
+  });
+
+  it('returns 409 when the same pages are already in a running job (no collection)', async () => {
+    mockProcessingJobFindFirst.mockImplementation((args: { where: Record<string, unknown> }) =>
+      Promise.resolve('pageIds' in args.where ? { id: 'job-running' } : null),
+    );
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).jobId).toBe('job-running');
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for archived pages and does not touch them', async () => {
+    mockPageFindMany.mockResolvedValue([{ id: 'page-1', collectionId: null, status: 'archived' }]);
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(404);
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+    expect(mockPageUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when collectionId belongs to another user', async () => {
+    mockGetOwnedCollection.mockResolvedValue(null);
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'], collectionId: 'foreign-col' }));
+
+    expect(res.status).toBe(404);
+    expect(mockGetOwnedCollection).toHaveBeenCalledWith('test-user-id', 'foreign-col');
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
+  it('stores regenerate flag in jobData', async () => {
+    const res = await POST(makeRequest({ pageIds: ['page-1'], regenerate: true }));
+
+    expect(res.status).toBe(200);
+    const data = mockProcessingJobCreate.mock.calls[0]![0].data as { jobData: string | null };
+    expect(JSON.parse(data.jobData!)).toEqual({ regenerate: true });
+  });
+
+  it('does not set jobData for ordinary processing', async () => {
+    await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    const data = mockProcessingJobCreate.mock.calls[0]![0].data as { jobData: string | null };
+    expect(data.jobData).toBeNull();
   });
 
   it('returns 403 when pages do not belong to user', async () => {

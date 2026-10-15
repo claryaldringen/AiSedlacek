@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"app/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",
+    "lint": "eslint \"app/**/*.{ts,tsx}\" \"lib/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"hooks/**/*.{ts,tsx}\" \"i18n/**/*.ts\" middleware.ts --no-error-on-unmatched-pattern",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,css}\" --ignore-path ../../.gitignore",
     "test": "vitest run"
@@ -17,7 +17,7 @@
     "@ai-sedlacek/db": "*",
     "@ai-sedlacek/ocr": "*",
     "@ai-sedlacek/shared": "*",
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^0.134.0",
     "@auth/prisma-adapter": "^2.11.1",
     "@prisma/client": "^6",
     "@tailwindcss/typography": "^0.5.19",
@@ -30,7 +30,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "resend": "^6.9.4",
-    "sharp": "^0.33"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -40,6 +40,7 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^3",
     "eslint": "^9",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3",
     "prisma": "^6",
     "tailwindcss": "^4",

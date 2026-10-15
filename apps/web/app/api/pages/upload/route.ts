@@ -1,16 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
-import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
+import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
+import {
+  InvalidImageError,
+  invalidImageMessage,
+  isReusableStoredImageUrl,
+  validateImage,
+  type ValidatedImage,
+} from '@/lib/infrastructure/image-validation';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
+import { readBodyLimited } from '@/lib/infrastructure/read-body';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp'];
-const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
+// Nečíselná hodnota v env nesmí vypnout limity (NaN > x je vždy false).
+const parsedMaxSize = Number.parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '', 10);
+const MAX_SIZE_MB = Number.isFinite(parsedMaxSize) && parsedMaxSize > 0 ? parsedMaxSize : 20;
+// UI (ImportDialog) i CLI (`ais upload`) posílají po jednom souboru – víc souborů
+// v jednom requestu jen zvětšuje, kolik paměti jeden request zabere.
+const MAX_FILES_PER_REQUEST = 1;
+// Jeden soubor + 1 MB na multipart hlavičky a pole collectionId
+// (výchozí 20 MB soubor → 21 MiB = 22 020 096 B; Caddy `max_size` musí být aspoň tolik).
+const MAX_REQUEST_BYTES = MAX_SIZE_MB * 1024 * 1024 * MAX_FILES_PER_REQUEST + 1024 * 1024;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -19,9 +34,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth.error) return auth.error;
   const { userId } = auth;
 
+  // Route handlery v App Routeru nemají limit těla a formData() celý multipart
+  // načte do paměti – větší tělo odmítnout dřív, než se celé načte.
   let formData: FormData;
   try {
-    formData = await request.formData();
+    const body = await readBodyLimited(request, MAX_REQUEST_BYTES);
+    if (body === null) {
+      return NextResponse.json({ error: t('requestTooLarge') }, { status: 413 });
+    }
+    formData = await new Response(body as BodyInit, {
+      headers: { 'content-type': request.headers.get('content-type') ?? '' },
+    }).formData();
   } catch {
     return NextResponse.json({ error: t('invalidFormData') }, { status: 400 });
   }
@@ -37,6 +60,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const files = formData.getAll('files');
+  if (files.length > MAX_FILES_PER_REQUEST) {
+    return NextResponse.json({ error: t('tooManyFiles') }, { status: 413 });
+  }
   if (files.length === 0) {
     return NextResponse.json({ error: t('noFile') }, { status: 400 });
   }
@@ -52,15 +78,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const file = entry as File;
+    // Client filename is kept for display only – it never reaches the disk.
     const filename = file.name ?? 'upload';
-
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      errors.push({
-        filename,
-        error: t('unsupportedFormat'),
-      });
-      continue;
-    }
 
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       errors.push({ filename, error: t('fileTooLarge', { max: MAX_SIZE_MB }) });
@@ -69,6 +88,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
+
+      // Format is detected from the content, never from file.type (SEC-1).
+      let image: ValidatedImage;
+      try {
+        image = await withSharpLimit(() => validateImage(buffer));
+      } catch (err) {
+        if (!(err instanceof InvalidImageError)) throw err;
+        errors.push({ filename, error: invalidImageMessage(err, t) });
+        continue;
+      }
+
       const hash = crypto.createHash('sha256').update(buffer).digest('hex');
 
       // Check for duplicate by hash (scoped to user)
@@ -85,45 +115,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      // Cross-user dedup: reuse storage file if any user already uploaded this hash
+      // Cross-user dedup: reuse storage file if any user already uploaded this hash,
+      // but only if it is stored under an image extension (files stored before
+      // content validation may carry the client's extension, e.g. .html).
       const existingGlobal = await prisma.page.findFirst({
         where: { hash },
         select: { imageUrl: true },
       });
 
-      const storageResult = existingGlobal
-        ? { url: existingGlobal.imageUrl }
-        : await storage.upload(buffer, filename);
-      const thumbnailUrl = await generateThumbnail(buffer, filename);
+      const imageUrl =
+        existingGlobal && isReusableStoredImageUrl(existingGlobal.imageUrl)
+          ? existingGlobal.imageUrl
+          : (await storage.upload(buffer, image.extension)).url;
+      const thumbnailUrl = await saveThumbnail(image.thumbnail);
 
       // Detect blank pages (parchment without writing)
       const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
-      const detectedBlank = await isBlankPage(buffer);
-
-      // Extract image metadata
-      let width: number | undefined;
-      let height: number | undefined;
-      try {
-        const metadata = await sharp(buffer).metadata();
-        width = metadata.width;
-        height = metadata.height;
-      } catch {
-        // not a valid image for sharp – skip metadata
-      }
+      const detectedBlank = await withSharpLimit(() => isBlankPage(buffer));
 
       const page = await prisma.page.create({
         data: {
           userId,
           filename,
           hash,
-          imageUrl: storageResult.url,
+          imageUrl,
           thumbnailUrl,
           collectionId: resolvedCollectionId,
           status: detectedBlank ? 'blank' : 'pending',
-          mimeType: file.type,
+          mimeType: image.mimeType,
           fileSize: buffer.length,
-          width,
-          height,
+          width: image.width,
+          height: image.height,
         },
       });
 

@@ -54,10 +54,11 @@ vi.mock('@/lib/adapters/storage/local-storage', () => ({
 // ── Helpers ──────────────────────────────────────────────
 
 function makeRequest(id: string, method: string, body?: unknown): NextRequest {
-  const init: RequestInit = { method };
+  // Hlavička x-locale simuluje český frontend – API podle ní volí jazyk hlášek.
+  const init: RequestInit = { method, headers: { 'x-locale': 'cs' } };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { 'Content-Type': 'application/json', 'x-locale': 'cs' };
   }
   return new NextRequest(new Request(`http://localhost/api/pages/${id}`, init));
 }
@@ -177,6 +178,21 @@ describe('PATCH /api/pages/[id] – sharing fields', () => {
           targetId: 'page-1',
         }),
       }),
+    );
+  });
+
+  it('slug-only change on a public page keeps it public (recreates PublicSlug)', async () => {
+    mockPageFindUnique.mockResolvedValue({ ...FAKE_PAGE, isPublic: true, slug: 'stary-slug' });
+
+    const res = await updatePage(
+      makeRequest('page-1', 'PATCH', { slug: 'novy-slug' }),
+      routeContext('page-1'),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalled();
+    expect(mockPublicSlugCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ slug: 'novy-slug' }) }),
     );
   });
 

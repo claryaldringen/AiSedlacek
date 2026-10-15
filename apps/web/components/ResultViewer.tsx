@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { computeCostRaw, formatCost, TOKEN_MULTIPLIER } from '@/lib/pricing';
-import { apiFetch } from '@/lib/infrastructure/api-client';
+import { chargeForUsage, formatCzk } from '@/lib/pricing';
+import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
   id: string;
@@ -46,6 +46,8 @@ interface ResultViewerProps {
   result: DocumentResult;
   onUpdate?: (updated: DocumentResult) => void;
   highlightQuery?: string;
+  /** Cizí dokument – bez editace textů a obnovy verzí (historie zůstane k prohlížení). */
+  readOnly?: boolean;
 }
 
 function processChildren(
@@ -58,7 +60,13 @@ function processChildren(
   });
 }
 
-function HighlightedMarkdown({ content, query }: { content: string; query?: string }): React.JSX.Element {
+function HighlightedMarkdown({
+  content,
+  query,
+}: {
+  content: string;
+  query?: string;
+}): React.JSX.Element {
   if (!query || query.length < 2) {
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
   }
@@ -70,7 +78,13 @@ function HighlightedMarkdown({ content, query }: { content: string; query?: stri
     const parts = text.split(regex);
     if (parts.length <= 1) return text;
     return parts.map((part, i) =>
-      regex.test(part) ? <mark key={i} className="bg-yellow-200 rounded px-0.5">{part}</mark> : part
+      regex.test(part) ? (
+        <mark key={i} className="bg-yellow-200 rounded px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
     );
   };
 
@@ -79,9 +93,15 @@ function HighlightedMarkdown({ content, query }: { content: string; query?: stri
       remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children, ...props }) => <p {...props}>{processChildren(children, highlightText)}</p>,
-        li: ({ children, ...props }) => <li {...props}>{processChildren(children, highlightText)}</li>,
-        td: ({ children, ...props }) => <td {...props}>{processChildren(children, highlightText)}</td>,
-        th: ({ children, ...props }) => <th {...props}>{processChildren(children, highlightText)}</th>,
+        li: ({ children, ...props }) => (
+          <li {...props}>{processChildren(children, highlightText)}</li>
+        ),
+        td: ({ children, ...props }) => (
+          <td {...props}>{processChildren(children, highlightText)}</td>
+        ),
+        th: ({ children, ...props }) => (
+          <th {...props}>{processChildren(children, highlightText)}</th>
+        ),
       }}
     >
       {content}
@@ -96,13 +116,22 @@ function EditableSection({
   onSave,
   saving,
   highlightQuery,
+  readOnly = false,
+  lockedReason,
 }: {
   title: string;
   subtitle?: string;
   content: string;
-  onSave: (newContent: string) => void;
+  /** Vrací true po úspěšném uložení – při chybě zůstane editor otevřený s rozepsaným textem. */
+  onSave: (newContent: string) => Promise<boolean>;
   saving?: boolean;
   highlightQuery?: string;
+  readOnly?: boolean;
+  /**
+   * Dočasný zámek (běžící retranslace) – úprava ani uložení nejdou, důvod se
+   * ukáže v tooltipu a u otevřeného editoru i textem. Rozepsaný text zůstane.
+   */
+  lockedReason?: string;
 }): React.JSX.Element {
   const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
@@ -114,10 +143,9 @@ function EditableSection({
     setEditing(true);
   }, [content]);
 
-  const handleSave = useCallback((): void => {
+  const handleSave = useCallback(async (): Promise<void> => {
     const md = editorRef.current?.getMarkdown() ?? draft;
-    onSave(md);
-    setEditing(false);
+    if (await onSave(md)) setEditing(false);
   }, [draft, onSave]);
 
   const handleCancel = useCallback((): void => {
@@ -131,13 +159,17 @@ function EditableSection({
           <h2 className="text-sm font-semibold text-stone-700">{title}</h2>
           {subtitle && <p className="text-xs text-stone-400">{subtitle}</p>}
         </div>
-        {!editing ? (
-          <button
-            onClick={handleEdit}
-            className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-          >
-            {tc('edit')}
-          </button>
+        {readOnly ? null : !editing ? (
+          // Zakázané tlačítko nevyvolá tooltip – title nese obalující span.
+          <span title={lockedReason}>
+            <button
+              onClick={handleEdit}
+              disabled={Boolean(lockedReason)}
+              className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+            >
+              {tc('edit')}
+            </button>
+          </span>
         ) : (
           <div className="flex gap-1">
             <button
@@ -146,18 +178,21 @@ function EditableSection({
             >
               {tc('cancel')}
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:opacity-50"
-            >
-              {saving ? tc('saving') : tc('save')}
-            </button>
+            <span title={lockedReason}>
+              <button
+                onClick={() => void handleSave()}
+                disabled={saving || Boolean(lockedReason)}
+                className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? tc('saving') : tc('save')}
+              </button>
+            </span>
           </div>
         )}
       </div>
-      {editing ? (
+      {editing && !readOnly ? (
         <div className="p-2">
+          {lockedReason && <p className="px-1 pb-2 text-xs text-amber-700">{lockedReason}</p>}
           <MarkdownEditor ref={editorRef} initialValue={content} onChange={setDraft} />
         </div>
       ) : (
@@ -169,10 +204,35 @@ function EditableSection({
   );
 }
 
-export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerProps): React.JSX.Element {
+export function ResultViewer({
+  result,
+  onUpdate,
+  highlightQuery,
+  readOnly = false,
+}: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
+  const tc = useTranslations('common');
+  const locale = useLocale();
+  // Cena pro uživatele – stejný výpočet jako účtování kreditů.
+  const formatCharge = (
+    model: string | null | undefined,
+    inputTokens: number | null | undefined,
+    outputTokens: number | null | undefined,
+  ): string | null => {
+    const charge = chargeForUsage(model, inputTokens, outputTokens);
+    return charge
+      ? t('chargeValue', {
+          czk: formatCzk(charge.czk, locale),
+          credits: charge.credits.toLocaleString(locale),
+        })
+      : null;
+  };
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
+  // Během retranslace se texty needitují – ruční úprava překladu by se srazila
+  // s výsledkem jobu (přepsal by ji) a nová transkripce by spustila další
+  // souběžnou retranslaci.
+  const retranslateLock = retranslating ? t('editLockedWhileRetranslating') : undefined;
 
   // Interval pro polling retranslace ukládáme do refu, aby šel uklidit.
   const retranslatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -194,19 +254,40 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
     return () => stopRetranslatePoll();
   }, [result.id, stopRetranslatePoll]);
 
+  // Chyba posledního uložení – bez ní se dřív editace při chybě serveru tvářila
+  // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi, proto apiFetchOk).
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Neúspěšná retranslace (useknutý výstup, odmítnutí modelem, konflikt s ruční
+  // úpravou, nedostatek kreditu) – bez hlášky by překlad tiše zůstal starý.
+  const [retranslateError, setRetranslateError] = useState<string | null>(null);
+
   const saveField = useCallback(
-    async (field: string, value: string): Promise<DocumentResult> => {
+    async (
+      field: 'transcription' | 'translation' | 'context',
+      value: string,
+      translationLanguage: string = result.translationLanguage,
+    ): Promise<DocumentResult> => {
       setSaving(true);
+      setSaveError(null);
       try {
         const body: Record<string, string> = { [field]: value };
         if (field === 'translation') {
-          body.translationLanguage = result.translationLanguage;
+          body.translationLanguage = translationLanguage;
         }
-        await apiFetch(`/api/documents/${result.id}`, {
+        await apiFetchOk(`/api/documents/${result.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+        }).catch((e: unknown) => {
+          // Chyba serveru nese vlastní hlášku; síťová chyba (offline, abort) obecnou,
+          // aby uživatel nepřišel o zpětnou vazbu, že se nic neuložilo.
+          setSaveError(e instanceof ApiError ? e.message : tc('unknownError'));
+          throw e;
         });
+        // Překlad v jiném jazyce (obnova verze) nemění zobrazený překlad.
+        if (field === 'translation' && translationLanguage !== result.translationLanguage) {
+          return result;
+        }
         const updated = { ...result, [field]: value };
         onUpdate?.(updated);
         return updated;
@@ -214,18 +295,41 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
         setSaving(false);
       }
     },
-    [result, onUpdate],
+    [result, onUpdate, tc],
+  );
+
+  const trySaveField = useCallback(
+    async (
+      field: 'transcription' | 'translation' | 'context',
+      value: string,
+      translationLanguage?: string,
+    ): Promise<boolean> => {
+      try {
+        await saveField(field, value, translationLanguage);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [saveField],
   );
 
   const handleTranscriptionSave = useCallback(
-    async (newText: string): Promise<void> => {
+    async (newText: string): Promise<boolean> => {
       // Dokument, pro který tento poll běží — výsledek aplikujeme jen pokud
       // je při dokončení stále otevřený tentýž dokument.
       const docId = result.id;
-      const updated = await saveField('transcription', newText);
+      let updated: DocumentResult;
+      try {
+        updated = await saveField('transcription', newText);
+      } catch {
+        // Neuložená transkripce nesmí spustit (placenou) retranslaci.
+        return false;
+      }
 
       // Re-translate based on updated transcription via worker job
       setRetranslating(true);
+      setRetranslateError(null);
       try {
         const res = await apiFetch(`/api/documents/${result.id}/retranslate`, {
           method: 'POST',
@@ -236,8 +340,17 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
           }),
         });
         if (!res.ok) {
+          // Transkripce je uložená, jen překlad se nespustil (kredit, souběžný job).
+          const data = (await res.json().catch(() => ({}))) as { error?: unknown };
+          setRetranslateError(
+            res.status === 402 || data.error === 'insufficient_tokens'
+              ? t('retranslationInsufficientCredit')
+              : typeof data.error === 'string'
+                ? data.error
+                : t('retranslationFailed'),
+          );
           setRetranslating(false);
-          return;
+          return true;
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
@@ -253,7 +366,8 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
             }
             const statusData = (await statusRes.json()) as {
               status: string;
-              currentStep?: string;
+              currentStep?: string | null;
+              errors?: string[];
             };
             if (
               statusData.status === 'completed' ||
@@ -262,6 +376,10 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
             ) {
               stopRetranslatePoll();
               setRetranslating(false);
+              if (statusData.status === 'error' && currentResultIdRef.current === docId) {
+                // Worker ukládá důvod do errors (poslední = tento běh), jinak obecná hláška.
+                setRetranslateError(statusData.errors?.at(-1) || t('retranslationFailed'));
+              }
               if (statusData.status === 'completed') {
                 // Reload the document to get the new translation
                 const docRes = await apiFetch(`/api/documents/${result.id}`);
@@ -299,12 +417,22 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
       } catch {
         setRetranslating(false);
       }
+      return true;
     },
-    [result, onUpdate, saveField, stopRetranslatePoll],
+    [result, onUpdate, saveField, stopRetranslatePoll, t],
   );
 
   return (
     <div className="flex flex-col">
+      {saveError && (
+        <ErrorBanner
+          message={`${t('savingFailed')}: ${saveError}`}
+          onDismiss={() => setSaveError(null)}
+        />
+      )}
+      {retranslateError && (
+        <ErrorBanner message={retranslateError} onDismiss={() => setRetranslateError(null)} />
+      )}
       {retranslating && (
         <div className="overflow-hidden border-b border-blue-200 bg-blue-50">
           <div className="flex items-center gap-2 px-4 py-2 text-sm text-blue-700">
@@ -341,9 +469,11 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
             title={t('transcription')}
             subtitle={t('originalLanguage', { lang: result.detectedLanguage })}
             content={result.transcription}
-            onSave={(text) => void handleTranscriptionSave(text)}
+            onSave={handleTranscriptionSave}
             saving={saving}
             highlightQuery={highlightQuery}
+            readOnly={readOnly}
+            lockedReason={retranslateLock}
           />
         </div>
         <div className="flex flex-col">
@@ -351,9 +481,11 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
             title={t('translation')}
             subtitle={`${t('translationLanguage', { lang: result.translationLanguage })}${retranslating ? ' ' + t('translationUpdating') : ''}`}
             content={result.translation}
-            onSave={(text) => void saveField('translation', text)}
+            onSave={(text) => trySaveField('translation', text)}
             saving={saving}
             highlightQuery={highlightQuery}
+            readOnly={readOnly}
+            lockedReason={retranslateLock}
           />
         </div>
       </div>
@@ -390,8 +522,9 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
           <EditableSection
             title={t('context')}
             content={result.context || ''}
-            onSave={(text) => void saveField('context', text)}
+            onSave={(text) => trySaveField('context', text)}
             saving={saving}
+            readOnly={readOnly}
           />
         </div>
       </div>
@@ -412,8 +545,8 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
                   value={
                     result.inputTokens != null || result.outputTokens != null
                       ? t('tokensInOut', {
-                          in: (result.inputTokens ?? 0) * TOKEN_MULTIPLIER,
-                          out: (result.outputTokens ?? 0) * TOKEN_MULTIPLIER,
+                          in: (result.inputTokens ?? 0).toLocaleString(locale),
+                          out: (result.outputTokens ?? 0).toLocaleString(locale),
                         })
                       : null
                   }
@@ -426,7 +559,7 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
                 />
                 <MetadataRow
                   label={t('totalPrice')}
-                  value={formatCost(result.model, result.inputTokens, result.outputTokens)}
+                  value={formatCharge(result.model, result.inputTokens, result.outputTokens)}
                 />
                 <MetadataRow
                   label={t('createdAt')}
@@ -447,15 +580,15 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
                       result.translationInputTokens != null ||
                       result.translationOutputTokens != null
                         ? t('tokensInOut', {
-                            in: (result.translationInputTokens ?? 0) * TOKEN_MULTIPLIER,
-                            out: (result.translationOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                            in: (result.translationInputTokens ?? 0).toLocaleString(locale),
+                            out: (result.translationOutputTokens ?? 0).toLocaleString(locale),
                           })
                         : null
                     }
                   />
                   <MetadataRow
                     label={t('totalPrice')}
-                    value={formatCost(
+                    value={formatCharge(
                       result.translationModel,
                       result.translationInputTokens,
                       result.translationOutputTokens,
@@ -470,13 +603,13 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
                   <MetadataRow
                     label={t('tokens')}
                     value={t('tokensInOut', {
-                      in: (result.chatInputTokens ?? 0) * TOKEN_MULTIPLIER,
-                      out: (result.chatOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                      in: (result.chatInputTokens ?? 0).toLocaleString(locale),
+                      out: (result.chatOutputTokens ?? 0).toLocaleString(locale),
                     })}
                   />
                   <MetadataRow
                     label={t('totalPrice')}
-                    value={formatCost(
+                    value={formatCharge(
                       result.chatModel,
                       result.chatInputTokens,
                       result.chatOutputTokens,
@@ -486,27 +619,25 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
               )}
 
               {(() => {
-                const processCost = computeCostRaw(
-                  result.model,
-                  result.inputTokens,
-                  result.outputTokens,
-                );
-                const translationCost = computeCostRaw(
-                  result.translationModel,
-                  result.translationInputTokens,
-                  result.translationOutputTokens,
-                );
-                const chatCost = computeCostRaw(
-                  result.chatModel,
-                  result.chatInputTokens,
-                  result.chatOutputTokens,
-                );
-                const total = processCost + translationCost + chatCost;
-                return total > 0 ? (
+                const charges = [
+                  chargeForUsage(result.model, result.inputTokens, result.outputTokens),
+                  chargeForUsage(
+                    result.translationModel,
+                    result.translationInputTokens,
+                    result.translationOutputTokens,
+                  ),
+                  chargeForUsage(result.chatModel, result.chatInputTokens, result.chatOutputTokens),
+                ];
+                const czk = charges.reduce((sum, c) => sum + (c?.czk ?? 0), 0);
+                const credits = charges.reduce((sum, c) => sum + (c?.credits ?? 0), 0);
+                return credits > 0 ? (
                   <MetadataGroup title={t('grandTotal')}>
                     <MetadataRow
                       label={t('totalGrandPrice')}
-                      value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
+                      value={t('chargeValue', {
+                        czk: formatCzk(czk, locale),
+                        credits: credits.toLocaleString(locale),
+                      })}
                     />
                   </MetadataGroup>
                 ) : null;
@@ -545,20 +676,54 @@ export function ResultViewer({ result, onUpdate, highlightQuery }: ResultViewerP
             <div className="p-4">
               <VersionHistory
                 documentId={result.id}
-                onRestore={(field, content) => {
-                  if (field === 'transcription') {
-                    void handleTranscriptionSave(content);
-                  } else if (field.startsWith('translation:')) {
-                    void saveField('translation', content);
-                  } else if (field === 'context') {
-                    void saveField('context', content);
-                  }
-                }}
+                onRestore={
+                  // Obnova překladu/transkripce by se během retranslace srazila s jobem.
+                  readOnly || retranslating
+                    ? undefined
+                    : (field, content) => {
+                        if (field === 'transcription') {
+                          void handleTranscriptionSave(content);
+                        } else if (field.startsWith('translation:')) {
+                          // Verze nese jazyk v názvu pole – obnovit do něj, ne do zobrazeného.
+                          void trySaveField(
+                            'translation',
+                            content,
+                            field.slice('translation:'.length),
+                          );
+                        } else if (field === 'context') {
+                          void trySaveField('context', content);
+                        }
+                      }
+                }
               />
             </div>
           </details>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ErrorBanner({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+    >
+      <span>{message}</span>
+      <button
+        onClick={onDismiss}
+        className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-100"
+        aria-label="×"
+      >
+        ×
+      </button>
     </div>
   );
 }

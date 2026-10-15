@@ -1,35 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import sharp from 'sharp';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage } from '@/lib/adapters/storage';
-import { generateThumbnail } from '@/lib/infrastructure/thumbnails';
+import { saveThumbnail } from '@/lib/infrastructure/thumbnails';
+import {
+  InvalidImageError,
+  invalidImageMessage,
+  validateImage,
+  type ValidatedImage,
+} from '@/lib/infrastructure/image-validation';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/tiff', 'image/webp', 'image/gif'];
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
-
-// Semaphore to limit concurrent sharp operations (sharp uses a fixed-size libuv thread pool)
-let sharpInFlight = 0;
-const SHARP_MAX_CONCURRENT = 3;
-const sharpQueue: Array<() => void> = [];
-
-async function withSharpLimit<T>(fn: () => Promise<T>): Promise<T> {
-  if (sharpInFlight >= SHARP_MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => sharpQueue.push(resolve));
-  }
-  sharpInFlight++;
-  try {
-    return await fn();
-  } finally {
-    sharpInFlight--;
-    sharpQueue.shift()?.();
-  }
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -83,12 +70,10 @@ async function handleImport(
   // Try prefetch cache first, fall back to fresh download
   const cached = await getOrWait(parsedUrl.toString());
   let buffer: Buffer;
-  let contentType: string;
   let contentDisposition: string;
 
   if (cached) {
     buffer = cached.buffer;
-    contentType = cached.contentType;
     contentDisposition = cached.contentDisposition;
   } else {
     let response: Response;
@@ -107,7 +92,6 @@ async function handleImport(
       return NextResponse.json({ error: `Server vrátil ${response.status}` }, { status: 422 });
     }
 
-    contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
     contentDisposition = response.headers.get('content-disposition') ?? '';
     try {
       buffer = await readBodyWithLimit(response, MAX_SIZE_MB * 1024 * 1024);
@@ -117,16 +101,6 @@ async function handleImport(
         { status: 422 },
       );
     }
-  }
-
-  // Check content type
-  if (!ALLOWED_TYPES.includes(contentType)) {
-    return NextResponse.json(
-      {
-        error: t('unsupportedFormatWithType', { type: contentType || 'unknown' }),
-      },
-      { status: 422 },
-    );
   }
 
   if (buffer.length > MAX_SIZE_MB * 1024 * 1024) {
@@ -141,6 +115,17 @@ async function handleImport(
     );
   }
 
+  // Format is detected from the content – the remote Content-Type and
+  // Content-Disposition are not trusted (SEC-1). Decoding runs under the sharp
+  // concurrency limit.
+  let image: ValidatedImage;
+  try {
+    image = await withSharpLimit(() => validateImage(buffer, { allowGif: true }));
+  } catch (err) {
+    if (!(err instanceof InvalidImageError)) throw err;
+    return NextResponse.json({ error: invalidImageMessage(err, t) }, { status: 422 });
+  }
+
   // Deduplicate by hash
   const hash = crypto.createHash('sha256').update(buffer).digest('hex');
   const existing = await prisma.page.findFirst({ where: { hash, userId } });
@@ -151,7 +136,8 @@ async function handleImport(
     );
   }
 
-  // Extract filename — priority:
+  // Display filename only (stored as Page.filename) – the file on disk is
+  // always named `<uuid>.<detected extension>`. Priority:
   // 1. Content-Disposition header (e.g. "4360-110814-0004r.jpg" from esbirky.cz)
   // 2. IIIF path segment (e.g. .../ID0009V/full/full/0/default.jpg → ID0009V.jpg)
   // 3. Query parameter fallback (e.g. ?id=180462 → 180462.jpg)
@@ -218,32 +204,20 @@ async function handleImport(
       : decodeURIComponent(pathParts[pathParts.length - 1] ?? 'import.jpg');
   }
 
-  // Save to local storage + run sharp operations with concurrency limit
-  const storage = getStorage();
-  const storageResult = await storage.upload(buffer, urlFilename);
-
-  const [thumbnailUrl, detectedBlank, dimensions] = await withSharpLimit(async () => {
-    const thumb = await generateThumbnail(buffer, urlFilename);
-    const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
-    const blank = await isBlankPage(buffer);
-    let w: number | undefined;
-    let h: number | undefined;
-    try {
-      const metadata = await sharp(buffer).metadata();
-      w = metadata.width;
-      h = metadata.height;
-    } catch {
-      // skip metadata
-    }
-    return [thumb, blank, { width: w, height: h }] as const;
-  });
-
-  // Validate collection
+  // Validate collection before anything is written to storage
   const resolvedCollectionId =
     typeof collectionId === 'string' && collectionId.trim() !== '' ? collectionId.trim() : null;
   if (resolvedCollectionId && !(await getOwnedCollection(userId, resolvedCollectionId))) {
     return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
+
+  const storage = getStorage();
+  const storageResult = await storage.upload(buffer, image.extension);
+  const thumbnailUrl = await saveThumbnail(image.thumbnail);
+  const detectedBlank = await withSharpLimit(async () => {
+    const { isBlankPage } = await import('@/lib/infrastructure/blank-detection');
+    return isBlankPage(buffer);
+  });
 
   // Determine next order value for the collection
   let nextOrder: number | undefined;
@@ -270,10 +244,10 @@ async function handleImport(
       thumbnailUrl,
       collectionId: resolvedCollectionId,
       status: detectedBlank ? 'blank' : 'pending',
-      mimeType: contentType,
+      mimeType: image.mimeType,
       fileSize: buffer.length,
-      width: dimensions.width,
-      height: dimensions.height,
+      width: image.width,
+      height: image.height,
       order: nextOrder,
     },
   });

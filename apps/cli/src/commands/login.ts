@@ -20,7 +20,11 @@ export const loginCommand = new Command('login')
 
     const { port, tokenPromise, server } = await startCallbackServer(state);
 
-    const authUrl = `${config.server}/auth/cli?state=${state}&redirect=${encodeURIComponent(`http://localhost:${port}/callback`)}`;
+    // Callback server poslouchá jen na 127.0.0.1, proto redirect míří přímo na tuto adresu
+    // ("localhost" se v prohlížeči může přeložit na ::1, kde nikdo neposlouchá). Stránka
+    // /auth/cli povoluje jen http: na loopback s explicitním portem a cestou /callback.
+    const redirect = `http://127.0.0.1:${port}/callback`;
+    const authUrl = `${config.server}/auth/cli?state=${state}&redirect=${encodeURIComponent(redirect)}`;
 
     const spinner = ora('Otevírám prohlížeč pro přihlášení...').start();
 
@@ -72,10 +76,11 @@ function startCallbackServer(
       const token = url.searchParams.get('token');
       const state = url.searchParams.get('state');
 
+      // Cizí požadavek (jiný lokální proces, skenování portů z webové stránky) nesmí
+      // přihlášení shodit – odmítni ho a čekej dál na skutečný callback nebo timeout.
       if (state !== expectedState) {
         res.writeHead(400);
         res.end('Neplatný state parametr');
-        rejectToken(new Error('State mismatch'));
         return;
       }
 

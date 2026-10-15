@@ -4,9 +4,11 @@ import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { checkBalance } from '@/lib/infrastructure/billing';
+import { getOwnedCollection } from '@/lib/infrastructure/authz';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
-// ── POST: Start processing via BullMQ ───────────────────────
+// ── POST: Start processing (worker picks up queued ProcessingJob) ──
 
 export async function POST(request: NextRequest): Promise<Response> {
   const t = await getApiTranslations(request, 'api');
@@ -31,12 +33,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     language,
     mode: rawMode,
     collectionId: rawCollectionId,
+    regenerate: rawRegenerate,
   } = body as {
     pageIds: unknown;
     language?: unknown;
     mode?: unknown;
     collectionId?: unknown;
+    regenerate?: unknown;
   };
+  // Přegenerování stránek, které už dokument mají: worker dokument nemaže,
+  // ale přepíše ho na místě a předchozí obsah uloží jako verze.
+  const regenerate = rawRegenerate === true;
 
   if (!Array.isArray(pageIds) || pageIds.length === 0) {
     return Response.json({ error: t('pageIdsNotArray') }, { status: 400 });
@@ -45,12 +52,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Verify all pages belong to the current user
   const ownedPages = await prisma.page.findMany({
     where: { id: { in: pageIds as string[] }, userId },
-    select: { id: true, collectionId: true },
+    select: { id: true, collectionId: true, status: true },
   });
   const ownedIds = new Set(ownedPages.map((p) => p.id));
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
   if (unauthorizedIds.length > 0) {
     return Response.json({ error: t('somePagesUnauthorized') }, { status: 403 });
+  }
+  // Archivované („smazané") stránky nezpracovávat – zápis výsledku by je
+  // odarchivoval a ve veřejném svazku znovu zveřejnil. Pro klienta se chovají
+  // jako neexistující.
+  if (ownedPages.some((p) => p.status === 'archived')) {
+    return Response.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
   // Check token balance before starting
@@ -59,14 +72,22 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: t('insufficientCredit'), balance }, { status: 402 });
   }
 
-  const targetLang =
-    typeof language === 'string' && language.trim() !== '' ? language.trim() : 'cs';
+  if (language !== undefined && language !== '' && !isTranslationLanguage(language)) {
+    return Response.json({ error: t('unsupportedLanguage') }, { status: 400 });
+  }
+  const targetLang = isTranslationLanguage(language) ? language : 'cs';
   const processingMode: ProcessingMode =
     rawMode === 'translate' ? 'translate' : 'transcribe+translate';
   const collectionId =
     typeof rawCollectionId === 'string'
       ? rawCollectionId
       : (ownedPages[0]?.collectionId ?? undefined);
+
+  // collectionId z requestu určuje kontext svazku pro OCR i blokaci souběžných
+  // jobů – nesmí jít o cizí svazek.
+  if (typeof rawCollectionId === 'string' && !(await getOwnedCollection(userId, rawCollectionId))) {
+    return Response.json({ error: t('collectionNotFound') }, { status: 404 });
+  }
 
   // Block duplicate OCR for the same collection (context ordering requires sequential processing)
   if (collectionId) {
@@ -87,6 +108,25 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
+  // Stejné stránky nesmí běžet ve dvou jobech (dvojklik, dva příkazy `ais`) –
+  // u stránek bez svazku výše uvedená kontrola nezabírá a výsledek by byl dvojí
+  // Opus, dvojí účtování a stránka v chybě kvůli unique pageId.
+  const overlappingJob = await prisma.processingJob.findFirst({
+    where: {
+      userId,
+      status: { in: ['running', 'queued'] },
+      type: 'ocr',
+      pageIds: { hasSome: pageIds as string[] },
+    },
+    select: { id: true },
+  });
+  if (overlappingJob) {
+    return Response.json(
+      { error: t('processingAlreadyRunning'), jobId: overlappingJob.id },
+      { status: 409 },
+    );
+  }
+
   // Create ProcessingJob in DB with status 'queued' — worker picks it up
   const job = await prisma.processingJob.create({
     data: {
@@ -98,13 +138,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       language: targetLang,
       mode: processingMode,
       collectionId: collectionId ?? null,
+      jobData: regenerate ? JSON.stringify({ regenerate: true }) : null,
       currentStep: 'Ve frontě — čeká na zpracování…',
     },
   });
 
   // Set all pages to status 'processing'
+  // Prázdné stránky nechat 'blank' – worker je podle stavu přeskakuje; dřív je
+  // tento update přepsal na 'processing' a worker je pak zbytečně posílal do OCR.
   await prisma.page.updateMany({
-    where: { id: { in: pageIds as string[] } },
+    where: { id: { in: pageIds as string[] }, status: { notIn: ['blank', 'archived'] } },
     data: { status: 'processing', errorMessage: null },
   });
 

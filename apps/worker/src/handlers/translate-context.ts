@@ -6,6 +6,7 @@ import { createMessage } from '../lib/llm';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface TranslateContextJobData {
   collectionId: string;
@@ -38,8 +39,9 @@ export async function handleTranslateContext(
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
-    maxTokens: 4096,
+    model: TEXT_MODEL,
+    // Dlouhý kontext se do 4096 tokenů nevešel a useknutý překlad nahradil originál.
+    maxTokens: 16_000,
     messages: [
       {
         role: 'user',
@@ -50,22 +52,30 @@ ${collection.context}`,
     ],
   });
 
-  const context = response.text;
-
-  await prisma.collection.update({
-    where: { id: collectionId },
-    data: { context, contextLanguage: targetLanguage },
-  });
-
-  // Deduct tokens
+  // Odečíst hned po volání (BIL-3) – i když se výsledek neuloží, tokeny
+  // se spotřebovaly.
   await deductTokensIfSufficient(
     userId,
     response.inputTokens,
     response.outputTokens,
     `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
-    `translate-context:${collectionId}:${Date.now()}`,
+    // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+    `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
+    response.model,
   ).catch((err) => {
     console.warn('[Worker:translate-context] Token deduction failed:', err);
+  });
+
+  // Kontext svazku nemá historii a překlad nahrazuje originál – přepsat ho smí
+  // jen kompletní, neprázdný výstup (DAT-2).
+  const context = response.text.trim();
+  if (response.stopReason !== 'end_turn' || context === '') {
+    throw new Error('Model nevrátil kompletní překlad kontextu – kontext svazku zůstal beze změny');
+  }
+
+  await prisma.collection.update({
+    where: { id: collectionId },
+    data: { context, contextLanguage: targetLanguage },
   });
 
   // Mark job as completed

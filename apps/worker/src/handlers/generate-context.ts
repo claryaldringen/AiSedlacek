@@ -5,6 +5,7 @@
 import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface GenerateContextJobData {
   collectionId: string;
@@ -91,12 +92,33 @@ ${concatenated}`;
 
   // Call Claude Sonnet
   const response = await createMessage({
-    model: 'claude-sonnet-4-6',
-    maxTokens: 4096,
+    model: TEXT_MODEL,
+    // Kontext se ukládá jen kompletní (stopReason === 'end_turn') – limit musí
+    // stačit i pro velké svazky, stejně jako fetch-context a translate-context.
+    maxTokens: 16_000,
     messages: [{ role: 'user', content: prompt }],
   });
 
   const context = response.text;
+
+  // Odečíst hned po volání (stejně jako OCR dávky) – ne až po zápisu do DB.
+  await deductTokensIfSufficient(
+    userId,
+    response.inputTokens,
+    response.outputTokens,
+    `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
+    // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+    `generate-context:${jobId}:${collectionId}`,
+    response.model,
+  ).catch((err) => {
+    console.warn('[Worker:generate-context] Token deduction failed:', err);
+  });
+
+  // Kontext svazku nemá historii – přepsat ho smí jen kompletní, neprázdný
+  // výstup (DAT-2, stejně jako fetch-context ve webu).
+  if (response.stopReason !== 'end_turn' || context.trim() === '') {
+    throw new Error('Model nevrátil kompletní kontext – kontext svazku zůstal beze změny');
+  }
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -118,7 +140,7 @@ ${concatenated}`;
 
   try {
     const metadataResponse = await createMessage({
-      model: 'claude-sonnet-4-6',
+      model: TEXT_MODEL,
       maxTokens: 1024,
       messages: [
         {
@@ -141,7 +163,25 @@ ${context}`,
       ],
     });
 
-    const metadataText = metadataResponse.text;
+    // Odečíst před parsováním – neplatný JSON jinak přeskočil odečet a volání
+    // bylo zadarmo.
+    await deductTokensIfSufficient(
+      userId,
+      metadataResponse.inputTokens,
+      metadataResponse.outputTokens,
+      `Metadata kontextu svazku ${collection.name}`,
+      // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+      `generate-context-meta:${jobId}:${collectionId}`,
+      metadataResponse.model,
+    ).catch((err) => {
+      console.warn('[Worker:generate-context] Token deduction failed:', err);
+    });
+
+    // Model občas obalí JSON do ``` bloku i přes instrukci.
+    const metadataText = metadataResponse.text
+      .replace(/^\s*```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
 
     if (metadataText) {
       const parsed = JSON.parse(metadataText) as Record<string, unknown>;
@@ -155,17 +195,6 @@ ${context}`,
         abstract: typeof parsed.abstract === 'string' ? parsed.abstract : undefined,
       };
     }
-
-    // Deduct tokens for metadata call too
-    await deductTokensIfSufficient(
-      userId,
-      metadataResponse.inputTokens,
-      metadataResponse.outputTokens,
-      `Metadata kontextu svazku ${collection.name}`,
-      `generate-context-meta:${collectionId}:${Date.now()}`,
-    ).catch((err) => {
-      console.warn('[Worker:generate-context] Token deduction failed:', err);
-    });
   } catch {
     // Metadata extraction is best-effort — ignore errors
   }
@@ -190,17 +219,6 @@ ${context}`,
   await prisma.collection.update({
     where: { id: collectionId },
     data: updateData,
-  });
-
-  // Deduct tokens for main context call
-  await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
-    `generate-context:${collectionId}:${Date.now()}`,
-  ).catch((err) => {
-    console.warn('[Worker:generate-context] Token deduction failed:', err);
   });
 
   // Mark job as completed

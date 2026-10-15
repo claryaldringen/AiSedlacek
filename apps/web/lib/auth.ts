@@ -1,10 +1,116 @@
-import NextAuth from 'next-auth';
+import { createHash } from 'node:crypto';
+import NextAuth, { CredentialsSignin } from 'next-auth';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import Google from 'next-auth/providers/google';
 import GitHub from 'next-auth/providers/github';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/infrastructure/db';
+import {
+  rateLimit,
+  releaseRateLimit,
+  resetRateLimit,
+  clientIp,
+} from '@/lib/infrastructure/rate-limit';
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+/** Neúspěšné pokusy z jedné IP (online brute-force hesel napříč účty). */
+const LOGIN_MAX_FAILURES_PER_IP = 30;
+/** Neúspěšné pokusy na jeden účet (brute-force hesla konkrétního účtu). */
+const LOGIN_MAX_FAILURES_PER_ACCOUNT = 10;
+/**
+ * Všechny pokusy z jedné IP (i úspěšné) – jen pojistka proti bcrypt DoS
+ * s platným heslem; štědrá, aby nezablokovala sdílenou IP (NAT knihovny).
+ */
+const LOGIN_MAX_ATTEMPTS_PER_IP = 200;
+
+/**
+ * Překročený limit přihlášení. NextAuth předá `code` klientovi (signIn vrací
+ * `{ error: 'CredentialsSignin', code: 'rate_limited' }`), takže login stránka
+ * ukáže „zkuste to za chvíli" místo „špatné heslo".
+ */
+export class LoginRateLimitedError extends CredentialsSignin {
+  override code = 'rate_limited';
+}
+
+/** Uživatel se zadaným e-mailem, jen pokud sedí heslo (účty jen přes OAuth heslo nemají). */
+async function findUserByPassword(
+  email: string,
+  password: string,
+): Promise<{
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  emailVerified: Date | null;
+} | null> {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user?.password) return null;
+  return (await bcrypt.compare(password, user.password)) ? user : null;
+}
+
+/**
+ * Ověření e-mailu a hesla s limitem pokusů. Počítají se jen neúspěšné pokusy
+ * (úspěch započtený pokus vrátí a vynuluje počítadlo účtu) – jinak by útočník
+ * znalý e-mailu oběť zablokoval a sdílená IP by zablokovala všechny za ní.
+ * Neúspěch se počítá stejně pro existující i neexistující účet, limit tak
+ * neprozrazuje existenci účtu.
+ */
+export async function authorizeCredentials(
+  credentials: Partial<Record<string, unknown>> | undefined,
+  request: Request,
+): Promise<{ id: string; name: string | null; email: string | null; image: string | null } | null> {
+  const email = credentials?.['email'];
+  const password = credentials?.['password'];
+  if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+    return null;
+  }
+  const normalizedEmail = email.toLowerCase().trim();
+  // E-mail má max. 254 znaků; bcrypt stejně čte jen prvních 72 bajtů hesla.
+  if (normalizedEmail.length > 254 || password.length > 1024) return null;
+
+  const ip = clientIp(request);
+  const ipFailuresKey = `login:ip:${ip}`;
+  // Klíč účtu je hash (pevná délka, e-mail volí klient).
+  const emailKey = createHash('sha256').update(normalizedEmail).digest('base64url');
+  const accountFailuresKey = `login:email:${emailKey}`;
+
+  if (!rateLimit(`login:attempts:${ip}`, LOGIN_MAX_ATTEMPTS_PER_IP, LOGIN_WINDOW_MS).ok) {
+    throw new LoginRateLimitedError();
+  }
+  // Neúspěch započteme dopředu, synchronně před bcryptem – souběžné requesty
+  // tak nemůžou všechny projít kontrolou dřív, než se zapíše první neúspěch.
+  // IP napřed: po jejím vyčerpání se klíč účtu vůbec nezakládá, takže rotace
+  // e-mailů z jedné IP nezvětšuje mapu limiteru.
+  const ipFailure = rateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS);
+  if (!ipFailure.ok) {
+    throw new LoginRateLimitedError();
+  }
+  const accountFailure = rateLimit(
+    accountFailuresKey,
+    LOGIN_MAX_FAILURES_PER_ACCOUNT,
+    LOGIN_WINDOW_MS,
+  );
+  if (!accountFailure.ok) {
+    releaseRateLimit(ipFailuresKey, ipFailure.windowId); // heslo se nezkoušelo
+    throw new LoginRateLimitedError();
+  }
+
+  const user = await findUserByPassword(normalizedEmail, password).catch((err: unknown) => {
+    // Výpadek DB není špatné heslo – nezamykat účet kvůli opakovaným pokusům.
+    releaseRateLimit(ipFailuresKey, ipFailure.windowId);
+    releaseRateLimit(accountFailuresKey, accountFailure.windowId);
+    throw err;
+  });
+  // Neúspěch zůstává započtený; správné heslo se mezi neúspěchy nepočítá.
+  if (!user) return null;
+  releaseRateLimit(ipFailuresKey, ipFailure.windowId);
+  resetRateLimit(accountFailuresKey);
+
+  if (!user.emailVerified) return null;
+
+  return { id: user.id, name: user.name, email: user.email, image: user.image };
+}
 
 const nextAuth = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -28,21 +134,7 @@ const nextAuth = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Heslo', type: 'password' },
       },
-      async authorize(credentials) {
-        const email = credentials?.email as string | undefined;
-        const password = credentials?.password as string | undefined;
-        if (!email || !password) return null;
-
-        const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
-        if (!user?.password) return null;
-
-        const valid = await bcrypt.compare(password, user.password);
-        if (!valid) return null;
-
-        if (!user.emailVerified) return null;
-
-        return { id: user.id, name: user.name, email: user.email, image: user.image };
-      },
+      authorize: (credentials, request) => authorizeCredentials(credentials, request),
     }),
   ],
   callbacks: {

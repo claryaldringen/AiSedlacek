@@ -3,7 +3,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import ora from 'ora';
 import { requireAuth } from '../lib/require-auth.js';
+import { detectImageMimeType } from '../lib/mime.js';
 import * as output from '../lib/output.js';
+
+/** Počet URL v jednom requestu na /api/pages/upload-url (server jich přijme víc). */
+const URL_BATCH_SIZE = 50;
 
 export const uploadCommand = new Command('upload')
   .description('Nahrát obrázky (URL nebo lokální soubory)')
@@ -16,6 +20,7 @@ export const uploadCommand = new Command('upload')
 
     const urls: string[] = [];
     const localFiles: string[] = [];
+    let totalErrors = 0;
 
     for (const src of expanded) {
       if (src.startsWith('http://') || src.startsWith('https://')) {
@@ -23,19 +28,21 @@ export const uploadCommand = new Command('upload')
       } else if (fs.existsSync(src)) {
         localFiles.push(src);
       } else {
-        output.warn(`Přeskakuji: ${src} (soubor nenalezen)`);
+        output.error(`Přeskakuji: ${src} (soubor nenalezen)`);
+        totalErrors++;
       }
     }
 
     const spinner = ora('Nahrávám...').start();
     let totalPages = 0;
-    let totalErrors = 0;
 
-    if (urls.length > 0) {
-      spinner.text = `Nahrávám ${urls.length} URL...`;
+    // Server přijme v jednom requestu omezený počet URL – posílat po dávkách.
+    for (let start = 0; start < urls.length; start += URL_BATCH_SIZE) {
+      const batch = urls.slice(start, start + URL_BATCH_SIZE);
+      spinner.text = `Nahrávám URL ${start + 1}–${start + batch.length} z ${urls.length}...`;
       try {
         const result = await api.postJson('/api/pages/upload-url', {
-          urls,
+          urls: batch,
           collectionId: options.collection,
         });
         totalPages += result.pages.length;
@@ -61,9 +68,21 @@ export const uploadCommand = new Command('upload')
     for (const filePath of localFiles) {
       spinner.text = `Nahrávám ${path.basename(filePath)}...`;
       try {
-        const formData = new FormData();
         const buffer = fs.readFileSync(filePath);
-        const blob = new Blob([buffer]);
+        // Klientský pre-check: nepodporovaný soubor selže hned, bez zbytečného uploadu.
+        // Autoritou je server – formát pozná z obsahu a `type` Blobu ignoruje.
+        // Typ určujeme z obsahu, ne z přípony.
+        const type = detectImageMimeType(buffer);
+        if (!type) {
+          spinner.stop();
+          output.error(`  ${filePath}: nepodporovaný formát – obsah není JPEG, PNG, WebP ani TIFF`);
+          spinner.start();
+          totalErrors++;
+          continue;
+        }
+
+        const formData = new FormData();
+        const blob = new Blob([buffer], { type });
         formData.append('files', blob, path.basename(filePath));
         if (options.collection) {
           formData.append('collectionId', options.collection);
@@ -95,6 +114,8 @@ export const uploadCommand = new Command('upload')
 
     spinner.stop();
     output.info(`Nahráno: ${totalPages} stránek, ${totalErrors} chyb`);
+    // Chyby jednotlivých souborů nesmí skončit úspěšným exit kódem (skripty/agenti).
+    if (totalErrors > 0) process.exitCode = 1;
   });
 
 function expandSources(sources: string[]): string[] {

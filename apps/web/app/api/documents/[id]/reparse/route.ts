@@ -41,60 +41,58 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: `Re-parse selhal: ${message}` }, { status: 422 });
   }
 
-  // Save old transcription as version
-  await createVersion(
-    id,
-    'transcription',
-    doc.transcription,
-    'ai_regenerate',
-    doc.model ?? undefined,
-  );
-
-  // Update document with re-parsed data
-  await prisma.document.update({
-    where: { id },
-    data: {
-      transcription: parsed.transcription,
-      detectedLanguage: parsed.detectedLanguage,
-      context: parsed.context,
-    },
-  });
-
-  // Upsert translation
+  // Předchozí obsah uložit jako verze – reparse přepisuje i ručně upravený
+  // kontext, který se dřív ztrácel bez historie.
   const lang = parsed.translationLanguage || 'cs';
   const existingTranslation = await prisma.translation.findUnique({
     where: { documentId_language: { documentId: id, language: lang } },
   });
-  if (existingTranslation) {
+  const model = doc.model ?? undefined;
+  if (doc.transcription !== parsed.transcription) {
+    await createVersion(id, 'transcription', doc.transcription, 'ai_regenerate', model);
+  }
+  if (doc.context && doc.context !== parsed.context) {
+    await createVersion(id, 'context', doc.context, 'ai_regenerate', model);
+  }
+  if (existingTranslation && existingTranslation.text !== parsed.translation) {
     await createVersion(
       id,
       `translation:${lang}`,
       existingTranslation.text,
       'ai_regenerate',
-      doc.model ?? undefined,
+      model,
     );
   }
-  await prisma.translation.upsert({
-    where: { documentId_language: { documentId: id, language: lang } },
-    update: { text: parsed.translation },
-    create: { documentId: id, language: lang, text: parsed.translation },
-  });
 
-  // Update glossary
-  await prisma.glossaryEntry.deleteMany({ where: { documentId: id } });
-  if (parsed.glossary.length > 0) {
-    await prisma.glossaryEntry.createMany({
+  // Zápis atomicky – při selhání uprostřed nesmí zůstat dokument bez glosáře
+  // nebo s novým přepisem a starým překladem.
+  await prisma.$transaction([
+    prisma.document.update({
+      where: { id },
+      data: {
+        transcription: parsed.transcription,
+        detectedLanguage: parsed.detectedLanguage,
+        context: parsed.context,
+      },
+    }),
+    prisma.translation.upsert({
+      where: { documentId_language: { documentId: id, language: lang } },
+      update: { text: parsed.translation },
+      create: { documentId: id, language: lang, text: parsed.translation },
+    }),
+    prisma.glossaryEntry.deleteMany({ where: { documentId: id } }),
+    prisma.glossaryEntry.createMany({
       data: parsed.glossary.map((g) => ({
         documentId: id,
         term: g.term,
         definition: g.definition,
       })),
-    });
-  }
+    }),
+  ]);
 
-  // Mark page as done
-  await prisma.page.update({
-    where: { id: doc.page.id },
+  // Mark page as done – archivovanou („smazanou") stránku nechat archivovanou.
+  await prisma.page.updateMany({
+    where: { id: doc.page.id, status: { not: 'archived' } },
     data: { status: 'done', errorMessage: null },
   });
 

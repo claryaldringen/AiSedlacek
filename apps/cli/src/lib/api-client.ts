@@ -58,11 +58,30 @@ export function createApiClient(serverUrl: string, token: string): ApiClient {
       throw new ApiError(401, 'Nejste přihlášen. Spusťte `ais login`.');
     }
 
-    const body = await res.json().catch(() => null);
+    const text = await res.text().catch(() => '');
+    let body: ApiResponse = null;
+    let isJson = false;
+    if (text !== '') {
+      try {
+        body = JSON.parse(text);
+        isJson = true;
+      } catch {
+        // Ne-JSON odpověď (HTML chybová stránka, proxy, přesměrování na login…)
+      }
+    }
 
     if (!res.ok) {
-      const msg = body?.error ?? `Server vrátil ${res.status}`;
+      const msg = (isJson && body?.error) || `Server vrátil ${res.status}`;
       throw new ApiError(res.status, msg);
+    }
+
+    // 2xx bez JSON těla nesmí projít jako úspěch – volající by např. označil změny
+    // za uložené, i když je server nezpracoval (typicky HTML stránka proxy/loginu).
+    if (!isJson && res.status !== 204) {
+      throw new ApiError(
+        res.status,
+        `Neočekávaná odpověď serveru (HTTP ${res.status}, očekáván JSON) – zkontrolujte adresu serveru v konfiguraci`,
+      );
     }
 
     return body;
@@ -101,6 +120,7 @@ export function createApiClient(serverUrl: string, token: string): ApiClient {
       });
     },
 
+    // Surová odpověď bez kontroly stavu – volající MUSÍ sám ověřit `res.ok`.
     getRaw(path: string): Promise<Response> {
       const url = `${serverUrl}${path}`;
       return fetch(url, {

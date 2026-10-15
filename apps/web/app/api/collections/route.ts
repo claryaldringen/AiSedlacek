@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
-import { computeCostFromTokens } from '@/lib/pricing';
+import { chargeForUsage } from '@/lib/pricing';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -33,15 +34,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Sync user's collections to workspace items (home workspace only)
+  // Sync user's collections to workspace items (home workspace only). Zapisuje
+  // se jen chybějící – listing se volá po většině akcí v UI a dřív každé čtení
+  // dělalo createMany přes všechny svazky uživatele.
   if (ws.type === 'home') {
-    const userCollections = await prisma.collection.findMany({
-      where: { userId },
+    const missing = await prisma.collection.findMany({
+      where: { userId, workspaceItems: { none: { workspaceId } } },
       select: { id: true },
     });
-    if (userCollections.length > 0) {
+    if (missing.length > 0) {
       await prisma.workspaceItem.createMany({
-        data: userCollections.map((c) => ({ workspaceId, collectionId: c.id })),
+        data: missing.map((c) => ({ workspaceId, collectionId: c.id })),
         skipDuplicates: true,
       });
     }
@@ -53,50 +56,96 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     },
     orderBy: { createdAt: 'desc' },
     include: {
-      _count: { select: { pages: true } },
+      // Archivované („smazané") stránky se nepočítají.
+      _count: { select: { pages: { where: { status: { not: 'archived' } } } } },
     },
   });
 
-  // Add stats for each collection
-  const collectionsWithStats = await Promise.all(
-    collections.map(async (c) => {
-      const [statusCounts, tokenAgg] = await Promise.all([
+  // Statistiky všech svazků dvěma dotazy místo dvou dotazů na každý svazek (N+1).
+  const collectionIds = collections.map((c) => c.id);
+  const [statusCounts, tokenSums] = collectionIds.length
+    ? await Promise.all([
         prisma.page.groupBy({
-          by: ['status'],
-          where: { collectionId: c.id },
+          by: ['collectionId', 'status'],
+          where: { collectionId: { in: collectionIds } },
           _count: true,
         }),
-        prisma.document.aggregate({
-          where: { page: { collectionId: c.id } },
-          _sum: { inputTokens: true, outputTokens: true },
-        }),
-      ]);
+        // Po modelech – náklad se počítá sazbou modelu, který dokument zpracoval.
+        prisma.$queryRaw<
+          {
+            collectionId: string;
+            model: string | null;
+            inputTokens: bigint | null;
+            outputTokens: bigint | null;
+          }[]
+        >(Prisma.sql`
+          SELECT p."collectionId" AS "collectionId",
+                 d."model" AS "model",
+                 SUM(d."inputTokens") AS "inputTokens",
+                 SUM(d."outputTokens") AS "outputTokens"
+          FROM "Document" d
+          JOIN "Page" p ON p."id" = d."pageId"
+          WHERE p."collectionId" IN (${Prisma.join(collectionIds)})
+          GROUP BY p."collectionId", d."model"
+        `),
+      ])
+    : [[], []];
 
-      const byStatus: Record<string, number> = {};
-      for (const s of statusCounts) {
-        byStatus[s.status] = s._count;
-      }
+  const statusByCollection = new Map<string, Record<string, number>>();
+  for (const s of statusCounts) {
+    if (!s.collectionId) continue;
+    const byStatus = statusByCollection.get(s.collectionId) ?? {};
+    byStatus[s.status] = s._count;
+    statusByCollection.set(s.collectionId, byStatus);
+  }
+  // Cena pro uživatele (Kč + kredity) stejným výpočtem jako účtování a cena
+  // u dokumentu – ne surový náklad API v USD bez marže.
+  const tokensByCollection = new Map<
+    string,
+    { inputTokens: number; outputTokens: number; chargeCzk: number; chargeCredits: number }
+  >();
+  for (const row of tokenSums) {
+    const input = Number(row.inputTokens ?? 0);
+    const output = Number(row.outputTokens ?? 0);
+    const acc = tokensByCollection.get(row.collectionId) ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      chargeCzk: 0,
+      chargeCredits: 0,
+    };
+    const charge = chargeForUsage(row.model, input, output);
+    acc.inputTokens += input;
+    acc.outputTokens += output;
+    acc.chargeCzk += charge?.czk ?? 0;
+    acc.chargeCredits += charge?.credits ?? 0;
+    tokensByCollection.set(row.collectionId, acc);
+  }
 
-      const inputTokens = tokenAgg._sum.inputTokens ?? 0;
-      const outputTokens = tokenAgg._sum.outputTokens ?? 0;
-      const costUsd = computeCostFromTokens(inputTokens, outputTokens);
+  const collectionsWithStats = collections.map((c) => {
+    const byStatus = statusByCollection.get(c.id) ?? {};
+    const tokens = tokensByCollection.get(c.id);
+    const inputTokens = tokens?.inputTokens ?? 0;
+    const outputTokens = tokens?.outputTokens ?? 0;
 
-      return {
-        ...c,
-        processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
-        stats: {
-          done: byStatus['done'] ?? 0,
-          pending: byStatus['pending'] ?? 0,
-          error: byStatus['error'] ?? 0,
-          processing: byStatus['processing'] ?? 0,
-          blank: byStatus['blank'] ?? 0,
-          inputTokens,
-          outputTokens,
-          costUsd: Math.round(costUsd * 100) / 100,
-        },
-      };
-    }),
-  );
+    return {
+      ...c,
+      // Sdílené a veřejné workspacy obsahují cizí svazky – UI je nabízí jen ke čtení.
+      canEdit: c.userId === userId,
+      processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
+      stats: {
+        done: byStatus['done'] ?? 0,
+        pending: byStatus['pending'] ?? 0,
+        error: byStatus['error'] ?? 0,
+        processing: byStatus['processing'] ?? 0,
+        blank: byStatus['blank'] ?? 0,
+        inputTokens,
+        outputTokens,
+        // Na 4 desetinná místa – formatCzk u haléřových částek ukazuje víc míst.
+        chargeCzk: Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000,
+        chargeCredits: tokens?.chargeCredits ?? 0,
+      },
+    };
+  });
 
   return NextResponse.json(collectionsWithStats);
 }

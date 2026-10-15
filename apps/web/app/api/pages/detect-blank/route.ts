@@ -4,6 +4,7 @@ import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { isBlankPage } from '@/lib/infrastructure/blank-detection';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -35,7 +36,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       const storage = getStorage();
       const buffer = await storage.read(storageKeyFromImageUrl(page.imageUrl));
-      const blank = await isBlankPage(buffer);
+      // Dekódování skenu sdílí rozpočet sharpu s uploadem (paměť web procesu).
+      const blank = await withSharpLimit(() => isBlankPage(buffer));
 
       if (blank) {
         await prisma.page.update({

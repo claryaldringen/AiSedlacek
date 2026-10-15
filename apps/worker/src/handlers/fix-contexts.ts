@@ -6,6 +6,8 @@ import { createMessage } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 
 export interface FixContextsJobData {
   collectionId: string;
@@ -70,7 +72,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
 
     try {
       const response = await createMessage({
-        model: 'claude-sonnet-4-6',
+        model: TEXT_MODEL,
         maxTokens: 2048,
         messages: [
           {
@@ -99,6 +101,27 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         ],
       });
 
+      // Odečet hned po volání (BIL-3) – spotřeba vznikla, i když se výsledek
+      // neuloží. Deterministický referenceId (bez Date.now()) – opakovaný běh
+      // jobu neúčtuje tentýž dokument dvakrát.
+      await deductTokensIfSufficient(
+        userId,
+        response.inputTokens,
+        response.outputTokens,
+        `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
+        `fix-context:${jobId}:${doc.id}`,
+        response.model,
+      ).catch((err) => {
+        console.warn('[Worker:fix-contexts] Token deduction failed:', err);
+      });
+
+      // Useknutý (max_tokens) nebo odmítnutý výstup kontext nepřepíše
+      if (response.stopReason !== 'end_turn') {
+        throw new Error(
+          `Model nevrátil kompletní kontext (${response.stopReason ?? 'neznámý důvod'}) – kontext zůstal beze změny`,
+        );
+      }
+
       const newContext = response.text;
 
       if (newContext && newContext !== doc.context) {
@@ -108,18 +131,6 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
           data: { context: newContext },
         });
       }
-
-      // Deduct tokens. Deterministic referenceId (no Date.now()) so a job re-run
-      // is idempotent and doesn't bill the same document twice.
-      await deductTokensIfSufficient(
-        userId,
-        response.inputTokens,
-        response.outputTokens,
-        `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
-        `fix-context:${jobId}:${doc.id}`,
-      ).catch((err) => {
-        console.warn('[Worker:fix-contexts] Token deduction failed:', err);
-      });
 
       completed++;
       succeeded++;
@@ -154,7 +165,7 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       status: errors.length > 0 && succeeded === 0 ? 'error' : 'completed',
       currentStep: 'Hotovo',
       completedPages: completed,
-      errors,
+      errors: await errorsKeepingReclaimMarkers(jobId, errors),
     },
   });
 }

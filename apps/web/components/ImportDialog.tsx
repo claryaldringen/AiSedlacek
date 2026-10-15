@@ -3,11 +3,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 
 export interface UploadedPage {
   id: string;
   filename: string;
   imageUrl: string;
+  thumbnailUrl?: string | null;
   status: string;
   collectionId: string | null;
   hash: string;
@@ -130,7 +132,12 @@ export function ImportDialog({
       setFileStatuses(statuses);
       setIsUploading(true);
 
-      const validFiles = statuses.filter((s) => s.state !== 'error');
+      // Přirozené pořadí podle názvu (scan_2 před scan_10) – prohlížeč dává
+      // lexikografické nebo libovolné (drag & drop) a pořadí stránek řídí OCR
+      // kontext předchozích stránek i zobrazení.
+      const validFiles = statuses
+        .filter((s) => s.state !== 'error')
+        .sort((a, b) => naturalCompare(a.file.name, b.file.name));
       if (validFiles.length === 0) {
         setIsUploading(false);
         return;
@@ -140,40 +147,53 @@ export function ImportDialog({
         prev.map((s) => (s.state === 'pending' ? { ...s, state: 'uploading' as const } : s)),
       );
 
+      // Po jednom souboru a sekvenčně: server celý multipart request drží v paměti
+      // (jeden request se 40 skeny by web proces shodil) a pořadí přiděluje jako
+      // max + 1 – souběžné requesty by se předbíhaly a dostaly stejné pořadí.
+      // Navíc průběh a chyby po souborech.
+      const uploadOne = async (status: (typeof validFiles)[number]): Promise<UploadedPage[]> => {
+        const setState = (patch: { state: 'done' | 'error'; error?: string }): void =>
+          setFileStatuses((prev) =>
+            prev.map((s) => (s.file === status.file ? { ...s, ...patch } : s)),
+          );
+        try {
+          const formData = new FormData();
+          formData.append('files', status.file);
+          if (collectionId) formData.append('collectionId', collectionId);
+
+          const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
+          const data = (await response.json().catch(() => ({}))) as {
+            pages?: UploadedPage[];
+            errors?: { filename: string; error: string }[];
+            error?: string;
+          };
+          if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
+
+          const pages = data.pages ?? [];
+          if (pages.length > 0) setState({ state: 'done' });
+          else setState({ state: 'error', error: data.errors?.[0]?.error ?? t('uploadFailed') });
+          return pages;
+        } catch (err) {
+          setState({
+            state: 'error',
+            error: err instanceof Error ? err.message : t('unknownError'),
+          });
+          return [];
+        }
+      };
+
       try {
-        const formData = new FormData();
-        for (const s of validFiles) formData.append('files', s.file);
-        if (collectionId) formData.append('collectionId', collectionId);
-
-        const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
-        const data = (await response.json()) as {
-          pages?: UploadedPage[];
-          errors?: { filename: string; error: string }[];
-          error?: string;
+        const uploadedPages: UploadedPage[] = [];
+        let nextIndex = 0;
+        const runQueue = async (): Promise<void> => {
+          while (nextIndex < validFiles.length) {
+            const status = validFiles[nextIndex++]!;
+            uploadedPages.push(...(await uploadOne(status)));
+          }
         };
-        if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
-
-        const uploadedPages = data.pages ?? [];
-        const uploadErrors = data.errors ?? [];
-
-        setFileStatuses((prev) =>
-          prev.map((s) => {
-            const page = uploadedPages.find((p) => p.filename === s.file.name);
-            if (page) return { ...s, state: 'done' as const };
-            const err = uploadErrors.find((e) => e.filename === s.file.name);
-            if (err) return { ...s, state: 'error' as const, error: err.error };
-            return s;
-          }),
-        );
+        await runQueue();
 
         if (uploadedPages.length > 0) onPagesImported(uploadedPages);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : t('unknownError');
-        setFileStatuses((prev) =>
-          prev.map((s) =>
-            s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s,
-          ),
-        );
       } finally {
         setIsUploading(false);
       }

@@ -20,7 +20,6 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
-    "db:push": "prisma db push",
     "build": "prisma generate",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
@@ -29,7 +28,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@prisma/client": "^6"
+    "@prisma/client": "^6",
+    "@ai-sedlacek/shared": "*"
   },
   "devDependencies": {
     "eslint": "^9",

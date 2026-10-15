@@ -43,6 +43,10 @@ export function UserMenu(): React.JSX.Element | null {
     void fetchBalance();
   }, [session?.user]);
 
+  // Hook musí běžet před podmíněným returnem – jinak React při změně session
+  // (přihlášení/odhlášení bez reloadu) spadne na „Rendered more hooks…".
+  const t = useTranslations('sidebar');
+
   if (!session?.user) return null;
 
   const initials = (session.user.name ?? session.user.email ?? '?')
@@ -52,7 +56,6 @@ export function UserMenu(): React.JSX.Element | null {
     .map((s) => s[0]?.toUpperCase() ?? '')
     .join('');
 
-  const t = useTranslations('sidebar');
   const formattedBalance =
     balance !== null ? t('tokenBalance', { count: balance.toLocaleString('cs-CZ') }) : null;
 
