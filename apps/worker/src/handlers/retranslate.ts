@@ -158,7 +158,11 @@ Return ONLY the updated translation in markdown, nothing else.`;
 
   // Posunout Document.updatedAt – podle něj `ais push` detekuje, že se překlad
   // na serveru změnil (Translation vlastní updatedAt nemá).
-  await prisma.document.update({ where: { id: documentId }, data: { updatedAt: new Date() } });
+  await prisma.document.update({
+    where: { id: documentId },
+    data: { updatedAt: new Date() },
+    select: { id: true },
+  });
 
   // Mark job as completed
   await prisma.processingJob.update({

@@ -752,7 +752,11 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
 
   // Posunout Document.updatedAt – podle něj `ais push` detekuje, že se překlad
   // na serveru změnil (Translation vlastní updatedAt nemá).
-  await prisma.document.update({ where: { id: doc.id }, data: { updatedAt: new Date() } });
+  await prisma.document.update({
+    where: { id: doc.id },
+    data: { updatedAt: new Date() },
+    select: { id: true },
+  });
 
   // Deduct tokens. Deterministic referenceId (no Date.now()) keeps a re-run
   // idempotent instead of billing the same translation again.

@@ -69,6 +69,13 @@ export async function saveDocumentResult(
         text: result.translation,
       },
     });
+    // Posunout Document.updatedAt – podle něj `ais push` detekuje, že se překlad
+    // na serveru změnil (Translation vlastní updatedAt nemá).
+    await prisma.document.update({
+      where: { id: existingDoc.id },
+      data: { updatedAt: new Date() },
+      select: { id: true },
+    });
     return existingDoc;
   }
 

@@ -76,6 +76,7 @@ describe('deterministické referenceId odečtů (BIL-3)', () => {
     expect(mocks.prisma.document.update).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: { updatedAt: expect.any(Date) },
+      select: { id: true },
     });
   });
 

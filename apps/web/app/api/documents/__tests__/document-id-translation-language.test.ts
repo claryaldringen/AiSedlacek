@@ -158,6 +158,7 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: { updatedAt: expect.any(Date) },
+      select: { id: true },
     });
   });
 
@@ -196,6 +197,7 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: { transcription: 'Nový text' },
+      select: { id: true },
     });
   });
 });

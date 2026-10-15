@@ -238,7 +238,22 @@ describe('PATCH /api/documents/[id]', () => {
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       data: { context: 'Nový kontext' },
+      select: { id: true },
     });
+  });
+
+  it('never reads rawResponse – neither in the pre-read nor in the returned re-read', async () => {
+    // rawResponse u dávek obsahuje celý batch JSONL (i výstup cizích stránek).
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC);
+    mockFindUnique.mockResolvedValueOnce({ ...FAKE_DOC, transcription: 'Nový text' });
+
+    const res = await PATCH(makePatchRequest({ transcription: 'Nový text' }), routeContext);
+
+    expect(res.status).toBe(200);
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
+    const [preRead, reRead] = mockFindUnique.mock.calls.map((c) => c[0]);
+    expect(preRead).toMatchObject({ where: { id: 'doc-1' }, omit: { rawResponse: true } });
+    expect(reRead).toMatchObject({ where: { id: 'doc-1' }, omit: { rawResponse: true } });
   });
 });
 

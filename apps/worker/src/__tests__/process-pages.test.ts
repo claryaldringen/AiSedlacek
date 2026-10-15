@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     collection: { findUnique: vi.fn() },
     page: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-    document: { aggregate: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
+    document: { aggregate: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
     translation: { create: vi.fn(), upsert: vi.fn() },
     processingJob: { update: vi.fn(), findUnique: vi.fn() },
     $transaction: vi.fn(),
@@ -110,6 +110,8 @@ beforeEach(() => {
   mocks.prisma.document.findFirst.mockResolvedValue(null);
   let docCounter = 0;
   mocks.prisma.document.create.mockImplementation(async () => ({ id: `doc-${++docCounter}` }));
+  mocks.prisma.document.update.mockResolvedValue({});
+  mocks.prisma.translation.create.mockResolvedValue({});
   mocks.prisma.processingJob.update.mockResolvedValue({});
   mocks.prisma.processingJob.findUnique.mockResolvedValue({ status: 'running' });
   mocks.prisma.$transaction.mockImplementation(async (fn: (tx: typeof mocks.tx) => unknown) =>
@@ -365,6 +367,32 @@ describe('processPages – archivace během zpracování', () => {
       where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: null },
     });
+  });
+});
+
+// ── S2-11 ────────────────────────────────────────────────────
+describe('processPages – překlad k existujícímu dokumentu (S2-11)', () => {
+  it('dokument bez překladu dostane nový překlad a posunuté updatedAt', async () => {
+    // Legacy dokument bez jakéhokoli překladu → OCR a jen nový překlad, dokument zůstane.
+    addPage('p1', {
+      document: { id: 'legacy-doc', context: 'kontext', translations: [], glossary: [] },
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+    expect(mocks.prisma.translation.create).toHaveBeenCalledWith({
+      data: { documentId: 'legacy-doc', language: 'cs', text: 'překlad 0' },
+    });
+    // Token detekce konfliktů pro `ais push` (Translation vlastní updatedAt nemá).
+    expect(mocks.prisma.document.update).toHaveBeenCalledWith({
+      where: { id: 'legacy-doc' },
+      data: { updatedAt: expect.any(Date) },
+      select: { id: true },
+    });
+    const createOrder = mocks.prisma.translation.create.mock.invocationCallOrder[0]!;
+    const bumpOrder = mocks.prisma.document.update.mock.invocationCallOrder[0]!;
+    expect(createOrder).toBeLessThan(bumpOrder);
   });
 });
 

@@ -87,8 +87,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   // Fetch current state for versioning and ownership check
+  // rawResponse (celý batch JSONL, desítky KB) tu není potřeba.
   const current = await prisma.document.findUnique({
     where: { id },
+    omit: { rawResponse: true },
     include: { translations: true, page: { select: { userId: true } } },
   });
   if (!current || current.page.userId !== userId) {
@@ -132,7 +134,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   if (Object.keys(data).length > 0) {
-    await prisma.document.update({ where: { id }, data });
+    await prisma.document.update({ where: { id }, data, select: { id: true } });
   }
 
   // Update translation if provided
