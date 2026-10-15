@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 
 export interface UploadedPage {
   id: string;
@@ -131,7 +132,12 @@ export function ImportDialog({
       setFileStatuses(statuses);
       setIsUploading(true);
 
-      const validFiles = statuses.filter((s) => s.state !== 'error');
+      // Přirozené pořadí podle názvu (scan_2 před scan_10) – prohlížeč dává
+      // lexikografické nebo libovolné (drag & drop) a pořadí stránek řídí OCR
+      // kontext předchozích stránek i zobrazení.
+      const validFiles = statuses
+        .filter((s) => s.state !== 'error')
+        .sort((a, b) => naturalCompare(a.file.name, b.file.name));
       if (validFiles.length === 0) {
         setIsUploading(false);
         return;
@@ -141,8 +147,9 @@ export function ImportDialog({
         prev.map((s) => (s.state === 'pending' ? { ...s, state: 'uploading' as const } : s)),
       );
 
-      // Po jednom souboru se souběžností 2: server celý multipart request drží
-      // v paměti a jeden request se 40 skeny po 15 MB by web proces shodil.
+      // Po jednom souboru a sekvenčně: server celý multipart request drží v paměti
+      // (jeden request se 40 skeny by web proces shodil) a pořadí přiděluje jako
+      // max + 1 – souběžné requesty by se předbíhaly a dostaly stejné pořadí.
       // Navíc průběh a chyby po souborech.
       const uploadOne = async (status: (typeof validFiles)[number]): Promise<UploadedPage[]> => {
         const setState = (patch: { state: 'done' | 'error'; error?: string }): void =>
@@ -184,7 +191,7 @@ export function ImportDialog({
             uploadedPages.push(...(await uploadOne(status)));
           }
         };
-        await Promise.all([runQueue(), runQueue()]);
+        await runQueue();
 
         if (uploadedPages.length > 0) onPagesImported(uploadedPages);
       } finally {
