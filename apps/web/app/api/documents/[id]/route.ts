@@ -80,18 +80,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   // Překlad se ukládá per jazyk – bez jazyka ho nelze uložit. Dříve se v tom případě
   // tiše ignoroval a klient (CLI push) dostal 200, takže změnu považoval za uloženou.
+  // Prázdný jazyk je chyba klienta; chybějící řeší zpětná kompatibilita níže.
   if (
     translation !== undefined &&
-    (typeof translationLanguage !== 'string' || translationLanguage.trim() === '')
+    typeof translationLanguage === 'string' &&
+    translationLanguage.trim() === ''
   ) {
-    return NextResponse.json(
-      {
-        error:
-          `${t('invalidBody')}: translationLanguage is required when translation is provided` +
-          ' (ais CLI: update to the latest version)',
-      },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: t('translationLanguageRequired') }, { status: 400 });
   }
 
   // Fetch current state for versioning and ownership check
@@ -105,13 +100,25 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
+  // Zpětná kompatibilita: `ais push` < 0.2.0 jazyk překladu neposílá – stahoval
+  // vždy první překlad dokumentu. Jednoznačné je to jen u dokumentu s jediným
+  // překladem (stejně jako resolvePushLanguage v CLI); jinak 400 a nic se neuloží,
+  // ani transkripce z téhož požadavku.
+  let language = translationLanguage;
+  if (translation !== undefined && language === undefined) {
+    if (current.translations.length !== 1) {
+      return NextResponse.json({ error: t('translationLanguageRequired') }, { status: 400 });
+    }
+    language = current.translations[0]!.language;
+  }
+
   // Nový překlad jen v povoleném jazyce – kód se později vkládá do promptů.
   // Úpravy už existujících překladů (i v dříve uložených kódech) zůstávají možné.
   if (
     typeof translation === 'string' &&
-    typeof translationLanguage === 'string' &&
-    !isTranslationLanguage(translationLanguage) &&
-    !current.translations.some((tr) => tr.language === translationLanguage)
+    typeof language === 'string' &&
+    !isTranslationLanguage(language) &&
+    !current.translations.some((tr) => tr.language === language)
   ) {
     return NextResponse.json({ error: t('unsupportedLanguage') }, { status: 400 });
   }
@@ -130,12 +137,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   // Změna překladu musí posunout Document.updatedAt – podle něj `ais push`
   // detekuje konflikt (Translation vlastní updatedAt nemá).
   const existingTranslation =
-    typeof translationLanguage === 'string'
-      ? current.translations.find((tr) => tr.language === translationLanguage)
+    typeof language === 'string'
+      ? current.translations.find((tr) => tr.language === language)
       : undefined;
   if (
     typeof translation === 'string' &&
-    typeof translationLanguage === 'string' &&
+    typeof language === 'string' &&
     existingTranslation?.text !== translation
   ) {
     data.updatedAt = new Date();
@@ -146,19 +153,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 
   // Update translation if provided
-  if (typeof translation === 'string' && typeof translationLanguage === 'string') {
+  if (typeof translation === 'string' && typeof language === 'string') {
     if (existingTranslation && existingTranslation.text !== translation) {
-      await createVersion(
-        id,
-        `translation:${translationLanguage}`,
-        existingTranslation.text,
-        'manual_edit',
-      );
+      await createVersion(id, `translation:${language}`, existingTranslation.text, 'manual_edit');
     }
     await prisma.translation.upsert({
-      where: { documentId_language: { documentId: id, language: translationLanguage } },
+      where: { documentId_language: { documentId: id, language } },
       update: { text: translation },
-      create: { documentId: id, language: translationLanguage, text: translation },
+      create: { documentId: id, language, text: translation },
     });
   }
 

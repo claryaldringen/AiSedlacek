@@ -20,6 +20,45 @@ describe('rateLimit', () => {
     expect(bucketCount()).toBe(1);
   });
 
+  it('peekRateLimit reads the state without counting an attempt', () => {
+    const { rateLimit, peekRateLimit, bucketCount } = mod;
+    const key = 'peek:key';
+
+    for (let i = 0; i < 5; i++) expect(peekRateLimit(key, 2).ok).toBe(true);
+    expect(bucketCount()).toBe(0); // čtení nezakládá bucket
+
+    rateLimit(key, 2, 60_000);
+    expect(peekRateLimit(key, 2).ok).toBe(true);
+    rateLimit(key, 2, 60_000);
+    const blocked = peekRateLimit(key, 2);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('peekRateLimit ignores an expired window', () => {
+    vi.useFakeTimers();
+    try {
+      const { rateLimit, peekRateLimit } = mod;
+      rateLimit('expiring', 1, 1_000);
+      expect(peekRateLimit('expiring', 1).ok).toBe(false);
+      vi.advanceTimersByTime(1_001);
+      expect(peekRateLimit('expiring', 1).ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resetRateLimit clears the counter of a key', () => {
+    const { rateLimit, peekRateLimit, resetRateLimit } = mod;
+    rateLimit('reset:key', 1, 60_000);
+    expect(peekRateLimit('reset:key', 1).ok).toBe(false);
+
+    resetRateLimit('reset:key');
+
+    expect(peekRateLimit('reset:key', 1).ok).toBe(true);
+    expect(rateLimit('reset:key', 1, 60_000).ok).toBe(true);
+  });
+
   it('caps the number of buckets under a flood of distinct keys', () => {
     const { rateLimit, bucketCount, MAX_BUCKETS } = mod;
 

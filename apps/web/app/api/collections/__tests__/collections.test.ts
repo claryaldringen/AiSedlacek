@@ -200,15 +200,20 @@ describe('GET /api/collections', () => {
     expect(json[0].processableCount).toBe(1);
     expect(json[0].stats.inputTokens).toBe(1000);
     expect(json[0].stats.outputTokens).toBe(500);
-    // Náklad po modelech: 600 × $5 + 300 × $25 + 400 × $4 + 200 × $20 = $0.0161
-    // (0.0105 Opus 4.6 + 0.0056 Opus 5.5) → zaokrouhleno na centy
-    expect(json[0].stats.costUsd).toBe(0.02);
+    // Cena pro uživatele po modelech (náklad API × kurz 23 × marže 2), ne surové USD:
+    // Opus 4.6: 600 × $5 + 300 × $25 = $0.0105 → 0,483 Kč = 9 660 kreditů
+    // Opus 5.5: 400 × $4 + 200 × $20 = $0.0056 → 0,2576 Kč = 5 152 kreditů
+    expect(json[0].stats.chargeCzk).toBe(0.7406);
+    expect(json[0].stats.chargeCredits).toBe(14812);
+    expect(json[0].stats).not.toHaveProperty('costUsd');
     expect(json[1].name).toBe('Druhy svazek');
     // Cizí svazek ve workspace je jen pro čtení
     expect(json[0].canEdit).toBe(true);
     expect(json[1].canEdit).toBe(false);
     expect(json[1].stats.done).toBe(0);
     expect(json[1].stats.inputTokens).toBe(0);
+    expect(json[1].stats.chargeCzk).toBe(0);
+    expect(json[1].stats.chargeCredits).toBe(0);
     expect(mockPageGroupBy).toHaveBeenCalledTimes(1);
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
     // Synchronizace do home workspace zapisuje jen svazky, které tam ještě nejsou.

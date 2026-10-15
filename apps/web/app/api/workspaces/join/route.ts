@@ -62,5 +62,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     },
   });
 
-  return NextResponse.json(result);
+  // Pozvánkový kód vidí jen vlastník workspace (konzistentně s GET /api/workspaces).
+  return NextResponse.json(result && { ...result, inviteCode: null });
 }

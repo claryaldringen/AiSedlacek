@@ -117,6 +117,7 @@ function EditableSection({
   saving,
   highlightQuery,
   readOnly = false,
+  lockedReason,
 }: {
   title: string;
   subtitle?: string;
@@ -126,6 +127,11 @@ function EditableSection({
   saving?: boolean;
   highlightQuery?: string;
   readOnly?: boolean;
+  /**
+   * Dočasný zámek (běžící retranslace) – úprava ani uložení nejdou, důvod se
+   * ukáže v tooltipu a u otevřeného editoru i textem. Rozepsaný text zůstane.
+   */
+  lockedReason?: string;
 }): React.JSX.Element {
   const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
@@ -154,12 +160,16 @@ function EditableSection({
           {subtitle && <p className="text-xs text-stone-400">{subtitle}</p>}
         </div>
         {readOnly ? null : !editing ? (
-          <button
-            onClick={handleEdit}
-            className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-          >
-            {tc('edit')}
-          </button>
+          // Zakázané tlačítko nevyvolá tooltip – title nese obalující span.
+          <span title={lockedReason}>
+            <button
+              onClick={handleEdit}
+              disabled={Boolean(lockedReason)}
+              className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+            >
+              {tc('edit')}
+            </button>
+          </span>
         ) : (
           <div className="flex gap-1">
             <button
@@ -168,18 +178,21 @@ function EditableSection({
             >
               {tc('cancel')}
             </button>
-            <button
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:opacity-50"
-            >
-              {saving ? tc('saving') : tc('save')}
-            </button>
+            <span title={lockedReason}>
+              <button
+                onClick={() => void handleSave()}
+                disabled={saving || Boolean(lockedReason)}
+                className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? tc('saving') : tc('save')}
+              </button>
+            </span>
           </div>
         )}
       </div>
       {editing && !readOnly ? (
         <div className="p-2">
+          {lockedReason && <p className="px-1 pb-2 text-xs text-amber-700">{lockedReason}</p>}
           <MarkdownEditor ref={editorRef} initialValue={content} onChange={setDraft} />
         </div>
       ) : (
@@ -216,6 +229,10 @@ export function ResultViewer({
   };
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
+  // Během retranslace se texty needitují – ruční úprava překladu by se srazila
+  // s výsledkem jobu (přepsal by ji) a nová transkripce by spustila další
+  // souběžnou retranslaci.
+  const retranslateLock = retranslating ? t('editLockedWhileRetranslating') : undefined;
 
   // Interval pro polling retranslace ukládáme do refu, aby šel uklidit.
   const retranslatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -446,6 +463,7 @@ export function ResultViewer({
             saving={saving}
             highlightQuery={highlightQuery}
             readOnly={readOnly}
+            lockedReason={retranslateLock}
           />
         </div>
         <div className="flex flex-col">
@@ -457,6 +475,7 @@ export function ResultViewer({
             saving={saving}
             highlightQuery={highlightQuery}
             readOnly={readOnly}
+            lockedReason={retranslateLock}
           />
         </div>
       </div>
@@ -648,7 +667,8 @@ export function ResultViewer({
               <VersionHistory
                 documentId={result.id}
                 onRestore={
-                  readOnly
+                  // Obnova překladu/transkripce by se během retranslace srazila s jobem.
+                  readOnly || retranslating
                     ? undefined
                     : (field, content) => {
                         if (field === 'transcription') {

@@ -18,7 +18,8 @@ vi.mock('@/lib/adapters/storage', () => ({
 let upload: (req: NextRequest) => Promise<Response>;
 
 beforeAll(async () => {
-  // Limit 1 MB na soubor → strop requestu 6 MB; test tak nemusí alokovat 100 MB.
+  // Limit 1 MB na soubor → strop requestu 2 MB (1 soubor + režie formuláře);
+  // test tak nemusí alokovat 20 MB.
   vi.stubEnv('MAX_FILE_SIZE_MB', '1');
   vi.resetModules();
   ({ POST: upload } = await import('@/app/api/pages/upload/route'));

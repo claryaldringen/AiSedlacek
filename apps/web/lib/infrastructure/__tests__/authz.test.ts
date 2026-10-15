@@ -82,3 +82,46 @@ describe('canReadPage', () => {
     expect(await canReadPage('stranger', page)).toBe(false);
   });
 });
+
+// Historie verzí: veřejnost nestačí, jen vlastník a členové sdíleného workspace.
+describe('canReadPage with allowPublic: false', () => {
+  const noPublic = { allowPublic: false };
+
+  it('owner still reads', async () => {
+    expect(await canReadPage('owner', { ...page, isPublic: true }, noPublic)).toBe(true);
+  });
+
+  it('a public page or a page in a public collection is not enough', async () => {
+    mockCollectionFindUnique.mockResolvedValue({ ...collection, isPublic: true });
+
+    expect(await canReadPage('stranger', { ...page, isPublic: true }, noPublic)).toBe(false);
+  });
+
+  it('membership counts only in shared workspaces (not the public one)', async () => {
+    mockWorkspaceItemFindFirst.mockResolvedValue({ id: 'item-1' });
+
+    expect(await canReadPage('member', page, noPublic)).toBe(true);
+    expect(mockWorkspaceItemFindFirst).toHaveBeenCalledWith({
+      where: {
+        collectionId: 'col-1',
+        workspace: { members: { some: { userId: 'member' } }, type: 'shared' },
+      },
+      select: { id: true },
+    });
+  });
+
+  it('page shared directly into a shared workspace', async () => {
+    mockWorkspaceItemFindFirst.mockImplementation((args: { where: Record<string, unknown> }) =>
+      Promise.resolve('pageId' in args.where ? { id: 'item-2' } : null),
+    );
+
+    expect(await canReadPage('member', { ...page, collectionId: null }, noPublic)).toBe(true);
+    expect(mockWorkspaceItemFindFirst).toHaveBeenCalledWith({
+      where: {
+        pageId: 'page-1',
+        workspace: { members: { some: { userId: 'member' } }, type: 'shared' },
+      },
+      select: { id: true },
+    });
+  });
+});

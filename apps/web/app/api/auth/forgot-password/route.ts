@@ -4,6 +4,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getEmailProvider } from '@/lib/adapters/email';
 import { rateLimit, clientIp } from '@/lib/infrastructure/rate-limit';
 import { getApiTranslations, getLocaleFromRequest } from '@/lib/infrastructure/api-locale';
+import { bodyErrorResponse, readJsonBody } from '@/lib/infrastructure/read-body';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -18,12 +19,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: t('invalidJson') }, { status: 400 });
-  }
+  // Nepřihlášená routa – tělo jen se stropem velikosti (viz read-body.ts).
+  const parsed = await readJsonBody(request);
+  if (!parsed.ok) return bodyErrorResponse(parsed.error, t);
+  const body = parsed.value;
 
   const { email: rawEmail } = (body as { email?: string }) ?? {};
 

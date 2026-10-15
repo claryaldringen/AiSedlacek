@@ -72,8 +72,14 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
         p !== null && p.status !== 'archived' && (!isPublicWorkspace || p.isPublic),
     );
 
+  // Syrové `items` se nevrací – obsahovaly by i archivované stránky a ve veřejném
+  // workspace i položky, které už veřejné nejsou (filtr výše by se obešel).
+  // Pozvánkový kód vidí jen vlastník.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { items, inviteCode, ...rest } = workspace;
   return NextResponse.json({
-    ...workspace,
+    ...rest,
+    inviteCode: workspace.ownerId === userId ? inviteCode : null,
     collections,
     orphanPages,
   });

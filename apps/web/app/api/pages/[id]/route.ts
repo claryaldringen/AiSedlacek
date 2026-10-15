@@ -222,6 +222,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   }
 }
 
+// Stavy, ve kterých stránka má (nebo právě dostává) placený výsledek OCR.
+const ARCHIVE_ON_DELETE_STATUSES = ['processing', 'done'];
+
+/** Uložené soubory (obrázek, náhled) – jen lokální, externí URL nemažeme. */
+function storedFileUrls(page: { imageUrl: string; thumbnailUrl: string | null }): string[] {
+  return [page.imageUrl, page.thumbnailUrl].filter(
+    (url): url is string =>
+      typeof url === 'string' && (url.startsWith('/uploads/') || url.startsWith('/api/images/')),
+  );
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: RouteContext,
@@ -234,34 +245,65 @@ export async function DELETE(
 
   const { id } = await params;
 
+  const page = await prisma.page.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      imageUrl: true,
+      thumbnailUrl: true,
+      document: { select: { id: true } },
+    },
+  });
+  if (!page || page.userId !== userId) {
+    return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
+  }
+
+  // O archivaci vs. smazání rozhoduje server, ne (možná zastaralý) stav v klientovi.
+  // Stránka s dokumentem nebo rozpracovaná/hotová se jen archivuje – stejně jako
+  // PATCH status=archived, vč. zrušení veřejného sdílení. Tvrdě se maže jen stránka
+  // bez výsledku, aby se zaplacené zpracování a historie verzí nikdy neztratily.
+  const mustArchive = page.document !== null || ARCHIVE_ON_DELETE_STATUSES.includes(page.status);
+
+  let archived: boolean;
   try {
-    const page = await prisma.page.findUnique({ where: { id } });
-    if (!page || page.userId !== userId) {
-      return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
-    }
-
-    // Delete file from storage. Skip when another page still references the same
-    // file (cross-user dedup reuses one stored file for an identical hash).
-    const storage = getStorage();
-    const sharesFile = await prisma.page.count({
-      where: { imageUrl: page.imageUrl, id: { not: page.id } },
-    });
-    if (sharesFile === 0) {
-      const filename = storageKeyFromImageUrl(page.imageUrl);
-      try {
-        await storage.delete(filename);
-      } catch {
-        // File may already be missing – continue
-      }
-    }
-
-    await prisma.$transaction(async (tx) => {
+    archived = await prisma.$transaction(async (tx) => {
       await tx.publicSlug.deleteMany({ where: { targetId: id } });
-      await tx.page.delete({ where: { id } });
+      if (!mustArchive) {
+        // Podmíněně – worker mohl mezitím začít stránku zpracovávat nebo vytvořit
+        // dokument; v tom případě stránku místo smazání archivujeme.
+        const { count } = await tx.page.deleteMany({
+          where: { id, document: { is: null }, status: { notIn: ARCHIVE_ON_DELETE_STATUSES } },
+        });
+        if (count > 0) return false;
+      }
+      await tx.page.update({
+        where: { id },
+        data: { status: 'archived', isPublic: false, slug: null },
+      });
+      return true;
     });
-
-    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
+
+  // Soubory až po úspěšném commitu – dřív se mazaly před transakcí a při její
+  // chybě zůstala stránka bez obrázku. Soubor sdílený jinou stránkou (deduplikace
+  // podle hashe napříč uživateli) zůstává.
+  if (!archived) {
+    const storage = getStorage();
+    for (const url of storedFileUrls(page)) {
+      try {
+        const sharedBy = await prisma.page.count({
+          where: { OR: [{ imageUrl: url }, { thumbnailUrl: url }] },
+        });
+        if (sharedBy === 0) await storage.delete(storageKeyFromImageUrl(url));
+      } catch {
+        // Soubor už může chybět – stránka je smazaná, osiřelý soubor nevadí.
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, archived });
 }

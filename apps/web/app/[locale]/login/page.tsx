@@ -68,6 +68,13 @@ function LoginForm(): React.JSX.Element {
     });
 
     if (result?.error) {
+      // Překročený limit pokusů (LoginRateLimitedError v lib/auth.ts) – nejde
+      // o špatné heslo, uživatel má jen chvíli počkat.
+      if (result.code === 'rate_limited') {
+        setError(t('tooManyLoginAttempts'));
+        setLoading(false);
+        return;
+      }
       // Check if email is unverified
       const checkRes = await apiFetch('/api/auth/check-verification', {
         method: 'POST',

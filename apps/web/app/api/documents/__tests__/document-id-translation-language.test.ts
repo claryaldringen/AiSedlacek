@@ -3,7 +3,8 @@ import { NextRequest } from 'next/server';
 
 // PATCH /api/documents/[id]: překlad bez translationLanguage musí skončit 400
 // a nic se nesmí uložit (DAT-3 – dříve se překlad tiše ignoroval a vrátilo se 200,
-// takže `ais push` změnu označil za odeslanou).
+// takže `ais push` změnu označil za odeslanou). Výjimka pro staré CLI (< 0.2.0),
+// které jazyk neposílá: dokument s jediným překladem ho jednoznačně určuje.
 
 const mockFindUnique = vi.fn();
 const mockUpdate = vi.fn();
@@ -65,15 +66,62 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     expect(mockCreateVersion).not.toHaveBeenCalled();
   }
 
-  it('returns 400 when translation is sent without translationLanguage', async () => {
-    mockFindUnique.mockResolvedValue(FAKE_DOC);
+  const MULTI_LANG_DOC = {
+    ...FAKE_DOC,
+    translations: [
+      { language: 'cs', text: 'Český překlad' },
+      { language: 'en', text: 'English translation' },
+    ],
+  };
+
+  it('returns 400 when translation is sent without translationLanguage and the language is ambiguous', async () => {
+    mockFindUnique.mockResolvedValue(MULTI_LANG_DOC);
 
     const res = await PATCH(makePatchRequest({ translation: 'Nový překlad' }), routeContext);
 
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toContain('translationLanguage');
+    // Hláška musí starému CLI říct, na jakou verzi aktualizovat.
+    expect(json.error).toContain('0.2.0');
     expectNothingWritten();
+  });
+
+  it('returns 400 when translation is sent without translationLanguage for a document without translations', async () => {
+    mockFindUnique.mockResolvedValue({ ...FAKE_DOC, translations: [] });
+
+    const res = await PATCH(makePatchRequest({ translation: 'Nový překlad' }), routeContext);
+
+    expect(res.status).toBe(400);
+    expectNothingWritten();
+  });
+
+  it('old CLI (no translationLanguage): uses the only existing translation and saves everything', async () => {
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC).mockResolvedValueOnce(FAKE_DOC);
+
+    const res = await PATCH(
+      makePatchRequest({ transcription: 'Nový text', translation: 'Nový překlad' }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockUpsert).toHaveBeenCalledWith({
+      where: { documentId_language: { documentId: 'doc-1', language: 'cs' } },
+      update: { text: 'Nový překlad' },
+      create: { documentId: 'doc-1', language: 'cs', text: 'Nový překlad' },
+    });
+    expect(mockCreateVersion).toHaveBeenCalledWith(
+      'doc-1',
+      'translation:cs',
+      'Český překlad',
+      'manual_edit',
+    );
+    // Transkripce z téhož požadavku se uloží (dřív celý request skončil 400).
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: 'doc-1' },
+      data: { transcription: 'Nový text', updatedAt: expect.any(Date) },
+      select: { id: true },
+    });
   });
 
   it('returns 400 when translationLanguage is empty', async () => {
@@ -89,7 +137,7 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
   });
 
   it('does not save other fields from the same request when translationLanguage is missing', async () => {
-    mockFindUnique.mockResolvedValue(FAKE_DOC);
+    mockFindUnique.mockResolvedValue(MULTI_LANG_DOC);
 
     const res = await PATCH(
       makePatchRequest({ transcription: 'Nový text', translation: 'Nový překlad' }),

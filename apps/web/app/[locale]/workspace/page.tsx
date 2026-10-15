@@ -25,6 +25,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
+import { formatCzk } from '@/lib/pricing';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -114,6 +115,7 @@ export default function HomePage(): React.JSX.Element {
 
 function WorkspaceContent(): React.JSX.Element {
   const t = useTranslations('workspace');
+  const tDoc = useTranslations('document');
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -395,9 +397,14 @@ function WorkspaceContent(): React.JSX.Element {
     void loadPages(selectedCollectionId);
   }, [loadPages, selectedCollectionId]);
 
-  // Jen pro čtení, dokud se pro aktuální svazek nenačte opak; kořenový pohled
-  // obsahuje jen vlastní stránky.
-  const readOnly = isReadOnly(collectionAccess, selectedCollectionId);
+  // Oprávnění z detailu svazku; než se pro aktuální svazek načte, platí canEdit
+  // ze seznamu svazků (ať cizí svazek ani krátce nenabízí úpravy). Kořenový
+  // pohled obsahuje jen vlastní stránky.
+  const readOnly = isReadOnly(
+    collectionAccess,
+    selectedCollectionId,
+    collections.find((c) => c.id === selectedCollectionId)?.canEdit === false,
+  );
 
   // ---- Workspace navigation ----
   const handleWorkspaceSelect = useCallback(
@@ -507,6 +514,10 @@ function WorkspaceContent(): React.JSX.Element {
     }
     return null;
   }, [selectedCollectionId, collections, selected]);
+  // Přejmenovat a sdílet z kořene workspace jde jen vlastní svazek – cizí svazek
+  // ze sdíleného workspace je jen pro čtení (API by vrátilo 404).
+  const editableGridCollection =
+    selectedGridCollection?.canEdit !== false ? selectedGridCollection : null;
 
   // ---- Upload ----
   const handleFilesUploaded = useCallback(
@@ -628,10 +639,10 @@ function WorkspaceContent(): React.JSX.Element {
   // ---- Rename collection ----
   const handleRenameCollection = useCallback(async (): Promise<void> => {
     // Determine which collection to rename: the one navigated into, or the one selected in grid
-    const colId = selectedCollectionId ?? selectedGridCollection?.id;
+    const colId = selectedCollectionId ?? editableGridCollection?.id;
     if (!colId) return;
     const col = collections.find((c) => c.id === colId);
-    if (!col) return;
+    if (!col || col.canEdit === false) return;
 
     // Use the title from metadata if available, otherwise the current name
     const currentName = col.title ?? col.name;
@@ -639,20 +650,19 @@ function WorkspaceContent(): React.JSX.Element {
     if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
 
     try {
-      const res = await apiFetch(`/api/collections/${colId}`, {
+      await apiFetchOk(`/api/collections/${colId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName.trim() }),
       });
-      if (res.ok) {
-        setCollections((prev) =>
-          prev.map((c) => (c.id === colId ? { ...c, name: newName.trim() } : c)),
-        );
-      }
-    } catch {
-      // ignore
+      setCollections((prev) =>
+        prev.map((c) => (c.id === colId ? { ...c, name: newName.trim() } : c)),
+      );
+    } catch (err) {
+      // Neprovedené přejmenování se nesmí tvářit jako úspěšné.
+      setError(err instanceof Error ? err.message : t('error'));
     }
-  }, [selectedCollectionId, selectedGridCollection, collections]);
+  }, [selectedCollectionId, editableGridCollection, collections, setError, t]);
 
   // ---- Search toggle ----
   const handleSearchToggle = useCallback(() => {
@@ -1002,9 +1012,10 @@ function WorkspaceContent(): React.JSX.Element {
     for (const id of selectedIds) {
       if (collectionIds.has(id)) {
         // In root view, pages of this collection are NOT in `pages` array.
-        // Use _count as estimate so the button is enabled.
+        // Use _count as estimate so the button is enabled. Cizí svazky se
+        // nezpracují (useProcessingJob je přeskočí), takže se nepočítají.
         const col = collections.find((c) => c.id === id);
-        if (col) collectionPageEstimate += col.processableCount;
+        if (col && col.canEdit !== false) collectionPageEstimate += col.processableCount;
       } else {
         expandedPageIds.add(id);
       }
@@ -1161,8 +1172,8 @@ function WorkspaceContent(): React.JSX.Element {
             ? undefined
             : selectedCollectionId
               ? () => handleShareItem(selectedCollectionId, 'collection')
-              : selectedGridCollection
-                ? () => handleShareItem(selectedGridCollection.id, 'collection')
+              : editableGridCollection
+                ? () => handleShareItem(editableGridCollection.id, 'collection')
                 : undefined
         }
         isCollectionPublic={
@@ -1176,7 +1187,7 @@ function WorkspaceContent(): React.JSX.Element {
         generatingContext={generatingContext}
         doneSelectedCount={doneSelectedCount}
         onRenameCollection={
-          !readOnly && (selectedCollectionId ?? selectedGridCollection)
+          !readOnly && (selectedCollectionId ?? editableGridCollection)
             ? () => void handleRenameCollection()
             : undefined
         }
@@ -1521,9 +1532,14 @@ function WorkspaceContent(): React.JSX.Element {
                         </div>
                         <div className="flex justify-between border-t border-slate-100 pt-1">
                           <span className="font-medium text-slate-600">{t('price')}</span>
+                          {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
                           <span className="font-semibold text-slate-800">
-                            {'$'}
-                            {selectedCollection.stats?.costUsd.toFixed(2)}
+                            {tDoc('chargeValue', {
+                              czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
+                              credits: (
+                                selectedCollection.stats?.chargeCredits ?? 0
+                              ).toLocaleString(locale),
+                            })}
                           </span>
                         </div>
                       </div>

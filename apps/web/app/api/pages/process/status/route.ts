@@ -110,13 +110,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     },
   });
 
-  // Reset any processing pages back to pending
+  // Nedokončené stránky vrátit stejně jako worker (resetUnfinishedPages): stránka
+  // s dokumentem (např. přerušená regenerace) do `done`, ostatní do `pending`.
+  // V `pending` by stránku s dokumentem běžné zpracování už nikdy nevzalo.
+  // Filtr na `processing` zároveň chrání archivované stránky.
   await prisma.page.updateMany({
-    where: {
-      id: { in: job.pageIds },
-      status: 'processing',
-    },
-    data: { status: 'pending' },
+    where: { id: { in: job.pageIds }, status: 'processing', document: { isNot: null } },
+    data: { status: 'done', errorMessage: null },
+  });
+  await prisma.page.updateMany({
+    where: { id: { in: job.pageIds }, status: 'processing' },
+    data: { status: 'pending', errorMessage: null },
   });
 
   return NextResponse.json({ status: 'cancelled', jobId: job.id });

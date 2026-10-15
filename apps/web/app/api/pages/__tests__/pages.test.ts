@@ -7,6 +7,7 @@ const mockPageFindMany = vi.fn();
 const mockPageFindUnique = vi.fn();
 const mockPageUpdate = vi.fn();
 const mockPageDelete = vi.fn();
+const mockPageDeleteMany = vi.fn();
 const mockPageCount = vi.fn();
 const mockCollectionFindUnique = vi.fn();
 const mockPublicSlugDeleteMany = vi.fn();
@@ -16,6 +17,7 @@ const txMock = {
   page: {
     update: (...args: unknown[]) => mockPageUpdate(...args),
     delete: (...args: unknown[]) => mockPageDelete(...args),
+    deleteMany: (...args: unknown[]) => mockPageDeleteMany(...args),
   },
   publicSlug: {
     deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
@@ -449,45 +451,145 @@ describe('PATCH /api/pages/[id]', () => {
 });
 
 describe('DELETE /api/pages/[id]', () => {
+  // Stránka bez výsledku OCR – jen ta se smí tvrdě smazat.
+  const PAGE_WITHOUT_DOCUMENT = {
+    ...FAKE_PAGE,
+    thumbnailUrl: '/uploads/thumb-1.jpg',
+    document: null,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: page found and owned by test user
-    mockPageFindUnique.mockResolvedValue(FAKE_PAGE);
+    mockPageFindUnique.mockResolvedValue(PAGE_WITHOUT_DOCUMENT);
     // Default: soubor nesdílí žádná jiná stránka (deduplikace podle hashe)
     mockPageCount.mockResolvedValue(0);
     mockStorageDelete.mockResolvedValue(undefined);
     mockPublicSlugDeleteMany.mockResolvedValue({ count: 0 });
-    mockPageDelete.mockResolvedValue(FAKE_PAGE);
+    mockPageDeleteMany.mockResolvedValue({ count: 1 });
+    mockPageUpdate.mockResolvedValue({ ...FAKE_PAGE, status: 'archived' });
     mockTransaction.mockImplementation(async (cb: (tx: typeof txMock) => unknown) => cb(txMock));
   });
 
-  it('deletes page and its file from storage', async () => {
+  it('deletes a page without document and its files from storage', async () => {
     const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
 
     expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.ok).toBe(true);
+    expect(await res.json()).toEqual({ ok: true, archived: false });
 
-    // Verify storage.delete was called with filename extracted from imageUrl
-    expect(mockStorageDelete).toHaveBeenCalledWith('abc-123.jpg');
-
-    // Verify transaction was used with publicSlug cleanup
+    // Smazání je podmíněné – stránka nesmí mít dokument ani být rozpracovaná.
     expect(mockTransaction).toHaveBeenCalled();
     expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'page-1' } });
-    expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
+    expect(mockPageDeleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'page-1',
+        document: { is: null },
+        status: { notIn: ['processing', 'done'] },
+      },
+    });
+    expect(mockPageUpdate).not.toHaveBeenCalled();
+
+    // Obrázek i náhled – klíč odvozený z URL
+    expect(mockStorageDelete).toHaveBeenCalledWith('abc-123.jpg');
+    expect(mockStorageDelete).toHaveBeenCalledWith('thumb-1.jpg');
+  });
+
+  it('deletes files only after the DB transaction committed', async () => {
+    const order: string[] = [];
+    mockTransaction.mockImplementation(async (cb: (tx: typeof txMock) => unknown) => {
+      const result = await cb(txMock);
+      order.push('commit');
+      return result;
+    });
+    mockStorageDelete.mockImplementation(async () => {
+      order.push('file');
+    });
+
+    await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(order).toEqual(['commit', 'file', 'file']);
+  });
+
+  it('keeps files when the DB transaction fails', async () => {
+    mockTransaction.mockRejectedValue(new Error('DB down'));
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(res.status).toBe(404);
+    expect(mockStorageDelete).not.toHaveBeenCalled();
+  });
+
+  it('archives instead of deleting a page that has a document', async () => {
+    mockPageFindUnique.mockResolvedValue({
+      ...FAKE_PAGE,
+      status: 'error',
+      document: { id: 'doc-1' },
+    });
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, archived: true });
+    expect(mockPageDeleteMany).not.toHaveBeenCalled();
+    expect(mockPageDelete).not.toHaveBeenCalled();
+    // Stejně jako PATCH status=archived – vč. zrušení veřejného sdílení
+    expect(mockPublicSlugDeleteMany).toHaveBeenCalledWith({ where: { targetId: 'page-1' } });
+    expect(mockPageUpdate).toHaveBeenCalledWith({
+      where: { id: 'page-1' },
+      data: { status: 'archived', isPublic: false, slug: null },
+    });
+    expect(mockStorageDelete).not.toHaveBeenCalled();
+  });
+
+  it.each(['processing', 'done'])('archives a %s page even without document', async (status) => {
+    mockPageFindUnique.mockResolvedValue({ ...PAGE_WITHOUT_DOCUMENT, status });
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(await res.json()).toEqual({ ok: true, archived: true });
+    expect(mockPageDeleteMany).not.toHaveBeenCalled();
+    expect(mockStorageDelete).not.toHaveBeenCalled();
+  });
+
+  it('archives when the worker created a document in the meantime', async () => {
+    // Klient i první čtení viděly stránku bez dokumentu, podmíněné smazání nic nesmazalo.
+    mockPageDeleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(await res.json()).toEqual({ ok: true, archived: true });
+    expect(mockPageUpdate).toHaveBeenCalledWith({
+      where: { id: 'page-1' },
+      data: { status: 'archived', isPublic: false, slug: null },
+    });
+    expect(mockStorageDelete).not.toHaveBeenCalled();
   });
 
   it('keeps the file when another page still references it', async () => {
-    mockPageCount.mockResolvedValue(1);
+    mockPageCount.mockImplementation(async (args: { where: { OR: { imageUrl?: string }[] } }) =>
+      args.where.OR.some((c) => c.imageUrl === FAKE_PAGE.imageUrl) ? 1 : 0,
+    );
 
     const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
 
     expect(res.status).toBe(200);
     expect(mockPageCount).toHaveBeenCalledWith({
-      where: { imageUrl: FAKE_PAGE.imageUrl, id: { not: 'page-1' } },
+      where: { OR: [{ imageUrl: FAKE_PAGE.imageUrl }, { thumbnailUrl: FAKE_PAGE.imageUrl }] },
     });
-    expect(mockStorageDelete).not.toHaveBeenCalled();
-    expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
+    expect(mockStorageDelete).not.toHaveBeenCalledWith('abc-123.jpg');
+    expect(mockStorageDelete).toHaveBeenCalledWith('thumb-1.jpg');
+  });
+
+  it('does not touch external thumbnail URLs', async () => {
+    mockPageFindUnique.mockResolvedValue({
+      ...PAGE_WITHOUT_DOCUMENT,
+      thumbnailUrl: 'https://iiif.example.org/full/150,/0/default.jpg',
+    });
+
+    await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(mockStorageDelete).toHaveBeenCalledTimes(1);
+    expect(mockStorageDelete).toHaveBeenCalledWith('abc-123.jpg');
   });
 
   it('still deletes page when file deletion fails', async () => {
@@ -496,11 +598,8 @@ describe('DELETE /api/pages/[id]', () => {
     const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
 
     expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.ok).toBe(true);
-
-    // Page should still be deleted even if file is missing
-    expect(mockPageDelete).toHaveBeenCalledWith({ where: { id: 'page-1' } });
+    expect(await res.json()).toEqual({ ok: true, archived: false });
+    expect(mockPageDeleteMany).toHaveBeenCalled();
   });
 
   it('returns 404 when page not found', async () => {
@@ -512,7 +611,17 @@ describe('DELETE /api/pages/[id]', () => {
     const json = await res.json();
     expect(json.error).toBe('Stránka nenalezena');
 
-    expect(mockPageDelete).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockStorageDelete).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a page owned by another user', async () => {
+    mockPageFindUnique.mockResolvedValue({ ...PAGE_WITHOUT_DOCUMENT, userId: 'other-user-id' });
+
+    const res = await deletePage(makeRequest('page-1', 'DELETE'), routeContext('page-1'));
+
+    expect(res.status).toBe(404);
+    expect(mockTransaction).not.toHaveBeenCalled();
     expect(mockStorageDelete).not.toHaveBeenCalled();
   });
 });

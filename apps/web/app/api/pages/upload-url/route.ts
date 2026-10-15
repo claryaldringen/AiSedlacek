@@ -13,8 +13,14 @@ import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
 
 const MAX_SIZE = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10) * 1024 * 1024;
+// URL se stahují sekvenčně v jednom requestu (každá až 30 s a 20 MB) – strop
+// drží délku requestu i počet dekódování obrázků v rozumných mezích. CLI ≥ 0.2.0
+// posílá po 50; staré CLI posílá všechny URL najednou – 200 ho u běžných svazků
+// nerozbije.
+const MAX_URLS_PER_REQUEST = 200;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -23,17 +29,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (auth.error) return auth.error;
   const { userId } = auth;
 
-  let body: { urls: string[]; collectionId?: string };
+  let body: { urls?: unknown; collectionId?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Neplatný JSON' }, { status: 400 });
   }
 
-  const { urls, collectionId } = body;
+  const { urls, collectionId } = body ?? {};
 
   if (!Array.isArray(urls) || urls.length === 0) {
     return NextResponse.json({ error: 'Pole urls je povinné' }, { status: 400 });
+  }
+  if (urls.length > MAX_URLS_PER_REQUEST) {
+    return NextResponse.json(
+      { error: t('tooManyUrls', { max: MAX_URLS_PER_REQUEST }) },
+      { status: 400 },
+    );
+  }
+  if (!urls.every((url): url is string => typeof url === 'string')) {
+    return NextResponse.json({ error: t('invalidUrl') }, { status: 400 });
   }
 
   const resolvedCollectionId =
@@ -73,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // Format is detected from the content, never from Content-Type (SEC-1).
       let image: ValidatedImage;
       try {
-        image = await validateImage(buffer);
+        image = await withSharpLimit(() => validateImage(buffer));
       } catch (err) {
         if (!(err instanceof InvalidImageError)) throw err;
         errors.push({ url, error: invalidImageMessage(err, t) });

@@ -224,9 +224,24 @@ describe('POST /api/pages/upload – request size limits', () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
-  it('rejects more than 5 files in one request', async () => {
+  it('caps the request at one 20 MB file + 1 MB form overhead (22 020 096 B)', async () => {
     const form = new FormData();
-    for (let i = 0; i < 6; i++)
+    form.append('files', file(HTML, 'x.jpg', { type: 'image/jpeg' }));
+    const req = new NextRequest('http://localhost/api/pages/upload', {
+      method: 'POST',
+      body: form,
+      headers: { 'x-locale': 'cs', 'content-length': String(21 * 1024 * 1024 + 1) },
+    });
+
+    const res = await upload(req);
+
+    expect(res.status).toBe(413);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than one file in one request (UI and CLI upload one at a time)', async () => {
+    const form = new FormData();
+    for (let i = 0; i < 2; i++)
       form.append('files', file(HTML, `${i}.jpg`, { type: 'image/jpeg' }));
     const req = new NextRequest('http://localhost/api/pages/upload', {
       method: 'POST',
@@ -237,6 +252,7 @@ describe('POST /api/pages/upload – request size limits', () => {
     const res = await upload(req);
 
     expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe(cs.api.tooManyFiles);
     expect(mockUpload).not.toHaveBeenCalled();
   });
 });

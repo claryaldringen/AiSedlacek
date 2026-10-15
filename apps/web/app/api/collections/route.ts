@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
-import { usageCostUsd } from '@ai-sedlacek/shared';
+import { chargeForUsage } from '@/lib/pricing';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -98,9 +98,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     byStatus[s.status] = s._count;
     statusByCollection.set(s.collectionId, byStatus);
   }
+  // Cena pro uživatele (Kč + kredity) stejným výpočtem jako účtování a cena
+  // u dokumentu – ne surový náklad API v USD bez marže.
   const tokensByCollection = new Map<
     string,
-    { inputTokens: number; outputTokens: number; costUsd: number }
+    { inputTokens: number; outputTokens: number; chargeCzk: number; chargeCredits: number }
   >();
   for (const row of tokenSums) {
     const input = Number(row.inputTokens ?? 0);
@@ -108,11 +110,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const acc = tokensByCollection.get(row.collectionId) ?? {
       inputTokens: 0,
       outputTokens: 0,
-      costUsd: 0,
+      chargeCzk: 0,
+      chargeCredits: 0,
     };
+    const charge = chargeForUsage(row.model, input, output);
     acc.inputTokens += input;
     acc.outputTokens += output;
-    acc.costUsd += usageCostUsd(row.model, input, output);
+    acc.chargeCzk += charge?.czk ?? 0;
+    acc.chargeCredits += charge?.credits ?? 0;
     tokensByCollection.set(row.collectionId, acc);
   }
 
@@ -121,7 +126,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const tokens = tokensByCollection.get(c.id);
     const inputTokens = tokens?.inputTokens ?? 0;
     const outputTokens = tokens?.outputTokens ?? 0;
-    const costUsd = tokens?.costUsd ?? 0;
 
     return {
       ...c,
@@ -136,7 +140,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         blank: byStatus['blank'] ?? 0,
         inputTokens,
         outputTokens,
-        costUsd: Math.round(costUsd * 100) / 100,
+        // Na 4 desetinná místa – formatCzk u haléřových částek ukazuje víc míst.
+        chargeCzk: Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000,
+        chargeCredits: tokens?.chargeCredits ?? 0,
       },
     };
   });
