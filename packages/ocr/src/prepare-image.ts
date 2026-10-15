@@ -50,10 +50,10 @@ export async function prepareImage(
   const apiMediaType = metadata.format ? API_FORMATS[metadata.format] : undefined;
   const needsRotation = metadata.orientation !== undefined && metadata.orientation !== 1;
   const tooLarge = image.length > MAX_RAW_BYTES;
-  const tooManyPixels =
+  const exceedsApiDimension =
     (metadata.width ?? 0) > MAX_API_DIMENSION || (metadata.height ?? 0) > MAX_API_DIMENSION;
 
-  if (apiMediaType && !needsRotation && !tooLarge && !tooManyPixels) {
+  if (apiMediaType && !needsRotation && !tooLarge && !exceedsApiDimension) {
     return { buffer: image, mediaType: apiMediaType };
   }
 
@@ -61,14 +61,14 @@ export async function prepareImage(
     !apiMediaType ? `formát ${metadata.format ?? 'neznámý'}` : null,
     needsRotation ? `EXIF orientace ${metadata.orientation}` : null,
     tooLarge ? `velikost ${(image.length / 1024 / 1024).toFixed(1)} MB` : null,
-    tooManyPixels ? `rozměry ${metadata.width}×${metadata.height} px` : null,
+    exceedsApiDimension ? `rozměry ${metadata.width}×${metadata.height} px` : null,
   ].filter(Boolean);
   console.log(`[Claude] Converting image to JPEG (${reasons.join(', ')})…`);
 
   // Pokusy od nejvyšší kvality. Plné rozlišení zkoušíme jen u obrázků, které
   // se do limitu vešly už v původní podobě (převod formátu / otočení).
   const attempts: { width?: number; quality: number }[] = [
-    ...(tooLarge || tooManyPixels ? [] : [{ quality: 90 }]),
+    ...(tooLarge || exceedsApiDimension ? [] : [{ quality: 90 }]),
     { width: 3000, quality: 85 },
     { width: 2000, quality: 75 },
   ];

@@ -123,7 +123,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   // detekuje konflikt (Translation vlastní updatedAt nemá).
   const existingTranslation =
     typeof translationLanguage === 'string'
-      ? current.translations.find((t) => t.language === translationLanguage)
+      ? current.translations.find((tr) => tr.language === translationLanguage)
       : undefined;
   if (
     typeof translation === 'string' &&

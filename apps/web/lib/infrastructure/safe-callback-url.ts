@@ -18,6 +18,8 @@ export function safeCallbackUrl(
     const path = `${url.pathname}${url.search}${url.hash}`;
     // Normalizace dot-segmentů umí z `/.//evil.com` udělat `//evil.com`, který
     // prohlížeč při navigaci čte jako scheme-relative URL na cizí host.
+    // `/\` u http(s) dnes nenastane (WHATWG parser mění `\` na `/`) – záměrná
+    // pojistka pro případ jiného parseru nebo schématu, nemazat.
     if (path.startsWith('//') || path.startsWith('/\\')) return fallback;
     return path;
   } catch {

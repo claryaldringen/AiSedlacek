@@ -207,8 +207,6 @@ describe('POST /api/pages/upload – content validation', () => {
   });
 });
 
-// ── POST /api/pages/import-url ───────────────────────────
-
 describe('POST /api/pages/upload – request size limits', () => {
   it('rejects a request whose declared body exceeds the limit before parsing it', async () => {
     const form = new FormData();
@@ -242,6 +240,8 @@ describe('POST /api/pages/upload – request size limits', () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 });
+
+// ── POST /api/pages/import-url ───────────────────────────
 
 describe('POST /api/pages/import-url – content validation', () => {
   it('rejects HTML served as image/jpeg and stores nothing', async () => {
