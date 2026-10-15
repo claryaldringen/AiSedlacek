@@ -13,6 +13,13 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+// Pojistky proti růstu paměti při floodu (klíče mohou být řízené klientem):
+// úklid expirovaných bucketů nejvýš jednou za minutu (dřív při každém insertu
+// nad 10 000 bucketů – O(n) na request) a tvrdý strop s vyhazováním nejstarších.
+const SWEEP_INTERVAL_MS = 60_000;
+export const MAX_BUCKETS = 50_000;
+let lastSweep = 0;
+
 export function rateLimit(
   key: string,
   limit: number,
@@ -22,12 +29,20 @@ export function rateLimit(
   const bucket = buckets.get(key);
 
   if (!bucket || now > bucket.resetAt) {
+    // delete + set: znovu založený bucket se přesune na konec pořadí vložení.
+    buckets.delete(key);
     buckets.set(key, { count: 1, resetAt: now + windowMs });
-    // Opportunistic cleanup so the map can't grow unbounded.
-    if (buckets.size > 10_000) {
+    if (now - lastSweep > SWEEP_INTERVAL_MS) {
+      lastSweep = now;
       for (const [k, b] of buckets) {
         if (now > b.resetAt) buckets.delete(k);
       }
+    }
+    // Map drží pořadí vložení – první klíč je nejstarší bucket.
+    while (buckets.size > MAX_BUCKETS) {
+      const oldest = buckets.keys().next().value;
+      if (oldest === undefined) break;
+      buckets.delete(oldest);
     }
     return { ok: true, retryAfterSeconds: 0 };
   }
