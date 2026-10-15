@@ -86,6 +86,32 @@ export function creditsForUsage(
   return Math.ceil(credits - 1e-9);
 }
 
+/**
+ * Kategorie odmítnutí (`stop_details.category` / `trigger.category` fallback
+ * bloku), u kterých Anthropic účtuje i odmítnutí PŘED jakýmkoli výstupem –
+ * běžně, sazbou modelu, který odmítl. Odmítnutí před výstupem v jiné kategorii
+ * nebo s `null` kategorií se neúčtuje; odmítnutí uprostřed výstupu se účtuje
+ * vždy. Stav k 2026-09 podle dokumentace („How refusals are billed",
+ * platform.claude.com/docs/en/build-with-claude/refusals-and-fallback) – může
+ * se měnit, při změně upravit tady.
+ */
+export const BILLED_PRE_OUTPUT_REFUSAL_CATEGORIES: readonly string[] = [
+  'bio',
+  'frontier_llm',
+  'reasoning_extraction',
+];
+
+/**
+ * Účtuje Anthropic odmítnutý pokus? Ano, pokud odmítl uprostřed výstupu
+ * (`outputTokens > 0`), nebo před výstupem v účtované kategorii.
+ */
+export function isRefusalBilled(outputTokens: number, category: string | null): boolean {
+  return (
+    outputTokens > 0 ||
+    (category !== null && BILLED_PRE_OUTPUT_REFUSAL_CATEGORIES.includes(category))
+  );
+}
+
 /** Kredity za dobití částky v haléřích. */
 export function czkToCredits(amountHalire: number): number {
   return Math.floor((amountHalire / 100 / BILLING.creditPriceCzkPerMillion) * 1_000_000);

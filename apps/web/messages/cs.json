@@ -168,6 +168,7 @@
     "versionHistory": "Historie verzí",
     "translationUpdatingFromTranscription": "Překlad se aktualizuje na základě upravené transkripce…",
     "editLockedWhileRetranslating": "Upravovat půjde, až se dokončí aktualizace překladu.",
+    "retranslationFailed": "Retranslace se nepovedla – překlad zůstal beze změny.",
     "chat": "Chat",
     "clickToRename": "Klikněte pro přejmenování",
     "original": "Originál",
@@ -286,7 +287,7 @@
     "invalidBody": "Neplatné tělo požadavku",
     "requestTooLarge": "Požadavek je příliš velký",
     "tooManyFiles": "Najednou lze nahrát jen jeden soubor",
-    "tooManyUrls": "Najednou lze nahrát nejvýše {max} URL",
+    "tooManyUrls": "Najednou lze nahrát nejvýše {max} URL. Z CLI aktualizujte na verzi 0.2.0 nebo novější (npm i -g ai-sedlacek-cli) – ta posílá URL po dávkách.",
     "contextIncomplete": "Model nevrátil kompletní kontext – stávající kontext zůstal beze změny. Zkuste kratší text.",
     "unsupportedLanguage": "Nepodporovaný jazyk překladu",
     "invalidMessages": "Neplatný formát zpráv",
@@ -642,6 +643,7 @@
     "daysAgo": "před {n} dny",
     "loading": "Načítám historii…",
     "noHistory": "Žádná historie verzí.",
+    "historyUnavailable": "Historie verzí není dostupná.",
     "restore": "Obnovit tuto verzi"
   }
 }

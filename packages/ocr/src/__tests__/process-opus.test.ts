@@ -115,6 +115,7 @@ describe('OCR request on Opus 5.5', () => {
       model: 'claude-opus-5-5',
       inputTokens: 3000,
       outputTokens: 12,
+      category: 'bio',
     });
     // Bez usage.iterations (žádný fallback neproběhl) nejsou další pokusy
     expect((err as OcrRefusalError).declinedAttempts).toEqual([]);
@@ -180,9 +181,9 @@ describe('server-side fallback – usage of declined attempts', () => {
     expect(res.model).toBe('claude-opus-5');
     expect([res.inputTokens, res.outputTokens]).toEqual([3100, 2500]);
     expect(res.results).toHaveLength(1);
-    // Odmítnutý pokus zvlášť, s požadovaným modelem
+    // Odmítnutý pokus zvlášť, s požadovaným modelem a kategorií z bloku fallback
     expect(res.declinedAttempts).toEqual([
-      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420 },
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420, category: 'bio' },
     ]);
   });
 
@@ -219,7 +220,14 @@ describe('server-side fallback – usage of declined attempts', () => {
               iteration('fallback_message', 'claude-opus-5', 3100, 30),
             ],
           },
-          content: [],
+          content: [
+            {
+              type: 'fallback',
+              from: { model: 'claude-opus-5-5' },
+              to: { model: 'claude-opus-5' },
+              trigger: { type: 'refusal', category: 'cyber' },
+            },
+          ],
         }),
       ),
     );
@@ -231,10 +239,17 @@ describe('server-side fallback – usage of declined attempts', () => {
 
     expect(err).toBeInstanceOf(OcrRefusalError);
     const refusal = err as OcrRefusalError;
-    expect(refusal.usage).toEqual({ model: 'claude-opus-5', inputTokens: 3100, outputTokens: 30 });
-    // Odmítnutí před výstupem se vrací taky – o účtování rozhoduje volající
+    // Poslední pokus: kategorie ze stop_details
+    expect(refusal.usage).toEqual({
+      model: 'claude-opus-5',
+      inputTokens: 3100,
+      outputTokens: 30,
+      category: 'bio',
+    });
+    // Odmítnutí před výstupem se vrací taky (s kategorií hopu) – o účtování
+    // rozhoduje volající
     expect(refusal.declinedAttempts).toEqual([
-      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0 },
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: 'cyber' },
     ]);
   });
 });

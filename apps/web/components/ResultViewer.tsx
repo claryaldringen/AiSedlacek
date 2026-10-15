@@ -257,6 +257,9 @@ export function ResultViewer({
   // Chyba posledního uložení – bez ní se dřív editace při chybě serveru tvářila
   // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi, proto apiFetchOk).
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Neúspěšná retranslace (useknutý výstup, odmítnutí modelem, konflikt s ruční
+  // úpravou, nedostatek kreditu) – bez hlášky by překlad tiše zůstal starý.
+  const [retranslateError, setRetranslateError] = useState<string | null>(null);
 
   const saveField = useCallback(
     async (
@@ -326,6 +329,7 @@ export function ResultViewer({
 
       // Re-translate based on updated transcription via worker job
       setRetranslating(true);
+      setRetranslateError(null);
       try {
         const res = await apiFetch(`/api/documents/${result.id}/retranslate`, {
           method: 'POST',
@@ -336,6 +340,11 @@ export function ResultViewer({
           }),
         });
         if (!res.ok) {
+          // Transkripce je uložená, jen překlad se nespustil (kredit, souběžný job).
+          const data = (await res.json().catch(() => ({}))) as { error?: unknown };
+          setRetranslateError(
+            typeof data.error === 'string' ? data.error : t('retranslationFailed'),
+          );
           setRetranslating(false);
           return true;
         }
@@ -353,7 +362,8 @@ export function ResultViewer({
             }
             const statusData = (await statusRes.json()) as {
               status: string;
-              currentStep?: string;
+              currentStep?: string | null;
+              errors?: string[];
             };
             if (
               statusData.status === 'completed' ||
@@ -362,6 +372,10 @@ export function ResultViewer({
             ) {
               stopRetranslatePoll();
               setRetranslating(false);
+              if (statusData.status === 'error' && currentResultIdRef.current === docId) {
+                // Worker ukládá důvod do errors (poslední = tento běh), jinak obecná hláška.
+                setRetranslateError(statusData.errors?.at(-1) || t('retranslationFailed'));
+              }
               if (statusData.status === 'completed') {
                 // Reload the document to get the new translation
                 const docRes = await apiFetch(`/api/documents/${result.id}`);
@@ -401,27 +415,19 @@ export function ResultViewer({
       }
       return true;
     },
-    [result, onUpdate, saveField, stopRetranslatePoll],
+    [result, onUpdate, saveField, stopRetranslatePoll, t],
   );
 
   return (
     <div className="flex flex-col">
       {saveError && (
-        <div
-          role="alert"
-          className="flex items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
-        >
-          <span>
-            {t('savingFailed')}: {saveError}
-          </span>
-          <button
-            onClick={() => setSaveError(null)}
-            className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-100"
-            aria-label="×"
-          >
-            ×
-          </button>
-        </div>
+        <ErrorBanner
+          message={`${t('savingFailed')}: ${saveError}`}
+          onDismiss={() => setSaveError(null)}
+        />
+      )}
+      {retranslateError && (
+        <ErrorBanner message={retranslateError} onDismiss={() => setRetranslateError(null)} />
       )}
       {retranslating && (
         <div className="overflow-hidden border-b border-blue-200 bg-blue-50">
@@ -690,6 +696,30 @@ export function ResultViewer({
           </details>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ErrorBanner({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+    >
+      <span>{message}</span>
+      <button
+        onClick={onDismiss}
+        className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-100"
+        aria-label="×"
+      >
+        ×
+      </button>
     </div>
   );
 }

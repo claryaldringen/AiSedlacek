@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { createMessage, isCliMode } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
-import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import { checkBalance, deductTokens, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
 import {
   OcrRefusalError,
   prepareImage,
@@ -29,7 +29,7 @@ import {
 import { resetUnfinishedPages, setPageStatus } from '../lib/page-status';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 import { createBatches } from '../lib/batch-utils';
-import { OCR_MODEL, TEXT_MODEL } from '@ai-sedlacek/shared';
+import { OCR_MODEL, TEXT_MODEL, isRefusalBilled } from '@ai-sedlacek/shared';
 
 /**
  * Hláška pro stránku, jejíž obrázek nejde načíst z úložiště (chybí soubor apod.).
@@ -503,18 +503,18 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         sentPages.map((p) => p.pageId),
       );
       const refusedDescription = `OCR dávka ${batchIdx + 1} – odmítnuto modelem${collectionLabel}`;
-      const logBillingError = (billingErr: unknown): void => {
-        console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
-      };
-      await deductRefusedAttempt(userId, err.usage, refusedDescription, refusedReferenceId).catch(
-        logBillingError,
+      await billRefusedAttempt(userId, err.usage, refusedDescription, refusedReferenceId).catch(
+        (billingErr: unknown) => {
+          console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
+        },
       );
-      await deductDeclinedAttempts(
+      await billDeclinedAttempts(
+        jobId,
         userId,
         err.declinedAttempts,
         refusedDescription,
         refusedReferenceId,
-      ).catch(logBillingError);
+      );
       for (const p of sentPages) {
         errors.push(`Stránka ${p.pageId}: ${err.message}`);
         await markPageFailed(p.pageId, p.existingDocId, err.message);
@@ -550,8 +550,6 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Chyba billingu (DB, opakované P2034 u Serializable transakce) nesmí
     // zahodit výstup dávky, který už je zaplacený Anthropicu: výsledky se
     // uloží a další dávky se zastaví stejně jako při nedostatku kreditu.
-    // Pokusy, které serverový fallback odmítl, top-level usage nepokrývá – účtují
-    // se zvlášť, každý svým modelem a s klíčem odvozeným od klíče dávky.
     let deductResult: { success: boolean };
     let billingFailed = false;
     const batchDescription = `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`;
@@ -568,12 +566,15 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         batchReferenceId,
         model,
       );
-      await deductDeclinedAttempts(userId, declinedAttempts, batchDescription, batchReferenceId);
     } catch (err) {
       console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchIdx + 1}:`, err);
       deductResult = { success: false };
       billingFailed = true;
     }
+    // Pokusy, které serverový fallback odmítl, top-level usage nepokrývá – účtují
+    // se zvlášť (každý svým modelem a s klíčem odvozeným od klíče dávky). Jejich
+    // chyba se jen zaloguje a výsledek hlavního odečtu nemění.
+    await billDeclinedAttempts(jobId, userId, declinedAttempts, batchDescription, batchReferenceId);
 
     // Distribute tokens proportionally across pages in the batch
     const perPageInputTokens = Math.round(inputTokens / sentPages.length);
@@ -764,18 +765,21 @@ function pageSetDigest(pageIds: string[]): string {
 }
 
 /**
- * Naúčtuje odmítnutý pokus. Odmítnutí uprostřed výstupu (už vygenerované tokeny)
- * Anthropic účtuje běžnou sazbou; zda účtuje odmítnutí před výstupem, závisí na
- * kategorii – takové se proto konzervativně vůči uživateli neúčtuje.
+ * Naúčtuje odmítnutý pokus, pokud ho účtuje Anthropic (`isRefusalBilled`):
+ * odmítnutí uprostřed výstupu vždy, odmítnutí před výstupem jen v účtovaných
+ * kategoriích. Volání už proběhlo, proto bezpodmínečně (`deductTokens`, ne
+ * `…IfSufficient` – ta by při zůstatku ≤ 0, typicky hned po hlavním odečtu
+ * dávky, pokus potichu neúčtovala); idempotenci drží `referenceId`.
  */
-async function deductRefusedAttempt(
+async function billRefusedAttempt(
   userId: string,
   attempt: OcrAttemptUsage,
   description: string,
   referenceId: string,
 ): Promise<void> {
-  if (attempt.outputTokens === 0) return;
-  await deductTokensIfSufficient(
+  if (!isRefusalBilled(attempt.outputTokens, attempt.category)) return;
+  if (attempt.inputTokens + attempt.outputTokens <= 0) return;
+  await deductTokens(
     userId,
     attempt.inputTokens,
     attempt.outputTokens,
@@ -789,20 +793,26 @@ async function deductRefusedAttempt(
  * Naúčtuje pokusy, které v řetězci serverového fallbacku odmítl předchozí model
  * (top-level usage je nepokrývá). Každý zvlášť, sazbou svého modelu a s klíčem
  * odvozeným od klíče dávky – opakované zpracování po restartu neúčtuje dvakrát.
+ * Nikdy nevyhodí: chyba odečtu pokusu se zaloguje a nesmí ovlivnit hlavní odečet.
  */
-async function deductDeclinedAttempts(
+async function billDeclinedAttempts(
+  jobId: string,
   userId: string,
   attempts: OcrAttemptUsage[],
   description: string,
   batchReferenceId: string,
 ): Promise<void> {
   for (const [i, attempt] of attempts.entries()) {
-    await deductRefusedAttempt(
-      userId,
-      attempt,
-      `${description} – odmítnutý pokus (${attempt.model})`,
-      declinedAttemptReferenceId(batchReferenceId, i),
-    );
+    try {
+      await billRefusedAttempt(
+        userId,
+        attempt,
+        `${description} – odmítnutý pokus (${attempt.model})`,
+        declinedAttemptReferenceId(batchReferenceId, i),
+      );
+    } catch (err) {
+      console.error(`[Worker] Billing of declined attempt ${i} failed for job ${jobId}:`, err);
+    }
   }
 }
 

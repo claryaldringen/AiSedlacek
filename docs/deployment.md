@@ -56,8 +56,11 @@ server a teprve pak spustit nový skript:
 
 1. `cd /opt/AiSedlacek && git status` – lokálně upravený `package-lock.json`
    vrátit (`git checkout -- package-lock.json`), jinak `git pull --ff-only` spadne.
-2. Ruční záloha: `mkdir -p /var/backups/aisedlacek && pg_dump --format=custom --file=/var/backups/aisedlacek/manual-$(date +%Y%m%d).dump "<DATABASE_URL bez ?schema>"`.
-3. `git pull --ff-only origin main` – od teď poběží nový `deploy.sh`.
+2. Ruční záloha mimo rotovaný adresář (denní zálohy mažou `*.dump` starší 14 dní):
+   `mkdir -p /var/backups/aisedlacek-manual && pg_dump --format=custom --file=/var/backups/aisedlacek-manual/pre-2026-10.dump "<DATABASE_URL bez ?schema>"`.
+3. `pm2 stop ai-sedlacek-worker` (joby počkají ve frontě – worker běží přes tsx přímo
+   ze zdrojáků a s novým kódem nad starými `node_modules` by padal; `deploy.sh` ho
+   na konci znovu spustí), pak `git pull --ff-only origin main` – od teď poběží nový `deploy.sh`.
 4. Kontrola historie migrací a případný baseline – viz
    [Kontrola historie migrací](#kontrola-historie-migrací-a-jednorázový-baseline).
 5. Caddy: hlavičky pro `/uploads/*` a limity `request_body` z
@@ -66,7 +69,13 @@ server a teprve pak spustit nový skript:
 7. `./deploy.sh`, pak `pm2 env <id workeru> | grep NODE_ENV` → `production`.
 8. Zálohy: instalace `ops/backup/` (viz [Zálohy](#zálohy)).
 9. CLI: vydat `ai-sedlacek-cli@0.2.0` na npm (`npm publish -w ai-sedlacek-cli`).
-   Starší CLI dál funguje, jen `ais push` u dokumentu s víc překlady vyžaduje novou verzi.
+   Starší CLI dál funguje, jen `ais push` u dokumentu s víc překlady a nahrání víc než
+   200 URL najednou vyžadují novou verzi (server to v chybě řekne).
+
+**Rollback prvního deploye:** `DEPLOY_REF=fcf24c2 ./deploy.sh` – nový skript ho dokončí
+sám (starší `deploy.sh` re-exec nezná a stáhl by znovu `main`). Verze z 2026-10 nepřidává
+žádnou migraci, takže obnova DB není potřeba (jen pokud se při baseline něco pokazilo –
+pak ruční dump z kroku 2).
 
 ## Deploy nové verze
 
@@ -81,7 +90,9 @@ Kontrola i záloha běží před `npm ci`, takže když selžou, běžící apli
 netknutá. Build běží před migrací, takže neprošlý build nechá databázi netknutou
 – běžící aplikace ale může být rozbitá (`npm ci` a build už přepsaly soubory). Rollback:
 `DEPLOY_REF=<předchozí commit> /opt/AiSedlacek/deploy.sh`; pokud už proběhla migrace,
-je potřeba obnovit pre-deploy dump (`pg_restore`). Ponechává se 10 posledních
+je potřeba obnovit pre-deploy dump (`pg_restore`) – dump vzniká před buildem, takže
+zápisy z doby buildu v něm nejsou: po obnově dosrovnat platby (Stripe dashboard, Fio
+výpis) a zkontrolovat OCR joby dokončené během deploye. Ponechává se 10 posledních
 pre-deploy dumpů.
 
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker

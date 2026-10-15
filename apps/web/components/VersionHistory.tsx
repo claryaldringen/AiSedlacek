@@ -60,12 +60,16 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
 
   const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(true);
+  // 404 = historii nesmíme číst (veřejný dokument cizího uživatele) – to není
+  // totéž co „žádná historie".
+  const [unavailable, setUnavailable] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/documents/${documentId}/versions`);
+      setUnavailable(res.status === 404);
       if (res.ok) {
         setVersions((await res.json()) as Version[]);
       }
@@ -82,6 +86,10 @@ export function VersionHistory({ documentId, onRestore }: VersionHistoryProps): 
 
   if (loading) {
     return <p className="py-4 text-center text-xs text-slate-400">{t('loading')}</p>;
+  }
+
+  if (unavailable) {
+    return <p className="py-4 text-center text-xs text-slate-400">{t('historyUnavailable')}</p>;
   }
 
   if (versions.length === 0) {

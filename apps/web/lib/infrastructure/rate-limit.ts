@@ -55,19 +55,13 @@ export function rateLimit(
 }
 
 /**
- * Stav limitu bez započtení pokusu – pro limity, které počítají jen některé
- * pokusy (přihlášení: napřed se zeptat, `rateLimit` zavolat až po neúspěchu).
+ * Vrátí jeden započtený pokus (count − 1, ne pod nulu) – pro pokusy započtené
+ * dopředu, které se nakonec počítat nemají (úspěšné přihlášení).
  */
-export function peekRateLimit(
-  key: string,
-  limit: number,
-): { ok: boolean; retryAfterSeconds: number } {
-  const now = Date.now();
+export function releaseRateLimit(key: string): void {
   const bucket = buckets.get(key);
-  if (!bucket || now > bucket.resetAt || bucket.count < limit) {
-    return { ok: true, retryAfterSeconds: 0 };
-  }
-  return { ok: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
+  if (!bucket || Date.now() > bucket.resetAt) return;
+  bucket.count = Math.max(0, bucket.count - 1);
 }
 
 /** Vynuluje limit klíče (např. neúspěšné pokusy účtu po úspěšném přihlášení). */

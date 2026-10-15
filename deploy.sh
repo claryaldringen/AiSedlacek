@@ -11,21 +11,33 @@ cd "$APP_DIR"
 DEPLOY_REF="${DEPLOY_REF:-}"
 if [ -z "${DEPLOY_REEXEC:-}" ]; then
   self_before="$(sha256sum deploy.sh)"
+  # Commit nasazený před tímto deployem – kontrola migrací podle něj pozná,
+  # které migrace přináší až tento deploy.
+  PREV_HEAD="$(git rev-parse HEAD)"
   echo "=== Updating code ==="
   if [ -n "$DEPLOY_REF" ]; then
     git fetch origin
+    # Relativní ref (HEAD~1) přeložit hned – po checkoutu by znamenal jiný commit.
+    DEPLOY_REF="$(git rev-parse --verify "${DEPLOY_REF}^{commit}")"
     git checkout --detach "$DEPLOY_REF"
   else
     git checkout main
     git pull --ff-only origin main
   fi
   # Bash čte skript průběžně ze starého souboru (git ho nahradí novým), takže
-  # změny deploy.sh by se jinak projevily až při dalším deployi.
+  # změny deploy.sh by se jinak projevily až při dalším deployi. Starší verze
+  # (rollback přes DEPLOY_REF) re-exec neznají a udělaly by znovu pull mainu –
+  # v tom případě dokončí deploy tento skript.
   if [ "$(sha256sum deploy.sh)" != "$self_before" ]; then
-    echo "=== deploy.sh changed – continuing with the new version ==="
-    exec env DEPLOY_REEXEC=1 bash "$APP_DIR/deploy.sh" "$@"
+    if grep -q 'DEPLOY_REEXEC' deploy.sh; then
+      echo "=== deploy.sh changed – continuing with the new version ==="
+      exec env DEPLOY_REEXEC=1 DEPLOY_REF="$DEPLOY_REF" PREV_HEAD="$PREV_HEAD" \
+        bash "$APP_DIR/deploy.sh" "$@"
+    fi
+    echo "=== target deploy.sh is older – continuing with the current one ==="
   fi
 fi
+PREV_HEAD="${PREV_HEAD:-$(git rev-parse HEAD)}"
 
 DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
 # Prisma URL může mít ?schema=…, kterému psql/pg_dump nerozumí.
@@ -40,8 +52,17 @@ echo "=== Checking migration history ==="
 # produkci nebyl ověřený – migrate deploy by pak spadl uprostřed deploye (P3005,
 # „already exists"), nebo znovu spustil starou datovou migraci.
 # Jednorázový baseline: docs/deployment.md – Kontrola historie migrací.
-psql_q() { psql "$PG_URL" -v ON_ERROR_STOP=1 -tAc "$1"; }
-if [ "$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")" = "t" ]; then
+# -X: bez ~/.psqlrc (např. \timing by změnil výstup a kontrolu tiše přeskočil).
+psql_q() { psql -X "$PG_URL" -v ON_ERROR_STOP=1 -tAc "$1"; }
+db_has_tables="$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")"
+case "$db_has_tables" in
+  t | f) ;;
+  *)
+    echo "CHYBA: nečekaná odpověď DB při kontrole migrací: $db_has_tables" >&2
+    exit 1
+    ;;
+esac
+if [ "$db_has_tables" = "t" ]; then
   if [ "$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\"._prisma_migrations') IS NOT NULL")" != "t" ]; then
     echo "CHYBA: DB má tabulky, ale chybí _prisma_migrations – nejdřív baseline (docs/deployment.md – Kontrola historie migrací)." >&2
     exit 1
@@ -59,14 +80,19 @@ if [ "$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")" = "
   last_applied="$(tail -n1 <<<"$applied")"
   gaps=""
   for dir in packages/db/prisma/migrations/*/; do
+    [ -d "$dir" ] || continue # starší commit (rollback) adresář nemá
     name="$(basename "$dir")"
     grep -qxF "$name" <<<"$applied" && continue
-    # Chybějící migrace starší než poslední aplikovaná = schéma se měnilo mimo
-    # migrace; migrate deploy by ji pustil nad hotovými tabulkami.
+    # Migraci, kterou přináší až tento deploy, aplikuje migrate deploy – i když má
+    # starší timestamp (vznikla na jiné větvi). Díra = migrace, která v repu byla
+    # už v nasazeném commitu, a přesto v historii DB chybí, i když novější
+    # migrace prošly: schéma se měnilo mimo migrace.
+    git cat-file -e "$PREV_HEAD:packages/db/prisma/migrations/$name/migration.sql" 2>/dev/null ||
+      continue
     [[ "$name" < "$last_applied" ]] && gaps+="$name "
   done
   if [ -n "$gaps" ]; then
-    echo "CHYBA: v historii DB chybí starší migrace: ${gaps}– ověřit a označit (docs/deployment.md – Kontrola historie migrací)." >&2
+    echo "CHYBA: v historii DB chybí starší migrace: ${gaps}– ověřit, že jejich objekty v DB existují, a teprve pak označit (docs/deployment.md – Kontrola historie migrací)." >&2
     exit 1
   fi
 fi

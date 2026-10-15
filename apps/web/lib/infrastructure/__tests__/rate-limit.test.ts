@@ -20,42 +20,48 @@ describe('rateLimit', () => {
     expect(bucketCount()).toBe(1);
   });
 
-  it('peekRateLimit reads the state without counting an attempt', () => {
-    const { rateLimit, peekRateLimit, bucketCount } = mod;
-    const key = 'peek:key';
-
-    for (let i = 0; i < 5; i++) expect(peekRateLimit(key, 2).ok).toBe(true);
-    expect(bucketCount()).toBe(0); // čtení nezakládá bucket
-
+  it('releaseRateLimit gives back one counted attempt, never below zero', () => {
+    const { rateLimit, releaseRateLimit } = mod;
+    const key = 'release:key';
     rateLimit(key, 2, 60_000);
-    expect(peekRateLimit(key, 2).ok).toBe(true);
     rateLimit(key, 2, 60_000);
-    const blocked = peekRateLimit(key, 2);
-    expect(blocked.ok).toBe(false);
-    expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
+    expect(rateLimit(key, 2, 60_000).ok).toBe(false);
+
+    releaseRateLimit(key);
+    expect(rateLimit(key, 2, 60_000).ok).toBe(true); // uvolněné místo
+    expect(rateLimit(key, 2, 60_000).ok).toBe(false);
+
+    for (let i = 0; i < 5; i++) releaseRateLimit(key);
+    // Ne pod nulu: po dvou pokusech je limit zase plný.
+    expect(rateLimit(key, 2, 60_000).ok).toBe(true);
+    expect(rateLimit(key, 2, 60_000).ok).toBe(true);
+    expect(rateLimit(key, 2, 60_000).ok).toBe(false);
   });
 
-  it('peekRateLimit ignores an expired window', () => {
+  it('releaseRateLimit ignores unknown and expired keys', () => {
     vi.useFakeTimers();
     try {
-      const { rateLimit, peekRateLimit } = mod;
+      const { rateLimit, releaseRateLimit, bucketCount } = mod;
+      releaseRateLimit('unknown');
+      expect(bucketCount()).toBe(0); // nezakládá bucket
+
       rateLimit('expiring', 1, 1_000);
-      expect(peekRateLimit('expiring', 1).ok).toBe(false);
       vi.advanceTimersByTime(1_001);
-      expect(peekRateLimit('expiring', 1).ok).toBe(true);
+      releaseRateLimit('expiring');
+      expect(rateLimit('expiring', 1, 1_000).ok).toBe(true);
+      expect(rateLimit('expiring', 1, 1_000).ok).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('resetRateLimit clears the counter of a key', () => {
-    const { rateLimit, peekRateLimit, resetRateLimit } = mod;
+    const { rateLimit, resetRateLimit } = mod;
     rateLimit('reset:key', 1, 60_000);
-    expect(peekRateLimit('reset:key', 1).ok).toBe(false);
+    expect(rateLimit('reset:key', 1, 60_000).ok).toBe(false);
 
     resetRateLimit('reset:key');
 
-    expect(peekRateLimit('reset:key', 1).ok).toBe(true);
     expect(rateLimit('reset:key', 1, 60_000).ok).toBe(true);
   });
 

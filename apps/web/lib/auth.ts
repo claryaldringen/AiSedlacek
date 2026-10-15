@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/infrastructure/db';
 import {
   rateLimit,
-  peekRateLimit,
+  releaseRateLimit,
   resetRateLimit,
   clientIp,
 } from '@/lib/infrastructure/rate-limit';
@@ -33,11 +33,28 @@ export class LoginRateLimitedError extends CredentialsSignin {
   override code = 'rate_limited';
 }
 
+/** Uživatel se zadaným e-mailem, jen pokud sedí heslo (účty jen přes OAuth heslo nemají). */
+async function findUserByPassword(
+  email: string,
+  password: string,
+): Promise<{
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  emailVerified: Date | null;
+} | null> {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user?.password) return null;
+  return (await bcrypt.compare(password, user.password)) ? user : null;
+}
+
 /**
  * Ověření e-mailu a hesla s limitem pokusů. Počítají se jen neúspěšné pokusy
- * (úspěch vynuluje počítadlo účtu) – jinak by útočník znalý e-mailu oběť
- * zablokoval a sdílená IP by zablokovala všechny za ní. Neúspěch se počítá
- * stejně pro existující i neexistující účet, limit tak neprozrazuje existenci účtu.
+ * (úspěch započtený pokus vrátí a vynuluje počítadlo účtu) – jinak by útočník
+ * znalý e-mailu oběť zablokoval a sdílená IP by zablokovala všechny za ní.
+ * Neúspěch se počítá stejně pro existující i neexistující účet, limit tak
+ * neprozrazuje existenci účtu.
  */
 export async function authorizeCredentials(
   credentials: Partial<Record<string, unknown>> | undefined,
@@ -58,24 +75,30 @@ export async function authorizeCredentials(
   const emailKey = createHash('sha256').update(normalizedEmail).digest('base64url');
   const accountFailuresKey = `login:email:${emailKey}`;
 
-  // Limity neúspěchů napřed jen čteme (bez bcryptu a bez nových bucketů pro
-  // účet) – po vyčerpání IP limitu tak rotace e-mailů z jedné IP nezvětšuje
-  // mapu limiteru. Neúspěch se započte až po ověření hesla níže.
-  if (
-    !rateLimit(`login:attempts:${ip}`, LOGIN_MAX_ATTEMPTS_PER_IP, LOGIN_WINDOW_MS).ok ||
-    !peekRateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP).ok ||
-    !peekRateLimit(accountFailuresKey, LOGIN_MAX_FAILURES_PER_ACCOUNT).ok
-  ) {
+  if (!rateLimit(`login:attempts:${ip}`, LOGIN_MAX_ATTEMPTS_PER_IP, LOGIN_WINDOW_MS).ok) {
+    throw new LoginRateLimitedError();
+  }
+  // Neúspěch započteme dopředu, synchronně před bcryptem – souběžné requesty
+  // tak nemůžou všechny projít kontrolou dřív, než se zapíše první neúspěch.
+  // IP napřed: po jejím vyčerpání se klíč účtu vůbec nezakládá, takže rotace
+  // e-mailů z jedné IP nezvětšuje mapu limiteru.
+  if (!rateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS).ok) {
+    throw new LoginRateLimitedError();
+  }
+  if (!rateLimit(accountFailuresKey, LOGIN_MAX_FAILURES_PER_ACCOUNT, LOGIN_WINDOW_MS).ok) {
+    releaseRateLimit(ipFailuresKey); // heslo se nezkoušelo
     throw new LoginRateLimitedError();
   }
 
-  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-  const valid = user?.password ? await bcrypt.compare(password, user.password) : false;
-  if (!user || !valid) {
-    rateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS);
-    rateLimit(accountFailuresKey, LOGIN_MAX_FAILURES_PER_ACCOUNT, LOGIN_WINDOW_MS);
-    return null;
-  }
+  const user = await findUserByPassword(normalizedEmail, password).catch((err: unknown) => {
+    // Výpadek DB není špatné heslo – nezamykat účet kvůli opakovaným pokusům.
+    releaseRateLimit(ipFailuresKey);
+    releaseRateLimit(accountFailuresKey);
+    throw err;
+  });
+  // Neúspěch zůstává započtený; správné heslo se mezi neúspěchy nepočítá.
+  if (!user) return null;
+  releaseRateLimit(ipFailuresKey);
   resetRateLimit(accountFailuresKey);
 
   if (!user.emailVerified) return null;

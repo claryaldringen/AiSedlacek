@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   },
   checkBalance: vi.fn(),
   deductTokensIfSufficient: vi.fn(),
+  deductTokens: vi.fn(),
   createVersion: vi.fn(),
   processWithClaudeBatch: vi.fn(),
   prepareImage: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
 vi.mock('@ai-sedlacek/db/billing', () => ({
   checkBalance: mocks.checkBalance,
   deductTokensIfSufficient: mocks.deductTokensIfSufficient,
+  deductTokens: mocks.deductTokens,
 }));
 vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersion }));
 vi.mock('@ai-sedlacek/ocr', async (importOriginal) => ({
@@ -134,6 +136,7 @@ beforeEach(() => {
 
   mocks.checkBalance.mockResolvedValue({ balance: 1_000_000, sufficient: true });
   mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 900_000 });
+  mocks.deductTokens.mockResolvedValue({ id: 'tx', amount: -1 });
   mocks.createVersion.mockResolvedValue(undefined);
   // Každá stránka má jiný obsah → jiný hash
   mocks.storageRead.mockImplementation(async (path: string) => Buffer.from(`image:${path}`));
@@ -424,7 +427,12 @@ describe('processPages – odmítnutá dávka', () => {
   it('stránky dávky označí chybou, naúčtuje spotřebu a job nespadne', async () => {
     addPage('p1');
     mocks.processWithClaudeBatch.mockRejectedValue(
-      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 40 }),
+      new OcrRefusalError('bio', {
+        model: 'claude-opus-5-5',
+        inputTokens: 3000,
+        outputTokens: 40,
+        category: 'bio',
+      }),
     );
 
     await expect(processPages({ ...baseJob, pageIds: ['p1'] })).resolves.not.toThrow();
@@ -433,7 +441,9 @@ describe('processPages – odmítnutá dávka', () => {
       where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'error', errorMessage: expect.stringContaining('odmítl') },
     });
-    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledWith(
+    // Volání už proběhlo – účtuje se bezpodmínečně (ne „…IfSufficient")
+    expect(mocks.deductTokensIfSufficient).not.toHaveBeenCalled();
+    expect(mocks.deductTokens).toHaveBeenCalledWith(
       'user-1',
       3000,
       40,
@@ -732,9 +742,15 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
 
 // ── Serverový fallback: odmítnuté pokusy (review 2026-10, nález 1) ──
 describe('processPages – účtování odmítnutých pokusů serverového fallbacku', () => {
-  it('odmítnutý pokus naúčtuje zvlášť jeho modelem; odmítnutí před výstupem ne', async () => {
-    addPage('p1');
-    mocks.processWithClaudeBatch.mockResolvedValue({
+  function fallbackResult(
+    declinedAttempts: {
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      category: string | null;
+    }[],
+  ) {
+    return {
       results: [{ index: 0, result: ocrResult(0) }],
       rawResponse: '{}',
       processingTimeMs: 1000,
@@ -744,58 +760,146 @@ describe('processPages – účtování odmítnutých pokusů serverového fallb
       stopReason: 'end_turn',
       truncated: false,
       parseProblem: null,
-      declinedAttempts: [
-        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420 },
-        { model: 'claude-opus-4-8', inputTokens: 3050, outputTokens: 0 },
-      ],
-    });
+      declinedAttempts,
+    };
+  }
 
-    await processPages({ ...baseJob, pageIds: ['p1'] });
+  function declinedCalls(): unknown[][] {
+    return mocks.deductTokens.mock.calls.map((c) => [c[1], c[2], c[4], c[5]]);
+  }
 
-    const batchRef = ocrBatchReferenceId('job-1', ['p1']);
-    const calls = mocks.deductTokensIfSufficient.mock.calls.map((c) => [c[1], c[2], c[4], c[5]]);
-    expect(calls).toEqual([
-      // Hlavní odečet = top-level usage s modelem, který odpověděl
-      [3100, 2500, batchRef, 'claude-opus-5'],
-      // Odmítnutý pokus uprostřed výstupu – vlastní model i klíč
-      [3000, 420, `${batchRef}:declined:0`, 'claude-opus-5-5'],
-      // Pokus s 0 výstupními tokeny (odmítnutí před výstupem) se neúčtuje
-    ]);
-    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
-  });
-
-  it('odmítnutí celého řetězce: poslední pokus i dřívější odmítnuté pokusy s klíčem odmítnutí', async () => {
+  it('odmítnuté pokusy naúčtuje zvlášť jejich modelem podle kategorie a výstupu', async () => {
     addPage('p1');
-    mocks.processWithClaudeBatch.mockRejectedValue(
-      new OcrRefusalError('bio', { model: 'claude-opus-5', inputTokens: 3100, outputTokens: 30 }, [
-        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 15 },
+    mocks.processWithClaudeBatch.mockResolvedValue(
+      fallbackResult([
+        // uprostřed výstupu → vždy
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420, category: 'cyber' },
+        // před výstupem v účtované kategorii → účtuje se
+        { model: 'claude-opus-4-8', inputTokens: 3050, outputTokens: 0, category: 'bio' },
+        // před výstupem v neúčtované kategorii / bez kategorie → ne
+        { model: 'claude-opus-4-8', inputTokens: 3050, outputTokens: 0, category: 'cyber' },
+        { model: 'claude-opus-4-8', inputTokens: 3050, outputTokens: 0, category: null },
       ]),
     );
 
     await processPages({ ...baseJob, pageIds: ['p1'] });
 
+    const batchRef = ocrBatchReferenceId('job-1', ['p1']);
+    // Hlavní odečet = top-level usage s modelem, který odpověděl
+    expect(mocks.deductTokensIfSufficient.mock.calls.map((c) => [c[1], c[2], c[4], c[5]])).toEqual([
+      [3100, 2500, batchRef, 'claude-opus-5'],
+    ]);
+    expect(declinedCalls()).toEqual([
+      [3000, 420, `${batchRef}:declined:0`, 'claude-opus-5-5'],
+      [3050, 0, `${batchRef}:declined:1`, 'claude-opus-4-8'],
+    ]);
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('odmítnuté pokusy účtuje i při zůstatku ≤ 0 po hlavním odečtu', async () => {
+    addPage('p1');
+    // Hlavní odečet srazil zůstatek do minusu – …IfSufficient by další odečet odmítla
+    mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: -500 });
+    mocks.processWithClaudeBatch.mockResolvedValue(
+      fallbackResult([
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420, category: 'bio' },
+      ]),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(declinedCalls()).toEqual([
+      [3000, 420, `${ocrBatchReferenceId('job-1', ['p1'])}:declined:0`, 'claude-opus-5-5'],
+    ]);
+  });
+
+  it('chyba odečtu odmítnutého pokusu nepřepíše úspěšný hlavní odečet', async () => {
+    // Max. 2 stránky na dávku → [p1, p2], [p3]
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+    mocks.deductTokens.mockRejectedValue(new Error('DB down'));
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch.mockImplementation(async (...args: unknown[]) => ({
+      ...(await ocrDefault(...args)),
+      declinedAttempts: [
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420, category: 'bio' },
+      ],
+    }));
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+
+    // Obě dávky proběhly – job se nezastavil hláškou „Odečet kreditu selhal"
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(3);
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.status).toBe('completed');
+    expect(lastJobUpdate.data.errors).toEqual([]);
+  });
+
+  it('odmítnutí celého řetězce: poslední pokus i dřívější odmítnuté pokusy s klíčem odmítnutí', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockRejectedValue(
+      new OcrRefusalError(
+        'bio',
+        { model: 'claude-opus-5', inputTokens: 3100, outputTokens: 0, category: 'bio' },
+        [{ model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 15, category: 'cyber' }],
+      ),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
     const refusedRef = ocrBatchRefusedReferenceId('job-1', ['p1']);
-    const calls = mocks.deductTokensIfSufficient.mock.calls.map((c) => [c[1], c[2], c[4], c[5]]);
-    expect(calls).toEqual([
-      [3100, 30, refusedRef, 'claude-opus-5'],
+    expect(mocks.deductTokensIfSufficient).not.toHaveBeenCalled();
+    expect(declinedCalls()).toEqual([
+      // poslední pokus odmítl před výstupem, ale v účtované kategorii bio
+      [3100, 0, refusedRef, 'claude-opus-5'],
       [3000, 15, `${refusedRef}:declined:0`, 'claude-opus-5-5'],
     ]);
     expect(mocks.prisma.document.create).not.toHaveBeenCalled();
   });
 
-  it('odmítnutí před výstupem (0 výstupních tokenů) se neúčtuje', async () => {
+  it.each([['cyber'], [null]])(
+    'odmítnutí před výstupem v kategorii %s se neúčtuje',
+    async (category) => {
+      addPage('p1');
+      mocks.processWithClaudeBatch.mockRejectedValue(
+        new OcrRefusalError(category, {
+          model: 'claude-opus-5-5',
+          inputTokens: 3000,
+          outputTokens: 0,
+          category,
+        }),
+      );
+
+      await processPages({ ...baseJob, pageIds: ['p1'] });
+
+      expect(mocks.deductTokens).not.toHaveBeenCalled();
+      expect(mocks.deductTokensIfSufficient).not.toHaveBeenCalled();
+      expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p1', status: { not: 'archived' } },
+        data: { status: 'error', errorMessage: expect.stringContaining('odmítl') },
+      });
+    },
+  );
+
+  it('odmítnutí před výstupem v kategorii bio se účtuje', async () => {
     addPage('p1');
     mocks.processWithClaudeBatch.mockRejectedValue(
-      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0 }),
+      new OcrRefusalError('bio', {
+        model: 'claude-opus-5-5',
+        inputTokens: 3000,
+        outputTokens: 0,
+        category: 'bio',
+      }),
     );
 
     await processPages({ ...baseJob, pageIds: ['p1'] });
 
-    expect(mocks.deductTokensIfSufficient).not.toHaveBeenCalled();
-    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
-      where: { id: 'p1', status: { not: 'archived' } },
-      data: { status: 'error', errorMessage: expect.stringContaining('odmítl') },
-    });
+    expect(declinedCalls()).toEqual([
+      [3000, 0, ocrBatchRefusedReferenceId('job-1', ['p1']), 'claude-opus-5-5'],
+    ]);
   });
 });
 
@@ -804,14 +908,18 @@ describe('processPages – referenceId odmítnuté dávky', () => {
   it('po reclaimu úspěšné OCR téže sady stránek nesdílí klíč s odmítnutím', async () => {
     addPage('p1');
     mocks.processWithClaudeBatch.mockRejectedValueOnce(
-      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 40 }),
+      new OcrRefusalError('bio', {
+        model: 'claude-opus-5-5',
+        inputTokens: 3000,
+        outputTokens: 40,
+        category: 'bio',
+      }),
     );
 
     await processPages({ ...baseJob, pageIds: ['p1'] });
-    const refusedKey = mocks.deductTokensIfSufficient.mock.calls[0]![4] as string;
+    const refusedKey = mocks.deductTokens.mock.calls[0]![4] as string;
 
     // Reclaim téhož jobu – tentokrát model stránku zpracuje
-    mocks.deductTokensIfSufficient.mockClear();
     await processPages({ ...baseJob, pageIds: ['p1'] });
     const successKey = mocks.deductTokensIfSufficient.mock.calls[0]![4] as string;
 
@@ -915,6 +1023,7 @@ describe('processPages – přepis errors zachová značky reclaimu', () => {
           model: 'claude-opus-5-5',
           inputTokens: 3000,
           outputTokens: 40,
+          category: 'bio',
         }),
       )
       .mockImplementation(ocrDefault);

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { BILLING, creditsForUsage, czkToCredits, modelRates, usagePriceCzk } from '../pricing';
+import {
+  BILLING,
+  creditsForUsage,
+  czkToCredits,
+  isRefusalBilled,
+  modelRates,
+  usagePriceCzk,
+} from '../pricing';
 
 describe('pricing', () => {
   it('charges the actual API cost × markup, per model and token direction', () => {
@@ -31,5 +38,21 @@ describe('pricing', () => {
 
   it('keeps the top-up rate of 50 CZK per 1M credits', () => {
     expect(czkToCredits(100 * 100)).toBe(2_000_000);
+  });
+});
+
+describe('isRefusalBilled', () => {
+  it('refusal mid-output is always billed', () => {
+    expect(isRefusalBilled(15, null)).toBe(true);
+    expect(isRefusalBilled(15, 'cyber')).toBe(true);
+  });
+
+  it('refusal before output is billed only in the billed categories', () => {
+    expect(isRefusalBilled(0, 'bio')).toBe(true);
+    expect(isRefusalBilled(0, 'frontier_llm')).toBe(true);
+    expect(isRefusalBilled(0, 'reasoning_extraction')).toBe(true);
+    expect(isRefusalBilled(0, 'cyber')).toBe(false);
+    expect(isRefusalBilled(0, 'general_harms')).toBe(false);
+    expect(isRefusalBilled(0, null)).toBe(false);
   });
 });

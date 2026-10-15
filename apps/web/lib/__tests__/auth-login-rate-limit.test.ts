@@ -130,5 +130,58 @@ describe('authorizeCredentials – login rate limit', () => {
     mockUserFindUnique.mockResolvedValue({ ...USER, emailVerified: null });
 
     for (let i = 0; i < 15; i++) expect(await login('correct')).toBeNull();
+    // Ani IP se správným heslem neblíží limitu neúspěchů.
+    for (let i = 0; i < 30; i++) expect(await login('wrong', '10.0.0.1', `x${i}@e.cz`)).toBeNull();
+  });
+
+  it('successful logins from an IP do not consume its failure budget', async () => {
+    const ip = '10.0.0.7';
+    for (let i = 0; i < 29; i++)
+      expect(await login('wrong', ip, `user${i}@example.com`)).toBeNull();
+    for (let i = 0; i < 20; i++) expect(await login('correct', ip)).not.toBeNull();
+
+    // Třicátý neúspěch je pořád povolený, teprve pak se IP zablokuje.
+    expect(await login('wrong', ip, 'user29@example.com')).toBeNull();
+    await expect(login('correct', ip)).rejects.toBeInstanceOf(LoginRateLimitedError);
+  });
+
+  it('concurrent attempts cannot bypass the account limit', async () => {
+    // Pomalý bcrypt: všechny requesty dorazí dřív, než první ověření skončí.
+    mockCompare.mockImplementation(
+      (password: string) =>
+        new Promise((resolve) => setTimeout(() => resolve(password === 'correct'), 20)),
+    );
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 50 }, (_, i) => login('wrong', `10.0.5.${i % 3}`)),
+    );
+
+    expect(mockCompare).toHaveBeenCalledTimes(10);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(10);
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(40);
+    for (const r of rejected) expect(r.reason).toBeInstanceOf(LoginRateLimitedError);
+  });
+
+  it('concurrent attempts from one IP cannot bypass the IP limit', async () => {
+    mockUserFindUnique.mockResolvedValue(USER); // každý e-mail existuje → bcrypt
+    mockCompare.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(false), 20)),
+    );
+
+    await Promise.allSettled(
+      Array.from({ length: 100 }, (_, i) => login('wrong', '10.0.6.1', `u${i % 20}@example.com`)),
+    );
+
+    // 20 účtů × 5 pokusů – limit účtu (10) nezasáhne, strop dává IP limit 30.
+    expect(mockCompare).toHaveBeenCalledTimes(30);
+  });
+
+  it('a database error is not counted as a failed password', async () => {
+    mockUserFindUnique.mockRejectedValue(new Error('db down'));
+    for (let i = 0; i < 15; i++) await expect(login('correct')).rejects.toThrow('db down');
+
+    mockUserFindUnique.mockResolvedValue(USER);
+    expect(await login('correct')).not.toBeNull();
   });
 });

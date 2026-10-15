@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type {
+  BetaFallbackBlock,
   BetaFallbackMessageIterationUsage,
   BetaMessage,
   BetaMessageIterationUsage,
@@ -60,11 +61,16 @@ export function batchMaxTokens(pageCount: number): number {
   );
 }
 
-/** Spotřeba jednoho pokusu volání (model, který ho skutečně zpracoval). */
+/** Spotřeba jednoho odmítnutého pokusu volání (model, který ho skutečně zpracoval). */
 export interface OcrAttemptUsage {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Kategorie odmítnutí (`bio`, `cyber`, …; `null` = bez kategorie). Podle ní se
+   * rozhoduje, zda se účtuje odmítnutí před výstupem – viz `isRefusalBilled`.
+   */
+  category: string | null;
 }
 
 /** Model požadavek odmítl (safety klasifikátor) a odmítl ho i fallback model. */
@@ -73,7 +79,7 @@ export class OcrRefusalError extends Error {
     readonly category: string | null,
     /**
      * Spotřeba pokusu, jehož odmítnutí API vrátilo (top-level `usage` – poslední
-     * pokus řetězce). Částečný výstup se účtuje.
+     * pokus řetězce, kategorie ze `stop_details`).
      */
     readonly usage: OcrAttemptUsage,
     /** Dřívější odmítnuté pokusy řetězce fallbacku – viz `declinedAttempts()`. */
@@ -99,6 +105,9 @@ export class OcrRefusalError extends Error {
  * OCR nepoužívá serverové nástroje, takže iterace jsou jen pokusy řetězce:
  * všechny položky kromě poslední jsou odmítnuté pokusy, poslední odpovídá
  * top-level `usage`. Platí pro úspěch i pro odmítnutí celého řetězce.
+ *
+ * Kategorii odmítnutí nese blok `fallback` v `content` (`trigger.category`) –
+ * jeden na každý hop, kde model běžel a odmítl, ve stejném pořadí jako iterace.
  */
 export function declinedAttempts(message: BetaMessage): OcrAttemptUsage[] {
   const attempts = (message.usage.iterations ?? []).filter(
@@ -117,10 +126,21 @@ export function declinedAttempts(message: BetaMessage): OcrAttemptUsage[] {
       JSON.stringify({ iterations: message.usage.iterations, usage: message.usage }),
     );
   }
-  return attempts.slice(0, -1).map((it) => ({
+  const declined = attempts.slice(0, -1);
+  const fallbackBlocks = message.content.filter(
+    (block): block is BetaFallbackBlock => block.type === 'fallback',
+  );
+  if (fallbackBlocks.length !== declined.length) {
+    // Bez kategorie se odmítnutí před výstupem neúčtuje (konzervativně vůči uživateli)
+    console.warn(
+      `[Claude] Počet bloků fallback (${fallbackBlocks.length}) neodpovídá odmítnutým pokusům (${declined.length})`,
+    );
+  }
+  return declined.map((it, i) => ({
     model: it.model ?? OCR_MODEL,
     inputTokens: it.input_tokens,
     outputTokens: it.output_tokens,
+    category: fallbackBlocks[i]?.trigger.category ?? null,
   }));
 }
 
@@ -162,12 +182,14 @@ async function streamOcrRequest(params: {
   const declined = declinedAttempts(message);
 
   if (message.stop_reason === 'refusal') {
+    const category = message.stop_details?.category ?? null;
     throw new OcrRefusalError(
-      message.stop_details?.category ?? null,
+      category,
       {
         model: message.model,
         inputTokens: message.usage.input_tokens,
         outputTokens: message.usage.output_tokens,
+        category,
       },
       declined,
     );
