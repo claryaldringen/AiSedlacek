@@ -124,9 +124,13 @@ Postup vydání:
 
 1. Zvýšit verzi v `apps/cli/package.json` a `apps/cli/src/version.ts` (test hlídá shodu),
    PR přes `/ais-review`, merge do `main`.
-2. `git tag cli-vX.Y.Z origin/main && git push origin cli-vX.Y.Z` – workflow ověří, že tag
-   odpovídá verzi, spustí typecheck/lint/testy CLI, sestaví tarball a v odděleném jobu
-   (jediném s `id-token: write`, bez instalace závislostí) ho publikuje.
+2. `git fetch origin && git tag cli-vX.Y.Z origin/main && git push origin cli-vX.Y.Z` –
+   workflow ověří, že tag je na `main` a odpovídá verzi, spustí typecheck/lint/testy CLI,
+   sestaví tarball (`npm ci --ignore-scripts`) a v odděleném jobu (jediném s
+   `id-token: write`, bez instalace závislostí) ho publikuje.
+3. Když workflow selže **před** publikací (např. ještě nenastavený trusted publisher):
+   opravit, `git push origin :refs/tags/cli-vX.Y.Z` a otagovat znovu. Publikovanou verzi
+   už znovu vydat nejde – další oprava = nová verze.
 
 Jednorázové nastavení (vlastník balíčku na npmjs.com):
 
@@ -135,8 +139,8 @@ Jednorázové nastavení (vlastník balíčku na npmjs.com):
   Workflow filename `publish-cli.yml`, Environment `npm`.
 - Po prvním úspěšném vydání: **Settings → Publishing access → Require two-factor
   authentication and disallow tokens** (trusted publishing funguje dál, klasické tokeny ne).
-- Volitelně v GitHubu (Settings → Environments → `npm`) přidat povinné schválení před
-  publikací.
+- GitHub prostředí `npm` je omezené jen na tagy `cli-v*` (Settings → Environments → `npm`
+  → Deployment branches and tags); volitelně tam lze přidat povinné schválení před publikací.
 
 ## Databáze a migrace
 

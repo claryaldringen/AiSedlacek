@@ -24,14 +24,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          # Celá historie – kontrola, že otagovaný commit je v main.
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
-      - name: Verze tagu odpovídá balíčku
+      - name: Tag je na main a odpovídá verzi balíčku
         run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} neukazuje na commit z main – vydává se jen zrevidovaný kód."
+            exit 1
+          fi
           tag="${GITHUB_REF_NAME#cli-v}"
           pkg="$(node -p "require('./apps/cli/package.json').version")"
           if [ "$tag" != "$pkg" ]; then
@@ -39,7 +45,9 @@ jobs:
             exit 1
           fi
 
-      - run: npm ci
+      # Bez install skriptů závislostí (prisma engines, swc, esbuild…) – CLI je
+      # nepotřebuje a skript by mohl podvrhnout obsah publikovaného tarballu.
+      - run: npm ci --ignore-scripts
 
       - run: npx turbo typecheck lint format:check test --filter=ai-sedlacek-cli
 
@@ -67,6 +75,7 @@ jobs:
       contents: read
       # OIDC token pro npm Trusted Publishing. Job záměrně neinstaluje závislosti
       # (žádné cizí install skripty) – publikuje jen hotový tarball z buildu.
+      # Prostředí `npm` je v GitHubu omezené na tagy cli-v*.
       id-token: write
     steps:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -83,4 +92,14 @@ jobs:
           name: cli-tarball
           path: pack
 
-      - run: npm publish pack/*.tgz --access public
+      - name: Publikace
+        run: |
+          # Cesta MUSÍ začínat ./ – „pack/x.tgz“ by npm vyložil jako GitHub repo
+          # pack/x.tgz a stáhl cizí obsah. Čekáme právě jeden tarball dané verze.
+          tarball="./pack/ai-sedlacek-cli-${GITHUB_REF_NAME#cli-v}.tgz"
+          if [ ! -f "$tarball" ] || [ "$(find pack -type f | wc -l)" -ne 1 ]; then
+            echo "::error::Čekám jediný soubor ${tarball}"
+            ls -l pack
+            exit 1
+          fi
+          npm publish "$tarball" --access public --ignore-scripts
