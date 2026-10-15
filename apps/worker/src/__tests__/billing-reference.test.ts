@@ -105,7 +105,12 @@ describe('deterministické referenceId odečtů (BIL-3)', () => {
       handleGenerateContext('job-g', { collectionId: 'col-1', pageIds: ['p1'], userId: 'user-1' }),
     );
 
-    expect(first).toEqual(['generate-context-meta:job-g:col-1', 'generate-context:job-g:col-1']);
+    // Pořadí odečtů není podstatné (hlavní volání se účtuje hned po něm) – jde
+    // o deterministické klíče, shodné mezi běhy.
+    expect([...first].sort()).toEqual([
+      'generate-context-meta:job-g:col-1',
+      'generate-context:job-g:col-1',
+    ]);
     expect(second).toEqual(first);
   });
 });
