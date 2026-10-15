@@ -20,7 +20,8 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
         pages: {
           // Archivované („smazané") stránky nesmí zůstat veřejné.
           where: { status: { not: 'archived' } },
-          orderBy: { order: 'asc' },
+          // Shodné `order` (stránky z `ais upload`) rozhodne čas vzniku – stejně jako obálka na úvodní stránce.
+          orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
           include: {
             document: {
               include: {
