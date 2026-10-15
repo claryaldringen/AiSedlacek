@@ -69,7 +69,7 @@ server a teprve pak spustit nový skript:
 6. `.env`: doplnit `RESEND_API_KEY` a `EMAIL_FROM` (bez nich nefunguje registrace e-mailem).
 7. `./deploy.sh`, pak `pm2 env <id workeru> | grep NODE_ENV` → `production`.
 8. Zálohy: instalace `ops/backup/` (viz [Zálohy](#zálohy)).
-9. CLI: vydat `ai-sedlacek-cli@0.2.0` na npm (`npm publish -w ai-sedlacek-cli`).
+9. CLI: vydat `ai-sedlacek-cli@0.2.0` na npm – tagem `cli-v0.2.0`, viz [Vydání CLI](#vydání-cli).
    Starší CLI dál funguje, jen `ais push` u dokumentu s víc překlady a nahrání víc než
    200 URL najednou vyžadují novou verzi (server to v chybě řekne).
 
@@ -112,6 +112,36 @@ pre-deploy dumpů.
 
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker
 > znovu zařadí. Deployovat ideálně ve chvíli, kdy neběží velké OCR dávky.
+
+## Vydání CLI
+
+CLI (`ai-sedlacek-cli`, příkaz `ais`) vydává na npm workflow
+`.github/workflows/publish-cli.yml` po pushi tagu `cli-vX.Y.Z`. Publikuje se přes npm
+**Trusted Publishing** (OIDC): v GitHubu není žádný `NPM_TOKEN` a npm k balíčku připojí
+provenance (odkaz na konkrétní běh workflow).
+
+Postup vydání:
+
+1. Zvýšit verzi v `apps/cli/package.json` a `apps/cli/src/version.ts` (test hlídá shodu),
+   PR přes `/ais-review`, merge do `main`.
+2. `git fetch origin && git tag cli-vX.Y.Z origin/main && git push origin cli-vX.Y.Z` –
+   workflow ověří, že tag je na `main` a odpovídá verzi, spustí typecheck/lint/testy CLI,
+   sestaví tarball (`npm ci --ignore-scripts`) a v odděleném jobu (jediném s
+   `id-token: write`, bez instalace závislostí) ho publikuje.
+3. Když workflow selže **před** publikací (např. ještě nenastavený trusted publisher):
+   opravit, smazat tag na GitHubu i lokálně (`git push origin :refs/tags/cli-vX.Y.Z &&
+   git tag -d cli-vX.Y.Z`) a otagovat znovu podle bodu 2 (včetně `git fetch`). Publikovanou
+   verzi už znovu vydat nejde – další oprava = nová verze.
+
+Jednorázové nastavení (vlastník balíčku na npmjs.com):
+
+- `ai-sedlacek-cli` → **Settings → Trusted Publisher → GitHub Actions**:
+  Organization or user `claryaldringen`, Repository `AiSedlacek`,
+  Workflow filename `publish-cli.yml`, Environment `npm`.
+- Po prvním úspěšném vydání: **Settings → Publishing access → Require two-factor
+  authentication and disallow tokens** (trusted publishing funguje dál, klasické tokeny ne).
+- GitHub prostředí `npm` je omezené jen na tagy `cli-v*` (Settings → Environments → `npm`
+  → Deployment branches and tags); volitelně tam lze přidat povinné schválení před publikací.
 
 ## Databáze a migrace
 
