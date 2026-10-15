@@ -40,7 +40,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/claryaldringen/AiSedlacek.git"
+    "url": "git+https://github.com/claryaldringen/AiSedlacek.git",
+    "directory": "apps/cli"
   },
   "license": "MIT",
   "keywords": [

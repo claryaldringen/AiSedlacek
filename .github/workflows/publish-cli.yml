@@ -1,0 +1,86 @@
+name: Publish CLI
+
+# Vydání `ai-sedlacek-cli` na npm: push tagu `cli-vX.Y.Z` (verze musí odpovídat
+# apps/cli/package.json). Publikuje se přes npm Trusted Publishing (OIDC) – bez
+# NPM_TOKEN v GitHubu; npm k balíčku automaticky připojí provenance.
+# Jednorázové nastavení na npmjs.com: docs/deployment.md – Vydání CLI.
+on:
+  push:
+    tags: ['cli-v*']
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Akce pinované na commit SHA (tag lze přesunout); komentář = odpovídající tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verze tagu odpovídá balíčku
+        run: |
+          tag="${GITHUB_REF_NAME#cli-v}"
+          pkg="$(node -p "require('./apps/cli/package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} neodpovídá verzi ${pkg} v apps/cli/package.json"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npx turbo typecheck lint format:check test --filter=ai-sedlacek-cli
+
+      - name: Sestavení a zabalení
+        run: |
+          npm run build -w ai-sedlacek-cli
+          mkdir -p pack
+          npm pack -w ai-sedlacek-cli --pack-destination pack
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-tarball
+          path: pack/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Prostředí lze v GitHubu chránit (např. schválení před publikací); stejný
+    # název je nastavený u trusted publisheru na npmjs.com.
+    environment: npm
+    permissions:
+      contents: read
+      # OIDC token pro npm Trusted Publishing. Job záměrně neinstaluje závislosti
+      # (žádné cizí install skripty) – publikuje jen hotový tarball z buildu.
+      id-token: write
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing vyžaduje npm ≥ 11.5.1 (Node 22 má npm 10); verze jako
+      # packageManager v kořenovém package.json.
+      - run: npm install -g npm@11.6.2
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-tarball
+          path: pack
+
+      - run: npm publish pack/*.tgz --access public
