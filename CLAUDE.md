@@ -200,6 +200,19 @@ ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh
   jinak se účtuje nejdražší sazbou.
 - **Nikdy nemazat `Document`** kvůli regeneraci – přepisuje se na místě s verzemi (`regenerate`).
 
+### Code review před PR (povinné)
+
+Před každým `gh pr create` spusť projektový skill **`/ais-review`** (`.claude/skills/ais-review/`)
+nad diffem větve a vyřeš všechny potvrzené Critical/High nálezy. Checklisty v
+`.claude/skills/ais-review/references/checklists.md` pokrývají to, co je tu kritické: přístup
+k cizím datům (workspacy, archivace, dedup), účtování každého LLM volání podle modelu,
+bezstrátovost dat a migrací, provoz na sdíleném VPS a kontrakt CLI ↔ API.
+
+Vynucuje to PreToolUse hook (`.claude/settings.json` → `.claude/hooks/require-review.sh`):
+`gh pr create` projde, jen když `.claude/hooks/mark-reviewed.sh` zapsal marker pro aktuální
+HEAD. Každý další commit vyžaduje nové (stačí inkrementální) review. Bookbot review
+(`/bookbot:code-review`) se v tomhle projektu nepoužívá – AiSedlacek není projekt Bookbotu.
+
 ### Architektura vrstev
 
 Cílový stav (nový kód ho dodržuje; známé výjimky níže jsou dluh, ne vzor k napodobení):
