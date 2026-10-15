@@ -82,23 +82,29 @@ export async function authorizeCredentials(
   // tak nemůžou všechny projít kontrolou dřív, než se zapíše první neúspěch.
   // IP napřed: po jejím vyčerpání se klíč účtu vůbec nezakládá, takže rotace
   // e-mailů z jedné IP nezvětšuje mapu limiteru.
-  if (!rateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS).ok) {
+  const ipFailure = rateLimit(ipFailuresKey, LOGIN_MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS);
+  if (!ipFailure.ok) {
     throw new LoginRateLimitedError();
   }
-  if (!rateLimit(accountFailuresKey, LOGIN_MAX_FAILURES_PER_ACCOUNT, LOGIN_WINDOW_MS).ok) {
-    releaseRateLimit(ipFailuresKey); // heslo se nezkoušelo
+  const accountFailure = rateLimit(
+    accountFailuresKey,
+    LOGIN_MAX_FAILURES_PER_ACCOUNT,
+    LOGIN_WINDOW_MS,
+  );
+  if (!accountFailure.ok) {
+    releaseRateLimit(ipFailuresKey, ipFailure.windowId); // heslo se nezkoušelo
     throw new LoginRateLimitedError();
   }
 
   const user = await findUserByPassword(normalizedEmail, password).catch((err: unknown) => {
     // Výpadek DB není špatné heslo – nezamykat účet kvůli opakovaným pokusům.
-    releaseRateLimit(ipFailuresKey);
-    releaseRateLimit(accountFailuresKey);
+    releaseRateLimit(ipFailuresKey, ipFailure.windowId);
+    releaseRateLimit(accountFailuresKey, accountFailure.windowId);
     throw err;
   });
   // Neúspěch zůstává započtený; správné heslo se mezi neúspěchy nepočítá.
   if (!user) return null;
-  releaseRateLimit(ipFailuresKey);
+  releaseRateLimit(ipFailuresKey, ipFailure.windowId);
   resetRateLimit(accountFailuresKey);
 
   if (!user.emailVerified) return null;

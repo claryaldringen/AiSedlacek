@@ -343,7 +343,11 @@ export function ResultViewer({
           // Transkripce je uložená, jen překlad se nespustil (kredit, souběžný job).
           const data = (await res.json().catch(() => ({}))) as { error?: unknown };
           setRetranslateError(
-            typeof data.error === 'string' ? data.error : t('retranslationFailed'),
+            res.status === 402 || data.error === 'insufficient_tokens'
+              ? t('retranslationInsufficientCredit')
+              : typeof data.error === 'string'
+                ? data.error
+                : t('retranslationFailed'),
           );
           setRetranslating(false);
           return true;

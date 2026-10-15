@@ -140,7 +140,11 @@ export function declinedAttempts(message: BetaMessage): OcrAttemptUsage[] {
     model: it.model ?? OCR_MODEL,
     inputTokens: it.input_tokens,
     outputTokens: it.output_tokens,
-    category: fallbackBlocks[i]?.trigger.category ?? null,
+    // Veřejná dokumentace blok popisuje jen jako {type, from, to} – `trigger`
+    // nemusí přijít (typ pro zpětné posílání ho má jako unknown/null).
+    category:
+      (fallbackBlocks[i]?.trigger as BetaFallbackBlock['trigger'] | null | undefined)?.category ??
+      null,
   }));
 }
 
@@ -179,7 +183,13 @@ async function streamOcrRequest(params: {
     params.onText(text);
   });
   const message = await stream.finalMessage();
-  const declined = declinedAttempts(message);
+  // Diagnostika fallbacku nesmí zahodit hotový (Anthropicu už zaplacený) výstup.
+  let declined: OcrAttemptUsage[] = [];
+  try {
+    declined = declinedAttempts(message);
+  } catch (err) {
+    console.error('[Claude] Nelze vyhodnotit odmítnuté pokusy fallbacku:', err);
+  }
 
   if (message.stop_reason === 'refusal') {
     const category = message.stop_details?.category ?? null;

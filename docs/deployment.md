@@ -57,7 +57,8 @@ server a teprve pak spustit nový skript:
 1. `cd /opt/AiSedlacek && git status` – lokálně upravený `package-lock.json`
    vrátit (`git checkout -- package-lock.json`), jinak `git pull --ff-only` spadne.
 2. Ruční záloha mimo rotovaný adresář (denní zálohy mažou `*.dump` starší 14 dní):
-   `mkdir -p /var/backups/aisedlacek-manual && pg_dump --format=custom --file=/var/backups/aisedlacek-manual/pre-2026-10.dump "<DATABASE_URL bez ?schema>"`.
+   `install -d -m 700 /var/backups/aisedlacek-manual && (umask 077; pg_dump --format=custom --file=/var/backups/aisedlacek-manual/pre-2026-10.dump "<DATABASE_URL bez ?schema>")`
+   (dump obsahuje hashe hesel a OAuth tokeny – jen pro roota).
 3. `pm2 stop ai-sedlacek-worker` (joby počkají ve frontě – worker běží přes tsx přímo
    ze zdrojáků a s novým kódem nad starými `node_modules` by padal; `deploy.sh` ho
    na konci znovu spustí), pak `git pull --ff-only origin main` – od teď poběží nový `deploy.sh`.
@@ -72,10 +73,24 @@ server a teprve pak spustit nový skript:
    Starší CLI dál funguje, jen `ais push` u dokumentu s víc překlady a nahrání víc než
    200 URL najednou vyžadují novou verzi (server to v chybě řekne).
 
-**Rollback prvního deploye:** `DEPLOY_REF=fcf24c2 ./deploy.sh` – nový skript ho dokončí
-sám (starší `deploy.sh` re-exec nezná a stáhl by znovu `main`). Verze z 2026-10 nepřidává
-žádnou migraci, takže obnova DB není potřeba (jen pokud se při baseline něco pokazilo –
-pak ruční dump z kroku 2).
+**Přerušení před krokem 7** (např. baseline ukáže nečekaný stav):
+`git checkout --detach fcf24c2 && pm2 start ai-sedlacek-worker` – zpět na starý kód nad
+starými `node_modules`.
+
+**Rollback prvního deploye:** po checkoutu `fcf24c2` leží na disku starý `deploy.sh`, který
+`DEPLOY_REF` nezná a stáhl by zpět `main` bez kontroly a zálohy. Rollback (i jeho opakování)
+proto vždy z kopie aktuálního skriptu mimo repo:
+
+```bash
+git show origin/main:deploy.sh > /root/deploy-current.sh
+DEPLOY_REF=fcf24c2 bash /root/deploy-current.sh
+```
+
+Verze z 2026-10 nepřidává žádnou migraci, takže obnova DB není potřeba (jen pokud se při
+baseline něco pokazilo – pak ruční dump z kroku 2). **Další deploy po rollbacku** znovu
+podle tohoto postupu od kroku 3 (stop workeru, `git checkout main && git pull --ff-only
+origin main`, kontrola historie migrací, `./deploy.sh`), případně
+`bash /root/deploy-current.sh`.
 
 ## Deploy nové verze
 
@@ -114,7 +129,14 @@ pre-deploy dumpů.
 `deploy.sh` před `npm ci` ověří, že historie v `_prisma_migrations` navazuje na
 `packages/db/prisma/migrations`, a jinak skončí chybou dřív, než sáhne na běžící aplikaci:
 tabulka chybí nebo je prázdná, některá migrace je nedokončená (failed), nebo v historii
-chybí migrace starší než poslední aplikovaná (schéma se měnilo mimo migrace).
+chybí migrace starší než poslední aplikovaná, která byla v repu už v naposledy úspěšně
+nasazeném commitu (`.git/ais-deployed-head`, zapisuje `deploy.sh` po restartu) – schéma se
+měnilo mimo migrace. Nové migrace přinesené tímto deployem (i se starším timestampem
+z jiné větve) aplikuje `prisma migrate deploy`.
+
+Když skript hlásí chybějící migraci, **nejdřív ověřit, jestli její objekty v DB existují**:
+existují → `prisma migrate resolve --applied <název>`; neexistují (migrace se nikdy
+neaplikovala) → neoznačovat, nechat ji aplikovat: `PREV_HEAD=<commit bez této migrace> ./deploy.sh`.
 
 **Před prvním deployem verze z 2026-10 je tahle kontrola povinná ručně** – do té doby
 deploy migrace z repa vůbec nenacházel (ležely v `apps/web/prisma/migrations`), takže
@@ -154,7 +176,7 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
 - Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní.
 - S `BACKUP_REMOTE` se dumpy i uploady synchronizují mimo VPS (uploady se na
   cíli nemažou). Bez něj je záloha jen na stejném disku a uploady se nezálohují.
-- Obnova: `pg_restore --clean --if-exists -d "$DATABASE_URL" <soubor.dump>`
+- Obnova: `pg_restore --clean --if-exists -d "${DATABASE_URL%%\?*}" <soubor.dump>`
   (obnovu je dobré si jednou vyzkoušet na kopii DB).
 
 ## Caddy

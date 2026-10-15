@@ -9,11 +9,15 @@ cd "$APP_DIR"
 # Rollback: DEPLOY_REF=<commit> ./deploy.sh nasadí konkrétní commit (detached).
 # Bez DEPLOY_REF se nasazuje aktuální main.
 DEPLOY_REF="${DEPLOY_REF:-}"
+# Poslední úspěšně nasazený commit (zapisuje se po pm2 restart). Kontrola migrací
+# podle něj pozná, které migrace přináší až tento deploy – i když předchozí běh
+# spadl v půlce a HEAD už je posunutý.
+DEPLOYED_HEAD_FILE="$(git rev-parse --git-path ais-deployed-head)"
 if [ -z "${DEPLOY_REEXEC:-}" ]; then
   self_before="$(sha256sum deploy.sh)"
-  # Commit nasazený před tímto deployem – kontrola migrací podle něj pozná,
-  # které migrace přináší až tento deploy.
-  PREV_HEAD="$(git rev-parse HEAD)"
+  if [ -z "${PREV_HEAD:-}" ]; then
+    PREV_HEAD="$(cat "$DEPLOYED_HEAD_FILE" 2>/dev/null || git rev-parse HEAD)"
+  fi
   echo "=== Updating code ==="
   if [ -n "$DEPLOY_REF" ]; then
     git fetch origin
@@ -35,6 +39,9 @@ if [ -z "${DEPLOY_REEXEC:-}" ]; then
         bash "$APP_DIR/deploy.sh" "$@"
     fi
     echo "=== target deploy.sh is older – continuing with the current one ==="
+    echo "POZOR: na disku teď zůstává starší deploy.sh (bez kontroly migrací a zálohy)." >&2
+    echo "Další deploy i opakovaný rollback spouštěj z kopie aktuálního skriptu:" >&2
+    echo "  git show origin/main:deploy.sh > /root/deploy-current.sh && bash /root/deploy-current.sh" >&2
   fi
 fi
 PREV_HEAD="${PREV_HEAD:-$(git rev-parse HEAD)}"
@@ -138,6 +145,7 @@ echo "=== Restarting PM2 processes ==="
 # --update-env: bez něj PM2 při restartu ponechá staré proměnné z env bloků
 # ecosystem.config.cjs (např. NODE_ENV workeru).
 pm2 restart ecosystem.config.cjs --update-env
+git rev-parse HEAD >"$DEPLOYED_HEAD_FILE"
 
 echo "=== Done ==="
 pm2 status

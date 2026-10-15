@@ -169,6 +169,7 @@
     "translationUpdatingFromTranscription": "Translation is updating based on the edited transcription…",
     "editLockedWhileRetranslating": "Editing will be available once the translation update finishes.",
     "retranslationFailed": "Retranslation failed – the translation was left unchanged.",
+    "retranslationInsufficientCredit": "Insufficient credit – the translation was not updated (the transcription is saved).",
     "chat": "Chat",
     "clickToRename": "Click to rename",
     "original": "Original",

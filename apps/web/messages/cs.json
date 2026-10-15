@@ -169,6 +169,7 @@
     "translationUpdatingFromTranscription": "Překlad se aktualizuje na základě upravené transkripce…",
     "editLockedWhileRetranslating": "Upravovat půjde, až se dokončí aktualizace překladu.",
     "retranslationFailed": "Retranslace se nepovedla – překlad zůstal beze změny.",
+    "retranslationInsufficientCredit": "Nedostatek kreditu – překlad se neaktualizoval (transkripce je uložená).",
     "chat": "Chat",
     "clickToRename": "Klikněte pro přejmenování",
     "original": "Originál",

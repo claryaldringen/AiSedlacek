@@ -187,6 +187,45 @@ describe('server-side fallback – usage of declined attempts', () => {
     ]);
   });
 
+  it('tolerates a fallback block without trigger (category unknown)', async () => {
+    const jsonl = JSON.stringify({ imageIndex: 0, ...JSON.parse(OCR_JSON) });
+    mocks.stream.mockReturnValue(
+      fakeStream(
+        message({
+          model: 'claude-opus-5',
+          usage: {
+            input_tokens: 3100,
+            output_tokens: 2500,
+            iterations: [
+              iteration('message', null, 3000, 0),
+              iteration('fallback_message', 'claude-opus-5', 3100, 2500),
+            ],
+          },
+          content: [
+            // Tvar z veřejné dokumentace – bez `trigger`
+            {
+              type: 'fallback',
+              from: { model: 'claude-opus-5-5' },
+              to: { model: 'claude-opus-5' },
+            },
+            { type: 'text', text: jsonl },
+          ],
+        }),
+        [jsonl],
+      ),
+    );
+
+    const res = await processWithClaudeBatch(
+      [{ buffer: Buffer.from('a'), pageId: 'p1', index: 0 }],
+      'Přepiš.',
+    );
+
+    expect(res.results).toHaveLength(1);
+    expect(res.declinedAttempts).toEqual([
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: null },
+    ]);
+  });
+
   it('without fallback there are no declined attempts', async () => {
     mocks.stream.mockReturnValue(
       fakeStream(

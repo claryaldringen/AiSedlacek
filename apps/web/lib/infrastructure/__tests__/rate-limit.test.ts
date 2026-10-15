@@ -20,6 +20,22 @@ describe('rateLimit', () => {
     expect(bucketCount()).toBe(1);
   });
 
+  it('releaseRateLimit does not give back an attempt into a newer window', () => {
+    vi.useFakeTimers();
+    try {
+      const { rateLimit, releaseRateLimit } = mod;
+      const key = 'release-window';
+      const first = rateLimit(key, 2, 1_000); // okno 1
+      vi.advanceTimersByTime(1_001);
+      rateLimit(key, 2, 1_000); // okno 2: 1 pokus jiného requestu
+      rateLimit(key, 2, 1_000); // okno 2: 2 pokusy – plno
+      releaseRateLimit(key, first.windowId); // pokus z okna 1 se do okna 2 nevrací
+      expect(rateLimit(key, 2, 1_000).ok).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('releaseRateLimit gives back one counted attempt, never below zero', () => {
     const { rateLimit, releaseRateLimit } = mod;
     const key = 'release:key';
