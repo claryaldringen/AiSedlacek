@@ -129,8 +129,9 @@ Postup vydání:
    sestaví tarball (`npm ci --ignore-scripts`) a v odděleném jobu (jediném s
    `id-token: write`, bez instalace závislostí) ho publikuje.
 3. Když workflow selže **před** publikací (např. ještě nenastavený trusted publisher):
-   opravit, `git push origin :refs/tags/cli-vX.Y.Z` a otagovat znovu. Publikovanou verzi
-   už znovu vydat nejde – další oprava = nová verze.
+   opravit, smazat tag na GitHubu i lokálně (`git push origin :refs/tags/cli-vX.Y.Z &&
+   git tag -d cli-vX.Y.Z`) a otagovat znovu podle bodu 2 (včetně `git fetch`). Publikovanou
+   verzi už znovu vydat nejde – další oprava = nová verze.
 
 Jednorázové nastavení (vlastník balíčku na npmjs.com):
 
