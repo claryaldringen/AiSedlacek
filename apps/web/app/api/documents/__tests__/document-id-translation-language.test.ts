@@ -172,6 +172,18 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
+  it('rejects creating a translation in an unsupported language', async () => {
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC);
+
+    const res = await PATCH(
+      makePatchRequest({ translation: 'Překlad', translationLanguage: 'klingon' }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
   it('still accepts requests without translation (transcription only)', async () => {
     mockFindUnique
       .mockResolvedValueOnce(FAKE_DOC)

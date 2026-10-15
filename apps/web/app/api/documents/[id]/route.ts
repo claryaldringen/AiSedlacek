@@ -3,6 +3,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -92,6 +93,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
   });
   if (!current || current.page.userId !== userId) {
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
+  }
+
+  // Nový překlad jen v povoleném jazyce – kód se později vkládá do promptů.
+  // Úpravy už existujících překladů (i v dříve uložených kódech) zůstávají možné.
+  if (
+    typeof translation === 'string' &&
+    typeof translationLanguage === 'string' &&
+    !isTranslationLanguage(translationLanguage) &&
+    !current.translations.some((tr) => tr.language === translationLanguage)
+  ) {
+    return NextResponse.json({ error: t('unsupportedLanguage') }, { status: 400 });
   }
 
   const data: Record<string, string | Date> = {};

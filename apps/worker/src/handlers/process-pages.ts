@@ -148,6 +148,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       continue;
     }
 
+    // Archivovanou („smazanou") stránku nezpracovávat – zápis done/error by ji
+    // odarchivoval a ve veřejném svazku znovu zveřejnil.
+    if (page.status === 'archived') {
+      skippedCount.notFound++;
+      continue;
+    }
+
     // Regenerace: stránku, kterou tento job už přegeneroval (batchId = jobId),
     // po restartu workeru znovu neposílat – zbytečně by se platilo podruhé.
     if (regenerate && page.document !== null && page.document.batchId === jobId) {
@@ -472,16 +479,27 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // po reclaimu kolidoval – dávky se číslují znovu od 0, nová dávka 0 (jiné
     // stránky) tak „idempotentně" prošla bez zaplacení. Opakované zpracování
     // stejných stránek po restartu se naopak neúčtuje dvakrát.
-    const deductResult = await deductTokensIfSufficient(
-      userId,
-      inputTokens,
-      outputTokens,
-      `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
-      ocrBatchReferenceId(
-        jobId,
-        sentPages.map((p) => p.pageId),
-      ),
-    );
+    // Chyba billingu (DB, opakované P2034 u Serializable transakce) nesmí
+    // zahodit výstup dávky, který už je zaplacený Anthropicu: výsledky se
+    // uloží a další dávky se zastaví stejně jako při nedostatku kreditu.
+    let deductResult: { success: boolean };
+    let billingFailed = false;
+    try {
+      deductResult = await deductTokensIfSufficient(
+        userId,
+        inputTokens,
+        outputTokens,
+        `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
+        ocrBatchReferenceId(
+          jobId,
+          sentPages.map((p) => p.pageId),
+        ),
+      );
+    } catch (err) {
+      console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchIdx + 1}:`, err);
+      deductResult = { success: false };
+      billingFailed = true;
+    }
 
     // Distribute tokens proportionally across pages in the batch
     const perPageInputTokens = Math.round(inputTokens / sentPages.length);
@@ -577,7 +595,11 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         .flat()
         .map((p) => p.pageId);
       await resetUnfinishedPages(remainingPageIds);
-      errors.push('Nedostatečný kredit pro další zpracování');
+      errors.push(
+        billingFailed
+          ? 'Odečet kreditu selhal – výsledky dávky uloženy, zpracování zastaveno'
+          : 'Nedostatečný kredit pro další zpracování',
+      );
       await prisma.processingJob.update({
         where: { id: jobId },
         data: {

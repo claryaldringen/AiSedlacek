@@ -52,12 +52,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Verify all pages belong to the current user
   const ownedPages = await prisma.page.findMany({
     where: { id: { in: pageIds as string[] }, userId },
-    select: { id: true, collectionId: true },
+    select: { id: true, collectionId: true, status: true },
   });
   const ownedIds = new Set(ownedPages.map((p) => p.id));
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
   if (unauthorizedIds.length > 0) {
     return Response.json({ error: t('somePagesUnauthorized') }, { status: 403 });
+  }
+  // Archivované („smazané") stránky nezpracovávat – zápis výsledku by je
+  // odarchivoval a ve veřejném svazku znovu zveřejnil. Pro klienta se chovají
+  // jako neexistující.
+  if (ownedPages.some((p) => p.status === 'archived')) {
+    return Response.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
   // Check token balance before starting
@@ -141,7 +147,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Prázdné stránky nechat 'blank' – worker je podle stavu přeskakuje; dřív je
   // tento update přepsal na 'processing' a worker je pak zbytečně posílal do OCR.
   await prisma.page.updateMany({
-    where: { id: { in: pageIds as string[] }, status: { not: 'blank' } },
+    where: { id: { in: pageIds as string[] }, status: { notIn: ['blank', 'archived'] } },
     data: { status: 'processing', errorMessage: null },
   });
 

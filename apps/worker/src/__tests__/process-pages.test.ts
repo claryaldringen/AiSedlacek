@@ -304,6 +304,40 @@ describe('processPages – useknutý výstup dávky (LLM-2)', () => {
   });
 });
 
+// ── R-9 (review větve) ───────────────────────────────────────
+describe('processPages – selhání billingu po volání API', () => {
+  it('výsledky už zaplacené dávky uloží a další dávky zastaví', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [{ index: 0, result: ocrResult(0) }],
+      rawResponse: '{...}',
+      processingTimeMs: 1000,
+      model: 'claude-opus-4-6',
+      inputTokens: 3000,
+      outputTokens: 2000,
+      stopReason: 'end_turn',
+      truncated: false,
+    });
+    mocks.deductTokensIfSufficient.mockRejectedValue(new Error('P2034 serialization failure'));
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p1');
+  });
+
+  it('archivovanou stránku nezpracuje', async () => {
+    addPage('p1', { status: 'archived' });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    expect(mocks.prisma.page.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'p1' } }),
+    );
+  });
+});
+
 // ── LLM-3 ────────────────────────────────────────────────────
 describe('processPages – nejednoznačné přiřazení výsledků dávky (LLM-3)', () => {
   it('nic neuloží a stránky označí chybou s důvodem z parseru', async () => {

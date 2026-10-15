@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { createVersion } from '@/lib/infrastructure/versioning';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
+import { isTranslationLanguage } from '@ai-sedlacek/shared';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -23,6 +24,10 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (page.status === 'done') {
     return NextResponse.json({ error: 'Stránka už byla zpracována' }, { status: 409 });
   }
+  // Zápis výsledku by archivovanou („smazanou") stránku odarchivoval.
+  if (page.status === 'archived') {
+    return NextResponse.json({ error: 'Stránka je smazaná' }, { status: 409 });
+  }
 
   const body = await request.json();
   const {
@@ -41,6 +46,10 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
       { error: 'transcription a translation jsou povinné' },
       { status: 400 },
     );
+  }
+  // Kód jazyka se později vkládá do promptů – jen z povoleného seznamu.
+  if (translationLanguage !== undefined && !isTranslationLanguage(translationLanguage)) {
+    return NextResponse.json({ error: 'Nepodporovaný jazyk překladu' }, { status: 400 });
   }
 
   // Create document

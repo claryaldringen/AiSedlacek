@@ -126,7 +126,7 @@ describe('POST /api/pages/process', () => {
 
     // Verify pages were set to processing
     expect(mockPageUpdateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['page-1', 'page-2'] }, status: { not: 'blank' } },
+      where: { id: { in: ['page-1', 'page-2'] }, status: { notIn: ['blank', 'archived'] } },
       data: { status: 'processing', errorMessage: null },
     });
   });
@@ -177,6 +177,16 @@ describe('POST /api/pages/process', () => {
     expect(res.status).toBe(409);
     expect((await res.json()).jobId).toBe('job-running');
     expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for archived pages and does not touch them', async () => {
+    mockPageFindMany.mockResolvedValue([{ id: 'page-1', collectionId: null, status: 'archived' }]);
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(404);
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+    expect(mockPageUpdateMany).not.toHaveBeenCalled();
   });
 
   it('returns 404 when collectionId belongs to another user', async () => {
