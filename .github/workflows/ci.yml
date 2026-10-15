@@ -33,3 +33,12 @@ jobs:
 
       # typecheck/lint/test závisí na ^build → packages/db build = prisma generate
       - run: npx turbo typecheck lint format:check test
+
+      # Chyby, které odhalí jen `next build` (hranice server/client, Suspense,
+      # neplatné exporty rout), by na produkci shodily web až po smazání .next.
+      # Build potřebuje jen syntakticky platné hodnoty – k DB se nepřipojuje.
+      - run: npx turbo build --filter=@ai-sedlacek/web
+        env:
+          DATABASE_URL: postgresql://build:build@127.0.0.1:1/build
+          AUTH_SECRET: ci-build-only
+          NEXTAUTH_URL: http://localhost:3003

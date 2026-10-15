@@ -17,8 +17,14 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/aisedlacek}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 BACKUP_REMOTE="${BACKUP_REMOTE:-}"
 
-DATABASE_URL="$(grep -E '^DATABASE_URL=' "$APP_DIR/.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
-UPLOAD_DIR="$(grep -E '^UPLOAD_DIR=' "$APP_DIR/.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
+# `|| true`: chybějící řádek nesmí skript (set -e + pipefail) ukončit dřív,
+# než se vůbec udělá dump DB.
+DATABASE_URL="$(grep -E '^DATABASE_URL=' "$APP_DIR/.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true)"
+UPLOAD_DIR="$(grep -E '^UPLOAD_DIR=' "$APP_DIR/.env" | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true)"
+if [ -z "$DATABASE_URL" ]; then
+  echo "CHYBA: v $APP_DIR/.env chybí DATABASE_URL" >&2
+  exit 1
+fi
 UPLOAD_DIR="${UPLOAD_DIR:-$APP_DIR/uploads}"
 
 mkdir -p "$BACKUP_DIR"

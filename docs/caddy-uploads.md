@@ -114,16 +114,17 @@ curl -sI https://aisedlacek.com/uploads/test.svg
 
 Route handlery Next.js nemají limit těla requestu (dřív ho náhodou suplovalo
 middleware, které tělo nad 10 MB ořezávalo – rozbíjelo to ale uploady). Aplikace
-odmítá upload nad 5 souborů a nad deklarovanou velikost
-(`apps/web/app/api/pages/upload/route.ts`), druhou vrstvou má být Caddy – tělo
-nad limit pak k Next.js vůbec nedojde:
+sama čte tělo se stropem (upload: 1 soubor na request, nepřihlášené routy
+v řádu kB), druhou vrstvou je Caddy – tělo nad limit k Next.js vůbec nedojde.
+**Na produkci povinné** (sdílený VPS – jeden obří request shodí web a může
+ohrozit i ostatní aplikace):
 
 ```caddyfile
 aisedlacek.com {
-	# Upload: max. 5 souborů × 20 MB (MAX_FILE_SIZE_MB) + rezerva
+	# Upload: 1 soubor × 20 MB (MAX_FILE_SIZE_MB) + režie formuláře
 	@pageUpload path /api/pages/upload
 	request_body @pageUpload {
-		max_size 110MB
+		max_size 25MB
 	}
 
 	# Ostatní API (JSON, webhooky, chat) – stačí řádově jednotky MB

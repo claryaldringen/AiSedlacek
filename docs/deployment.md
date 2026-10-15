@@ -48,15 +48,37 @@ pm2 logs ai-sedlacek-worker --lines 200
 pm2 restart ai-sedlacek-worker
 ```
 
+## První deploy verze z 2026-10 (jednorázově)
+
+Na serveru běží commit `fcf24c2`. Starý `deploy.sh` neumí zálohu ani kontrolu
+migrací a bash by ho dočetl i po `git pull` – proto nejdřív ručně připravit
+server a teprve pak spustit nový skript:
+
+1. `cd /opt/AiSedlacek && git status` – lokálně upravený `package-lock.json`
+   vrátit (`git checkout -- package-lock.json`), jinak `git pull --ff-only` spadne.
+2. Ruční záloha: `mkdir -p /var/backups/aisedlacek && pg_dump --format=custom --file=/var/backups/aisedlacek/manual-$(date +%Y%m%d).dump "<DATABASE_URL bez ?schema>"`.
+3. `git pull --ff-only origin main` – od teď poběží nový `deploy.sh`.
+4. Kontrola historie migrací a případný baseline – viz
+   [Kontrola historie migrací](#kontrola-historie-migrací-a-jednorázový-baseline).
+5. Caddy: hlavičky pro `/uploads/*` a limity `request_body` z
+   [caddy-uploads.md](caddy-uploads.md) (**povinné**), `caddy validate`, reload.
+6. `.env`: doplnit `RESEND_API_KEY` a `EMAIL_FROM` (bez nich nefunguje registrace e-mailem).
+7. `./deploy.sh`, pak `pm2 env <id workeru> | grep NODE_ENV` → `production`.
+8. Zálohy: instalace `ops/backup/` (viz [Zálohy](#zálohy)).
+9. CLI: vydat `ai-sedlacek-cli@0.2.0` na npm (`npm publish -w ai-sedlacek-cli`).
+   Starší CLI dál funguje, jen `ais push` u dokumentu s víc překlady vyžaduje novou verzi.
+
 ## Deploy nové verze
 
 ```bash
 ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh
 ```
 
-`deploy.sh` udělá: `git pull` → `npm ci` → `prisma generate` → build webu →
-**pg_dump do `/var/backups/aisedlacek/pre-deploy-*.dump`** → `prisma migrate deploy`
-→ `pm2 restart`. Build běží před migrací, takže neprošlý build nechá databázi netknutou
+`deploy.sh` udělá: `git pull` (při změně sebe sama pokračuje novou verzí) → kontrola
+historie migrací → **pg_dump do `/var/backups/aisedlacek/pre-deploy-*.dump`** →
+`npm ci` → `prisma generate` → build webu → `prisma migrate deploy` → `pm2 restart`.
+Kontrola i záloha běží před `npm ci`, takže když selžou, běžící aplikace zůstane
+netknutá. Build běží před migrací, takže neprošlý build nechá databázi netknutou
 – běžící aplikace ale může být rozbitá (`npm ci` a build už přepsaly soubory). Rollback:
 `DEPLOY_REF=<předchozí commit> /opt/AiSedlacek/deploy.sh`; pokud už proběhla migrace,
 je potřeba obnovit pre-deploy dump (`pg_restore`). Ponechává se 10 posledních
@@ -75,6 +97,34 @@ pre-deploy dumpů.
 - Stav migrací: `npx prisma migrate status --schema=packages/db/prisma/schema.prisma`
   (s produkčním `DATABASE_URL`, jen čtení).
 - Nová migrace vzniká lokálně: `npm run db:migrate:dev -w @ai-sedlacek/db`.
+
+### Kontrola historie migrací a jednorázový baseline
+
+`deploy.sh` před `npm ci` ověří, že historie v `_prisma_migrations` navazuje na
+`packages/db/prisma/migrations`, a jinak skončí chybou dřív, než sáhne na běžící aplikaci:
+tabulka chybí nebo je prázdná, některá migrace je nedokončená (failed), nebo v historii
+chybí migrace starší než poslední aplikovaná (schéma se měnilo mimo migrace).
+
+**Před prvním deployem verze z 2026-10 je tahle kontrola povinná ručně** – do té doby
+deploy migrace z repa vůbec nenacházel (ležely v `apps/web/prisma/migrations`), takže
+stav produkční historie není ověřený:
+
+```bash
+cd /opt/AiSedlacek
+PG_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"; PG_URL="${PG_URL%%\?*}"
+psql "$PG_URL" -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY 1'
+git pull --ff-only origin main && ls packages/db/prisma/migrations
+```
+
+- Migrace, jejichž objekty v DB už existují, ale chybí v historii, jen označit:
+  `npx prisma migrate resolve --applied <název> --schema=packages/db/prisma/schema.prisma`.
+- **Datovou migraci `20260325120000_backfill_email_verified` nespouštět znovu** – pokud
+  v historii chybí, jen ji označit (`resolve --applied`); jinak by označila všechny
+  dosud neověřené e-mailové registrace jako ověřené.
+- Kontrola driftu (jen čtení): `npx prisma migrate diff --from-url "$PG_URL"
+  --to-schema-datamodel packages/db/prisma/schema.prisma --script` – po baseline má
+  být prázdný výstup (verze z 2026-10 nepřidává žádnou novou migraci).
+- Teprve pak `./deploy.sh`.
 
 ## Zálohy
 
