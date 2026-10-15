@@ -122,7 +122,8 @@
     "fixContextFromCollection": "Fix document context using work context",
     "callingModel": "Calling model…",
     "generationFailed": "Context generation failed",
-    "renameCollectionPrompt": "New volume name:"
+    "renameCollectionPrompt": "New volume name:",
+    "readOnlyCollection": "Read-only – this volume belongs to another user"
   },
   "document": {
     "document": "Document",
@@ -169,7 +170,8 @@
     "clickToRename": "Click to rename",
     "original": "Original",
     "cancelSaving": "Cancel",
-    "savingInProgress": "Saving…"
+    "savingInProgress": "Saving…",
+    "readOnly": "Read-only"
   },
   "collection": {
     "newCollection": "New volume",

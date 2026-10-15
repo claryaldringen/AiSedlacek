@@ -24,6 +24,7 @@ import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
+import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -48,6 +49,8 @@ interface DocApiResponse {
   processingTimeMs?: number;
   createdAt?: string;
   updatedAt?: string;
+  /** Jen vlastník; chybí-li (starší API), bere se true. */
+  canEdit?: boolean;
 }
 
 /** Map a document API response + page metadata into a DocumentResult */
@@ -126,6 +129,10 @@ function WorkspaceContent(): React.JSX.Element {
   const [pages, setPages] = useState<PageItem[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
 
+  // Oprávnění k úpravám otevřeného svazku (canEdit z GET /api/collections/:id) –
+  // cizí svazek ze sdíleného workspace se zobrazí jen pro čtení.
+  const [collectionAccess, setCollectionAccess] = useState<EditAccess | null>(null);
+
   // View mode
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
@@ -180,6 +187,8 @@ function WorkspaceContent(): React.JSX.Element {
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
   const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
+  // canEdit otevřené stránky (z GET /api/documents/:id, resp. /api/pages/:id).
+  const [panelAccess, setPanelAccess] = useState<EditAccess | null>(null);
 
   // Drag-over for whole content area
   const [contentDragOver, setContentDragOver] = useState(false);
@@ -341,7 +350,10 @@ function WorkspaceContent(): React.JSX.Element {
         const data = (await res.json()) as
           | PageItem[]
           | { pages: PageItem[] }
-          | { id: string; pages: PageItem[] };
+          | { id: string; pages: PageItem[]; canEdit?: boolean };
+        if (collectionId !== null) {
+          setCollectionAccess({ id: collectionId, canEdit: readCanEdit(data) });
+        }
 
         // Pages with status 'done' but no translation in the current locale
         // should appear as 'pending' (needs translation)
@@ -374,6 +386,10 @@ function WorkspaceContent(): React.JSX.Element {
   useEffect(() => {
     void loadPages(selectedCollectionId);
   }, [loadPages, selectedCollectionId]);
+
+  // Jen pro čtení, dokud se pro aktuální svazek nenačte opak; kořenový pohled
+  // obsahuje jen vlastní stránky.
+  const readOnly = isReadOnly(collectionAccess, selectedCollectionId);
 
   // ---- Workspace navigation ----
   const handleWorkspaceSelect = useCallback(
@@ -777,6 +793,7 @@ function WorkspaceContent(): React.JSX.Element {
           const res = await apiFetch(`/api/documents/${page.document.id}`);
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as DocApiResponse;
+          setPanelAccess({ id: page.id, canEdit: readCanEdit(doc) });
           setPanelResult(mapDocToResult(doc, page, locale, true));
         } catch (err) {
           setError(err instanceof Error ? err.message : t('error'));
@@ -794,6 +811,7 @@ function WorkspaceContent(): React.JSX.Element {
               fileSize?: number;
               errorMessage?: string;
             };
+            setPanelAccess({ id: page.id, canEdit: readCanEdit(fullPage) });
             setPanelPage(fullPage);
           }
         } catch {
@@ -834,10 +852,13 @@ function WorkspaceContent(): React.JSX.Element {
       void handlePageDoubleClick(page);
     },
     onDeleteSelected: () => {
-      void handleDeleteSelected();
+      if (!readOnly) void handleDeleteSelected();
     },
     isPanelOpen: panelPage !== null,
   });
+
+  // Otevřený dokument: canEdit z jeho detailu, do načtení podle svazku.
+  const panelReadOnly = isReadOnly(panelAccess, panelPage?.id, readOnly);
 
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
@@ -997,13 +1018,16 @@ function WorkspaceContent(): React.JSX.Element {
   }, [selected, pages]);
 
   // Drag-and-drop on content area to open upload
-  const handleContentDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    setContentDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      setUploadOpen(true);
-    }
-  }, []);
+  const handleContentDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>): void => {
+      e.preventDefault();
+      setContentDragOver(false);
+      if (!readOnly && e.dataTransfer.files.length > 0) {
+        setUploadOpen(true);
+      }
+    },
+    [readOnly],
+  );
 
   // ---- Share item ----
   const handleShareItem = useCallback(
@@ -1088,8 +1112,9 @@ function WorkspaceContent(): React.JSX.Element {
         onProcessSelected={() => void handleProcessSelected()}
         onDeleteSelected={() => void handleDeleteSelected()}
         onCreateCollection={() => setCreateCollectionDialogOpen(true)}
+        readOnly={readOnly}
         onSortByName={
-          selectedCollectionId
+          selectedCollectionId && !readOnly
             ? async () => {
                 const sorted = [...pages].sort((a, b) => {
                   const nameA = (a.displayName || a.filename).toLowerCase();
@@ -1113,7 +1138,7 @@ function WorkspaceContent(): React.JSX.Element {
               }
             : undefined
         }
-        onEditContext={() => setContextDialogOpen(true)}
+        onEditContext={readOnly ? undefined : () => setContextDialogOpen(true)}
         hasCollection={selectedCollectionId !== null}
         processingStep={processingStep}
         processingProgress={processingProgress}
@@ -1121,25 +1146,29 @@ function WorkspaceContent(): React.JSX.Element {
         onPauseProcessing={undefined}
         onResumeProcessing={undefined}
         isPaused={false}
-        onDetectBlank={() => void handleDetectBlank()}
+        onDetectBlank={readOnly ? undefined : () => void handleDetectBlank()}
         detectingBlank={detectingBlank}
         onShareCollection={
-          selectedCollectionId
-            ? () => handleShareItem(selectedCollectionId, 'collection')
-            : selectedGridCollection
-              ? () => handleShareItem(selectedGridCollection.id, 'collection')
-              : undefined
+          readOnly
+            ? undefined
+            : selectedCollectionId
+              ? () => handleShareItem(selectedCollectionId, 'collection')
+              : selectedGridCollection
+                ? () => handleShareItem(selectedGridCollection.id, 'collection')
+                : undefined
         }
         isCollectionPublic={
           selectedCollectionId
             ? (collections.find((c) => c.id === selectedCollectionId)?.isPublic ?? false)
             : (selectedGridCollection?.isPublic ?? false)
         }
-        onGenerateContext={selectedCollectionId ? () => void handleGenerateContext() : undefined}
+        onGenerateContext={
+          selectedCollectionId && !readOnly ? () => void handleGenerateContext() : undefined
+        }
         generatingContext={generatingContext}
         doneSelectedCount={doneSelectedCount}
         onRenameCollection={
-          (selectedCollectionId ?? selectedGridCollection)
+          !readOnly && (selectedCollectionId ?? selectedGridCollection)
             ? () => void handleRenameCollection()
             : undefined
         }
@@ -1149,6 +1178,27 @@ function WorkspaceContent(): React.JSX.Element {
         onSearchChange={setSearchQuery}
         searchResultCount={searchResults.size}
       />
+
+      {/* Cizí svazek (sdílený workspace, veřejný obsah) – jen pro čtení */}
+      {readOnly && (
+        <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+          <svg
+            className="h-3.5 w-3.5 shrink-0 text-slate-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
+            />
+          </svg>
+          {t('readOnlyCollection')}
+        </div>
+      )}
 
       {/* Generating context banner */}
       {generatingContext && (
@@ -1207,7 +1257,7 @@ function WorkspaceContent(): React.JSX.Element {
           e.preventDefault();
           // Only show upload overlay for OS file drags, not internal page-card drags
           const isPageDrag = e.dataTransfer.types.includes('application/x-page-ids');
-          if (!isPageDrag) setContentDragOver(true);
+          if (!isPageDrag && !readOnly) setContentDragOver(true);
         }}
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
@@ -1234,6 +1284,7 @@ function WorkspaceContent(): React.JSX.Element {
                     }}
                     hasContext={!!selectedCollection.context}
                     onSaved={() => void loadCollections()}
+                    readOnly={readOnly}
                   />
                 </div>
               </details>
@@ -1241,7 +1292,7 @@ function WorkspaceContent(): React.JSX.Element {
 
             {/* Kontext díla — 1/3 */}
             {selectedCollection.context &&
-            (selectedCollection.contextLanguage ?? 'cs') === locale ? (
+            ((selectedCollection.contextLanguage ?? 'cs') === locale || readOnly) ? (
               <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                 <details>
                   <summary className="cursor-pointer px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
@@ -1252,51 +1303,57 @@ function WorkspaceContent(): React.JSX.Element {
                       {selectedCollection.context}
                     </ReactMarkdown>
                   </div>
-                  <div className="border-t border-slate-100 px-4 py-2.5">
-                    <button
-                      onClick={() => void fixDocumentContexts(selectedCollection.id)}
-                      disabled={fixingContexts}
-                      className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      {fixingContexts ? (
-                        <>
-                          <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
+                  {!readOnly && (
+                    <div className="border-t border-slate-100 px-4 py-2.5">
+                      <button
+                        onClick={() => void fixDocumentContexts(selectedCollection.id)}
+                        disabled={fixingContexts}
+                        className="flex items-center gap-1.5 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        {fixingContexts ? (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                              />
+                            </svg>
+                            {fixingContextsProgress ?? t('fixing')}
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
                               stroke="currentColor"
-                              strokeWidth="4"
-                            />
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                            />
-                          </svg>
-                          {fixingContextsProgress ?? t('fixing')}
-                        </>
-                      ) : (
-                        <>
-                          <svg
-                            className="h-3.5 w-3.5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
-                            />
-                          </svg>
-                          {t('fixContextFromCollection')}
-                        </>
-                      )}
-                    </button>
-                  </div>
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"
+                              />
+                            </svg>
+                            {t('fixContextFromCollection')}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </details>
               </div>
             ) : selectedCollection.context &&
@@ -1498,8 +1555,14 @@ function WorkspaceContent(): React.JSX.Element {
             onCollectionDoubleClick={handleCollectionSelect}
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
-            onMovePages={(ids, targetId) => void handleMovePages(ids, targetId)}
-            onReorderPages={(ids, targetId, pos) => void handleReorderPages(ids, targetId, pos)}
+            onMovePages={
+              readOnly ? undefined : (ids, targetId) => void handleMovePages(ids, targetId)
+            }
+            onReorderPages={
+              readOnly
+                ? undefined
+                : (ids, targetId, pos) => void handleReorderPages(ids, targetId, pos)
+            }
             onSetSelected={setSelected}
             onSelectAll={handleSelectAll}
             onDeselectAll={handleDeselectAll}
@@ -1508,10 +1571,13 @@ function WorkspaceContent(): React.JSX.Element {
             onImportClick={() => setUploadOpen(true)}
             focusedItemId={focusedItemId}
             onColumnsChange={setColumnsCount}
-            onToggleBlank={(ids, blank) => void handleToggleBlank(ids, blank)}
-            onShareItem={handleShareItem}
+            onToggleBlank={
+              readOnly ? undefined : (ids, blank) => void handleToggleBlank(ids, blank)
+            }
+            onShareItem={readOnly ? undefined : handleShareItem}
             searchMatchIds={searchMatchIds}
             searchMatchCollectionIds={searchMatchCollectionIds}
+            readOnly={readOnly}
           />
         ) : (
           <FileList
@@ -1534,6 +1600,7 @@ function WorkspaceContent(): React.JSX.Element {
             processingPageIds={processingPageIds}
             showCollections={selectedCollectionId === null}
             searchMatchIds={searchMatchIds}
+            readOnly={readOnly}
           />
         )}
 
@@ -1549,7 +1616,7 @@ function WorkspaceContent(): React.JSX.Element {
 
       {/* Upload modal */}
       <ImportDialog
-        isOpen={uploadOpen}
+        isOpen={uploadOpen && !readOnly}
         onClose={() => setUploadOpen(false)}
         onPagesImported={handleFilesUploaded}
         collectionId={selectedCollectionId}
@@ -1558,7 +1625,7 @@ function WorkspaceContent(): React.JSX.Element {
       {/* Collection context dialog */}
       {selectedCollection && (
         <CollectionContextDialog
-          isOpen={contextDialogOpen}
+          isOpen={contextDialogOpen && !readOnly}
           onClose={() => setContextDialogOpen(false)}
           collectionId={selectedCollection.id}
           collectionName={selectedCollection.name}
@@ -1625,7 +1692,7 @@ function WorkspaceContent(): React.JSX.Element {
           setPanelPage(updated);
           setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
         }}
-        onRegenerate={(pageId) => void handleRegenerate(pageId)}
+        onRegenerate={panelReadOnly ? undefined : (pageId) => void handleRegenerate(pageId)}
         isRegenerating={regenerating}
         regenerateStep={regenerateStep}
         regenerateProgress={regenerateProgress}
@@ -1650,6 +1717,7 @@ function WorkspaceContent(): React.JSX.Element {
           if (idx >= 0 && idx < pages.length - 1) void handlePageDoubleClick(pages[idx + 1]!);
         }}
         highlightQuery={isSearchOpen ? searchQuery : undefined}
+        readOnly={panelReadOnly}
       />
     </AppShell>
   );

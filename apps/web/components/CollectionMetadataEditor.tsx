@@ -18,6 +18,8 @@ interface Props {
   metadata: CollectionMetadata;
   hasContext?: boolean;
   onSaved?: () => void;
+  /** Cizí svazek – pole jen ke čtení, bez uložení a extrakce z kontextu. */
+  readOnly?: boolean;
 }
 
 export function CollectionMetadataEditor({
@@ -25,6 +27,7 @@ export function CollectionMetadataEditor({
   metadata,
   hasContext,
   onSaved,
+  readOnly = false,
 }: Props): React.JSX.Element {
   const t = useTranslations('collection');
   const [title, setTitle] = useState(metadata.title ?? '');
@@ -91,8 +94,9 @@ export function CollectionMetadataEditor({
     }
   }, [t, collectionId, onSaved]);
 
-  const inputClass =
-    'w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400';
+  const inputClass = readOnly
+    ? 'w-full rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 outline-none'
+    : 'w-full rounded border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400';
   const labelClass = 'block text-xs font-medium text-slate-500 mb-1';
 
   return (
@@ -103,7 +107,8 @@ export function CollectionMetadataEditor({
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={t('metadataTitlePlaceholder')}
+          placeholder={readOnly ? undefined : t('metadataTitlePlaceholder')}
+          readOnly={readOnly}
           className={inputClass}
         />
       </div>
@@ -113,7 +118,8 @@ export function CollectionMetadataEditor({
           type="text"
           value={author}
           onChange={(e) => setAuthor(e.target.value)}
-          placeholder={t('metadataAuthorPlaceholder')}
+          placeholder={readOnly ? undefined : t('metadataAuthorPlaceholder')}
+          readOnly={readOnly}
           className={inputClass}
         />
       </div>
@@ -124,7 +130,8 @@ export function CollectionMetadataEditor({
             type="number"
             value={yearFrom}
             onChange={(e) => setYearFrom(e.target.value)}
-            placeholder="1125"
+            placeholder={readOnly ? undefined : '1125'}
+            readOnly={readOnly}
             className={inputClass}
           />
         </div>
@@ -134,7 +141,8 @@ export function CollectionMetadataEditor({
             type="number"
             value={yearTo}
             onChange={(e) => setYearTo(e.target.value)}
-            placeholder="1140"
+            placeholder={readOnly ? undefined : '1140'}
+            readOnly={readOnly}
             className={inputClass}
           />
         </div>
@@ -145,7 +153,8 @@ export function CollectionMetadataEditor({
           type="text"
           value={librarySignature}
           onChange={(e) => setLibrarySignature(e.target.value)}
-          placeholder="MS.7756"
+          placeholder={readOnly ? undefined : 'MS.7756'}
+          readOnly={readOnly}
           className={inputClass}
         />
       </div>
@@ -155,30 +164,33 @@ export function CollectionMetadataEditor({
           value={abstract}
           onChange={(e) => setAbstract(e.target.value)}
           rows={3}
-          placeholder={t('metadataAbstractPlaceholder')}
+          placeholder={readOnly ? undefined : t('metadataAbstractPlaceholder')}
+          readOnly={readOnly}
           className={inputClass + ' resize-none'}
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          onClick={() => void handleSave()}
-          disabled={saving || extracting}
-          className="flex-1 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
-        >
-          {saving ? t('savingMetadata') : t('saveMetadata')}
-        </button>
-        {hasContext && (
+      {!readOnly && (
+        <div className="flex gap-2">
           <button
-            onClick={() => void handleExtract()}
-            disabled={extracting || saving}
-            className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
-            title={t('extractMetadataTooltip')}
+            onClick={() => void handleSave()}
+            disabled={saving || extracting}
+            className="flex-1 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
           >
-            {extracting ? t('extractingMetadata') : t('extractMetadataFromContext')}
+            {saving ? t('savingMetadata') : t('saveMetadata')}
           </button>
-        )}
-      </div>
+          {hasContext && (
+            <button
+              onClick={() => void handleExtract()}
+              disabled={extracting || saving}
+              className="flex-1 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              title={t('extractMetadataTooltip')}
+            >
+              {extracting ? t('extractingMetadata') : t('extractMetadataFromContext')}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

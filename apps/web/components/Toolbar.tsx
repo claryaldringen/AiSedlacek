@@ -37,6 +37,8 @@ interface ToolbarProps {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   searchResultCount?: number;
+  /** Cizí svazek – skryje import a akce nad výběrem (zpracování, přejmenování, mazání). */
+  readOnly?: boolean;
 }
 
 const ico = 'h-5 w-5 shrink-0';
@@ -93,26 +95,32 @@ export function Toolbar({
   searchQuery,
   onSearchChange,
   searchResultCount,
+  readOnly = false,
 }: ToolbarProps): React.JSX.Element {
   const t = useTranslations('toolbar');
+  const hasTools = Boolean(
+    (hasCollection && onEditContext) || onShareCollection || onSortByName || onDetectBlank,
+  );
   return (
     <div className="flex flex-col border-b border-slate-200 bg-white">
       {/* Main toolbar row */}
       <div className="flex items-end gap-1 px-3 py-1.5">
         {/* Group 1: Content */}
         <div className="flex items-end gap-1">
-          <button onClick={onImportClick} className={btnPrimary}>
-            <svg
-              className={ico}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            {t('insert')}
-          </button>
+          {!readOnly && (
+            <button onClick={onImportClick} className={btnPrimary}>
+              <svg
+                className={ico}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              {t('insert')}
+            </button>
+          )}
 
           {onCreateCollection && (
             <button onClick={onCreateCollection} className={btnDefault}>
@@ -134,103 +142,107 @@ export function Toolbar({
           )}
         </div>
 
-        <div className={divider} />
+        {hasTools && (
+          <>
+            <div className={divider} />
 
-        {/* Group 2: Tools */}
-        <div className="flex items-end gap-1">
-          {hasCollection && onEditContext && (
-            <button onClick={onEditContext} title={t('contextTitle')} className={btnDefault}>
-              <svg
-                className={ico}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
-                />
-              </svg>
-              {t('context')}
-            </button>
-          )}
-
-          {onShareCollection && (
-            <button
-              onClick={onShareCollection}
-              title={t('share')}
-              className={
-                isCollectionPublic
-                  ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100`
-                  : btnDefault
-              }
-            >
-              <svg
-                className={ico}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
-                />
-              </svg>
-              {t('share')}
-            </button>
-          )}
-
-          {onSortByName && (
-            <button onClick={onSortByName} title={t('sortTitle')} className={btnDefault}>
-              <svg
-                className={ico}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
-                />
-              </svg>
-              {t('sort')}
-            </button>
-          )}
-
-          {onDetectBlank && (
-            <button
-              onClick={onDetectBlank}
-              disabled={detectingBlank || isProcessing}
-              title={t('detectBlankTitle')}
-              className={`${btnDefault} ${btnDisabled}`}
-            >
-              {detectingBlank ? (
-                spinnerIcon
-              ) : (
-                <svg
-                  className={ico}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-                  />
-                </svg>
+            {/* Group 2: Tools */}
+            <div className="flex items-end gap-1">
+              {hasCollection && onEditContext && (
+                <button onClick={onEditContext} title={t('contextTitle')} className={btnDefault}>
+                  <svg
+                    className={ico}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
+                    />
+                  </svg>
+                  {t('context')}
+                </button>
               )}
-              {t('detectBlank')}
-            </button>
-          )}
-        </div>
+
+              {onShareCollection && (
+                <button
+                  onClick={onShareCollection}
+                  title={t('share')}
+                  className={
+                    isCollectionPublic
+                      ? `${btnBase} text-blue-600 bg-blue-50 hover:bg-blue-100`
+                      : btnDefault
+                  }
+                >
+                  <svg
+                    className={ico}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"
+                    />
+                  </svg>
+                  {t('share')}
+                </button>
+              )}
+
+              {onSortByName && (
+                <button onClick={onSortByName} title={t('sortTitle')} className={btnDefault}>
+                  <svg
+                    className={ico}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
+                    />
+                  </svg>
+                  {t('sort')}
+                </button>
+              )}
+
+              {onDetectBlank && (
+                <button
+                  onClick={onDetectBlank}
+                  disabled={detectingBlank || isProcessing}
+                  title={t('detectBlankTitle')}
+                  className={`${btnDefault} ${btnDisabled}`}
+                >
+                  {detectingBlank ? (
+                    spinnerIcon
+                  ) : (
+                    <svg
+                      className={ico}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                      />
+                    </svg>
+                  )}
+                  {t('detectBlank')}
+                </button>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Search */}
         <div className={divider} />
@@ -301,8 +313,8 @@ export function Toolbar({
           )}
         </div>
 
-        {/* Group 3: Selected actions */}
-        {selectedCount > 0 && (
+        {/* Group 3: Selected actions – v režimu jen pro čtení nic z nich neprojde */}
+        {selectedCount > 0 && !readOnly && (
           <>
             <div className={divider} />
             <div className="flex items-end gap-1">

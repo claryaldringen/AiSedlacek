@@ -122,7 +122,8 @@
     "fixContextFromCollection": "Opravit kontext dokumentu podle kontextu díla",
     "callingModel": "Volám model…",
     "generationFailed": "Generování kontextu selhalo",
-    "renameCollectionPrompt": "Nový název svazku:"
+    "renameCollectionPrompt": "Nový název svazku:",
+    "readOnlyCollection": "Jen pro čtení – svazek patří jinému uživateli"
   },
   "document": {
     "document": "Dokument",
@@ -169,7 +170,8 @@
     "clickToRename": "Klikněte pro přejmenování",
     "original": "Originál",
     "cancelSaving": "Zrušit",
-    "savingInProgress": "Ukládám…"
+    "savingInProgress": "Ukládám…",
+    "readOnly": "Jen pro čtení"
   },
   "collection": {
     "newCollection": "Nový svazek",

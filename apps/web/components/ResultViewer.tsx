@@ -46,6 +46,8 @@ interface ResultViewerProps {
   result: DocumentResult;
   onUpdate?: (updated: DocumentResult) => void;
   highlightQuery?: string;
+  /** Cizí dokument – bez editace textů a obnovy verzí (historie zůstane k prohlížení). */
+  readOnly?: boolean;
 }
 
 function processChildren(
@@ -114,6 +116,7 @@ function EditableSection({
   onSave,
   saving,
   highlightQuery,
+  readOnly = false,
 }: {
   title: string;
   subtitle?: string;
@@ -122,6 +125,7 @@ function EditableSection({
   onSave: (newContent: string) => Promise<boolean>;
   saving?: boolean;
   highlightQuery?: string;
+  readOnly?: boolean;
 }): React.JSX.Element {
   const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
@@ -149,7 +153,7 @@ function EditableSection({
           <h2 className="text-sm font-semibold text-stone-700">{title}</h2>
           {subtitle && <p className="text-xs text-stone-400">{subtitle}</p>}
         </div>
-        {!editing ? (
+        {readOnly ? null : !editing ? (
           <button
             onClick={handleEdit}
             className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -174,7 +178,7 @@ function EditableSection({
           </div>
         )}
       </div>
-      {editing ? (
+      {editing && !readOnly ? (
         <div className="p-2">
           <MarkdownEditor ref={editorRef} initialValue={content} onChange={setDraft} />
         </div>
@@ -191,6 +195,7 @@ export function ResultViewer({
   result,
   onUpdate,
   highlightQuery,
+  readOnly = false,
 }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const tc = useTranslations('common');
@@ -440,6 +445,7 @@ export function ResultViewer({
             onSave={handleTranscriptionSave}
             saving={saving}
             highlightQuery={highlightQuery}
+            readOnly={readOnly}
           />
         </div>
         <div className="flex flex-col">
@@ -450,6 +456,7 @@ export function ResultViewer({
             onSave={(text) => trySaveField('translation', text)}
             saving={saving}
             highlightQuery={highlightQuery}
+            readOnly={readOnly}
           />
         </div>
       </div>
@@ -488,6 +495,7 @@ export function ResultViewer({
             content={result.context || ''}
             onSave={(text) => trySaveField('context', text)}
             saving={saving}
+            readOnly={readOnly}
           />
         </div>
       </div>
@@ -639,16 +647,24 @@ export function ResultViewer({
             <div className="p-4">
               <VersionHistory
                 documentId={result.id}
-                onRestore={(field, content) => {
-                  if (field === 'transcription') {
-                    void handleTranscriptionSave(content);
-                  } else if (field.startsWith('translation:')) {
-                    // Verze nese jazyk v názvu pole – obnovit do něj, ne do zobrazeného.
-                    void trySaveField('translation', content, field.slice('translation:'.length));
-                  } else if (field === 'context') {
-                    void trySaveField('context', content);
-                  }
-                }}
+                onRestore={
+                  readOnly
+                    ? undefined
+                    : (field, content) => {
+                        if (field === 'transcription') {
+                          void handleTranscriptionSave(content);
+                        } else if (field.startsWith('translation:')) {
+                          // Verze nese jazyk v názvu pole – obnovit do něj, ne do zobrazeného.
+                          void trySaveField(
+                            'translation',
+                            content,
+                            field.slice('translation:'.length),
+                          );
+                        } else if (field === 'context') {
+                          void trySaveField('context', content);
+                        }
+                      }
+                }
               />
             </div>
           </details>
