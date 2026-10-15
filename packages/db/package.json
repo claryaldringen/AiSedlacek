@@ -20,7 +20,6 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
-    "db:push": "prisma db push",
     "build": "prisma generate",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",

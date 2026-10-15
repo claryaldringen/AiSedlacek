@@ -64,7 +64,8 @@ export const uploadCommand = new Command('upload')
       spinner.text = `Nahrávám ${path.basename(filePath)}...`;
       try {
         const buffer = fs.readFileSync(filePath);
-        // Server přijímá jen známé obrázkové typy – Blob bez `type` by odmítl (ARCH-4).
+        // Klientský pre-check: nepodporovaný soubor selže hned, bez zbytečného uploadu.
+        // Autoritou je server – formát pozná z obsahu a `type` Blobu ignoruje.
         // Typ určujeme z obsahu, ne z přípony.
         const type = detectImageMimeType(buffer);
         if (!type) {
