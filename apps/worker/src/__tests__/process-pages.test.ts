@@ -156,7 +156,9 @@ describe('processPages – deduplikace (SEC-2)', () => {
     expect(where.outputTokens).toEqual({ gt: 0 });
   });
 
-  it('bez shody v rámci uživatele stránku zpracuje OCR (cizí dokument se nekopíruje)', async () => {
+  it('bez nalezeného zdroje deduplikace stránku zpracuje OCR a založí nový dokument', async () => {
+    // Že se cizí dokumenty vůbec nehledají, ověřuje `where` v předchozím testu –
+    // tady `findFirst` vrací null bez ohledu na dotaz.
     addPage('p1');
 
     await processPages({ ...baseJob, pageIds: ['p1'] });
