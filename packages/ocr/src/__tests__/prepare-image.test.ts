@@ -67,6 +67,30 @@ describe('prepareImage (LLM-1)', () => {
     expect(buffer.length).toBeLessThanOrEqual(Math.floor((5 * 1024 * 1024 * 3) / 4));
   });
 
+  it.each([
+    ['široký', 8100, 100],
+    ['vysoký', 100, 9000],
+  ])(
+    '%s obrázek nad 8000 px zmenší, i když se vejde do limitu velikosti',
+    async (_label, width, height) => {
+      // Jednobarevný PNG má pár kB – dřív odešel beze změny a API odmítlo celou dávku.
+      const png = await solid(width, height).png().toBuffer();
+      expect(png.length).toBeLessThan(1024 * 1024);
+
+      const { buffer, mediaType } = await prepareImage(png);
+
+      expect(mediaType).toBe('image/jpeg');
+      const meta = await sharp(buffer).metadata();
+      expect(meta.width).toBeLessThanOrEqual(8000);
+      expect(meta.height).toBeLessThanOrEqual(8000);
+    },
+  );
+
+  it('obrázek přesně 8000 px pošle beze změny', async () => {
+    const png = await solid(8000, 50).png().toBuffer();
+    expect(await prepareImage(png)).toEqual({ buffer: png, mediaType: 'image/png' });
+  });
+
   it('odmítne obrázek nad limitem pixelů (dekompresní bomba)', async () => {
     const png = await solid(100, 100).png().toBuffer();
     await expect(prepareImage(png, { limitInputPixels: 5000 })).rejects.toThrow(

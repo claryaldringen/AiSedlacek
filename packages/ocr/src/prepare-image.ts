@@ -5,6 +5,8 @@ import type { ImageMediaType } from './types';
 // so the raw file must be under ~3.75 MB to stay within the 5 MB base64 limit.
 const MAX_BASE64_BYTES = 5 * 1024 * 1024;
 const MAX_RAW_BYTES = Math.floor((MAX_BASE64_BYTES * 3) / 4); // ~3.75 MB
+// Messages API odmítá obrázky nad 8000 px na stranu – a s nimi celou dávku.
+const MAX_API_DIMENSION = 8000;
 
 /**
  * Maximální počet pixelů vstupu pro sharp – ochrana proti dekompresní bombě
@@ -48,8 +50,10 @@ export async function prepareImage(
   const apiMediaType = metadata.format ? API_FORMATS[metadata.format] : undefined;
   const needsRotation = metadata.orientation !== undefined && metadata.orientation !== 1;
   const tooLarge = image.length > MAX_RAW_BYTES;
+  const tooManyPixels =
+    (metadata.width ?? 0) > MAX_API_DIMENSION || (metadata.height ?? 0) > MAX_API_DIMENSION;
 
-  if (apiMediaType && !needsRotation && !tooLarge) {
+  if (apiMediaType && !needsRotation && !tooLarge && !tooManyPixels) {
     return { buffer: image, mediaType: apiMediaType };
   }
 
@@ -57,13 +61,14 @@ export async function prepareImage(
     !apiMediaType ? `formát ${metadata.format ?? 'neznámý'}` : null,
     needsRotation ? `EXIF orientace ${metadata.orientation}` : null,
     tooLarge ? `velikost ${(image.length / 1024 / 1024).toFixed(1)} MB` : null,
+    tooManyPixels ? `rozměry ${metadata.width}×${metadata.height} px` : null,
   ].filter(Boolean);
   console.log(`[Claude] Converting image to JPEG (${reasons.join(', ')})…`);
 
   // Pokusy od nejvyšší kvality. Plné rozlišení zkoušíme jen u obrázků, které
   // se do limitu vešly už v původní podobě (převod formátu / otočení).
   const attempts: { width?: number; quality: number }[] = [
-    ...(tooLarge ? [] : [{ quality: 90 }]),
+    ...(tooLarge || tooManyPixels ? [] : [{ quality: 90 }]),
     { width: 3000, quality: 85 },
     { width: 2000, quality: 75 },
   ];
@@ -71,7 +76,16 @@ export async function prepareImage(
   let converted: Buffer | null = null;
   for (const { width, quality } of attempts) {
     let pipeline = sharp(image, sharpOptions).rotate();
-    if (width) pipeline = pipeline.resize({ width, withoutEnlargement: true });
+    // Výška je omezená jen limitem API – u běžných poměrů stran rozhoduje šířka,
+    // úzký a vysoký obrázek (svitek, sloupec) se zmenší i podle výšky.
+    if (width) {
+      pipeline = pipeline.resize({
+        width,
+        height: MAX_API_DIMENSION,
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    }
     converted = await pipeline.flatten({ background: '#ffffff' }).jpeg({ quality }).toBuffer();
     if (converted.length <= MAX_RAW_BYTES) break;
   }

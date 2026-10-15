@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
 import { computeCostRaw, formatCost, TOKEN_MULTIPLIER } from '@/lib/pricing';
-import { apiFetch } from '@/lib/infrastructure/api-client';
+import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
   id: string;
@@ -217,7 +217,7 @@ export function ResultViewer({
   }, [result.id, stopRetranslatePoll]);
 
   // Chyba posledního uložení – bez ní se dřív editace při chybě serveru tvářila
-  // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi).
+  // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi, proto apiFetchOk).
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const saveField = useCallback(
@@ -233,17 +233,15 @@ export function ResultViewer({
         if (field === 'translation') {
           body.translationLanguage = translationLanguage;
         }
-        const res = await apiFetch(`/api/documents/${result.id}`, {
+        await apiFetchOk(`/api/documents/${result.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+        }).catch((e: unknown) => {
+          // Hlášku ukazujeme jen u chyby serveru (jako dřív), síťová chyba jen propadne.
+          if (e instanceof ApiError) setSaveError(e.message);
+          throw e;
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          const message = data.error ?? `HTTP ${res.status}`;
-          setSaveError(message);
-          throw new Error(message);
-        }
         // Překlad v jiném jazyce (obnova verze) nemění zobrazený překlad.
         if (field === 'translation' && translationLanguage !== result.translationLanguage) {
           return result;
