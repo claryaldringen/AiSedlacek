@@ -883,25 +883,18 @@ function WorkspaceContent(): React.JSX.Element {
                 throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
               }
               const { jobId } = (await retransRes.json()) as { jobId: string };
-              await pollJob(jobId, {
+              const outcome = await pollJob(jobId, {
                 onStep: (step) => setRegenerateStep(step),
                 onProgress: (completed, total) => {
                   if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
                 },
               });
               // Reload page and document with new translation
-              const pageRes = await apiFetch(`/api/pages/${pageId}`);
-              if (pageRes.ok) {
-                const updatedPage = (await pageRes.json()) as PageItem;
-                setPanelPage(updatedPage);
-                setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-                if (updatedPage.document) {
-                  const reloadDoc = await apiFetch(`/api/documents/${updatedPage.document.id}`);
-                  if (reloadDoc.ok) {
-                    const updatedDoc = (await reloadDoc.json()) as DocApiResponse;
-                    setPanelResult(mapDocToResult(updatedDoc, updatedPage, locale, false));
-                  }
-                }
+              await reloadPanel();
+              // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
+              // musí vidět, že překlad nevznikl.
+              if (outcome !== 'completed') {
+                setError(t('regenerationFailed'));
               }
               return;
             }
@@ -917,19 +910,7 @@ function WorkspaceContent(): React.JSX.Element {
           });
           if (reparseRes.ok) {
             // Re-parse succeeded — reload document
-            const pageRes = await apiFetch(`/api/pages/${pageId}`);
-            if (pageRes.ok) {
-              const updatedPage = (await pageRes.json()) as PageItem;
-              setPanelPage(updatedPage);
-              setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-              if (updatedPage.document) {
-                const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
-                if (docRes.ok) {
-                  const doc = (await docRes.json()) as DocApiResponse;
-                  setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
-                }
-              }
-            }
+            await reloadPanel();
             return; // Done — no API call needed
           }
           // Re-parse failed — fall through to full regeneration. Dokument se NEmaže:

@@ -193,6 +193,7 @@ export function ResultViewer({
   highlightQuery,
 }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
+  const tc = useTranslations('common');
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
 
@@ -238,8 +239,9 @@ export function ResultViewer({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         }).catch((e: unknown) => {
-          // Hlášku ukazujeme jen u chyby serveru (jako dřív), síťová chyba jen propadne.
-          if (e instanceof ApiError) setSaveError(e.message);
+          // Chyba serveru nese vlastní hlášku; síťová chyba (offline, abort) obecnou,
+          // aby uživatel nepřišel o zpětnou vazbu, že se nic neuložilo.
+          setSaveError(e instanceof ApiError ? e.message : tc('unknownError'));
           throw e;
         });
         // Překlad v jiném jazyce (obnova verze) nemění zobrazený překlad.
@@ -253,7 +255,7 @@ export function ResultViewer({
         setSaving(false);
       }
     },
-    [result, onUpdate],
+    [result, onUpdate, tc],
   );
 
   const trySaveField = useCallback(
