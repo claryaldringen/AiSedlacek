@@ -16,9 +16,10 @@ npm ci
 echo "=== Generating Prisma client ==="
 npx prisma generate --schema="$SCHEMA"
 
-# Build před migrací: když build selže, databáze zůstane netknutá a dál běží
-# stará verze (dřív se migrovalo první a při chybě buildu běžel starý kód nad
-# novým schématem).
+# Build před migrací: když build selže, databáze zůstane netknutá. Běžící
+# aplikace ale může být rozbitá (npm ci už přepsal node_modules a build
+# přepisuje .next/standalone) – rollback: git checkout <předchozí commit>
+# a znovu spustit tento skript.
 echo "=== Building web app ==="
 npx turbo build --filter=@ai-sedlacek/web
 
@@ -34,6 +35,9 @@ DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 pg_dump --format=custom --file="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump" "${DATABASE_URL%%\?*}"
+# Ponechat 10 nejnovějších pre-deploy dumpů – disk serveru je sdílený a plný
+# disk shodí Postgres (denní zálohy rotuje ops/backup/aisedlacek-backup.sh).
+ls -1t "$BACKUP_DIR"/pre-deploy-*.dump 2>/dev/null | tail -n +11 | xargs -r rm --
 
 echo "=== Running database migrations ==="
 # Migrace leží vedle schématu v packages/db/prisma/migrations. (Do 2026-10 byly
