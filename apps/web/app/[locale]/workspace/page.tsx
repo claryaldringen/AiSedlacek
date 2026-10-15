@@ -517,18 +517,17 @@ function WorkspaceContent(): React.JSX.Element {
       setPages((prev) =>
         prev.map((p) => (pageIds.includes(p.id) ? { ...p, status: newStatus } : p)),
       );
-      await Promise.all(
+      const results = await Promise.allSettled(
         pageIds.map((id) =>
           apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus }),
-          }).catch(() => {
-            // Revert on error
-            void loadPages(selectedCollectionId);
           }),
         ),
       );
+      // Revert on error – jeden reload, ne jeden za každý neúspěšný request.
+      if (results.some((r) => r.status === 'rejected')) void loadPages(selectedCollectionId);
     },
     [selectedCollectionId, loadPages],
   );
@@ -661,18 +660,17 @@ function WorkspaceContent(): React.JSX.Element {
       setPages((prev) => prev.filter((p) => !pageIds.includes(p.id)));
 
       // Fire API calls
-      await Promise.all(
+      const results = await Promise.allSettled(
         pageIds.map((id) =>
           apiFetchOk(`/api/pages/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ collectionId: targetCollectionId }),
-          }).catch(() => {
-            // On error, reload pages to restore correct state
-            void loadPages(selectedCollectionId);
           }),
         ),
       );
+      // On error, reload pages to restore correct state – jednou, ne za každou chybu.
+      if (results.some((r) => r.status === 'rejected')) void loadPages(selectedCollectionId);
 
       // Refresh collection counts
       void loadCollections();
