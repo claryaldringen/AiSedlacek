@@ -6,6 +6,9 @@ import { requireAuth } from '../lib/require-auth.js';
 import { detectImageMimeType } from '../lib/mime.js';
 import * as output from '../lib/output.js';
 
+/** Počet URL v jednom requestu na /api/pages/upload-url (server jich přijme víc). */
+const URL_BATCH_SIZE = 50;
+
 export const uploadCommand = new Command('upload')
   .description('Nahrát obrázky (URL nebo lokální soubory)')
   .argument('<sources...>', 'URL adresy, lokální soubory, nebo .txt soubor se seznamem URL')
@@ -33,11 +36,13 @@ export const uploadCommand = new Command('upload')
     const spinner = ora('Nahrávám...').start();
     let totalPages = 0;
 
-    if (urls.length > 0) {
-      spinner.text = `Nahrávám ${urls.length} URL...`;
+    // Server přijme v jednom requestu omezený počet URL – posílat po dávkách.
+    for (let start = 0; start < urls.length; start += URL_BATCH_SIZE) {
+      const batch = urls.slice(start, start + URL_BATCH_SIZE);
+      spinner.text = `Nahrávám URL ${start + 1}–${start + batch.length} z ${urls.length}...`;
       try {
         const result = await api.postJson('/api/pages/upload-url', {
-          urls,
+          urls: batch,
           collectionId: options.collection,
         });
         totalPages += result.pages.length;

@@ -71,6 +71,23 @@ describe('ais upload', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('sends URLs to the server in batches of 50', async () => {
+    const urls = Array.from({ length: 120 }, (_, i) => `https://example.org/${i}.png`);
+    api.postJson.mockImplementation((_path: string, body: { urls: string[] }) =>
+      Promise.resolve({
+        pages: body.urls.map((u, i) => ({ id: `p-${u}`, filename: `${i}.png` })),
+        errors: [],
+      }),
+    );
+
+    await uploadCommand.parseAsync(urls, { from: 'user' });
+
+    const sizes = api.postJson.mock.calls.map((c) => (c[1] as { urls: string[] }).urls.length);
+    expect(sizes).toEqual([50, 50, 20]);
+    expect(api.postJson.mock.calls.flatMap((c) => (c[1] as { urls: string[] }).urls)).toEqual(urls);
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it('does not send unsupported files and exits with an error', async () => {
     const file = path.join(tmpDir, 'image.svg');
     fs.writeFileSync(file, '<svg xmlns="http://www.w3.org/2000/svg"/>');
