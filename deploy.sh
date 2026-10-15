@@ -6,8 +6,17 @@ SCHEMA="packages/db/prisma/schema.prisma"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/aisedlacek}"
 cd "$APP_DIR"
 
-echo "=== Pulling latest code ==="
-git pull origin main
+# Rollback: DEPLOY_REF=<commit> ./deploy.sh nasadí konkrétní commit (detached).
+# Bez DEPLOY_REF se nasazuje aktuální main.
+DEPLOY_REF="${DEPLOY_REF:-}"
+echo "=== Updating code ==="
+if [ -n "$DEPLOY_REF" ]; then
+  git fetch origin
+  git checkout --detach "$DEPLOY_REF"
+else
+  git checkout main
+  git pull --ff-only origin main
+fi
 
 echo "=== Installing dependencies ==="
 # npm ci zajišťuje reprodukovatelné buildy z package-lock.json (supply-chain bezpečnost)
@@ -18,8 +27,9 @@ npx prisma generate --schema="$SCHEMA"
 
 # Build před migrací: když build selže, databáze zůstane netknutá. Běžící
 # aplikace ale může být rozbitá (npm ci už přepsal node_modules a build
-# přepisuje .next/standalone) – rollback: git checkout <předchozí commit>
-# a znovu spustit tento skript.
+# přepisuje .next/standalone) – rollback: DEPLOY_REF=<předchozí commit> ./deploy.sh.
+# Pokud už proběhla migrace, starý kód poběží proti novému schématu – pak je
+# skutečný rollback obnova pre-deploy dumpu (pg_restore).
 echo "=== Building web app ==="
 npx turbo build --filter=@ai-sedlacek/web
 

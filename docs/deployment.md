@@ -57,8 +57,9 @@ ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh
 `deploy.sh` udělá: `git pull` → `npm ci` → `prisma generate` → build webu →
 **pg_dump do `/var/backups/aisedlacek/pre-deploy-*.dump`** → `prisma migrate deploy`
 → `pm2 restart`. Build běží před migrací, takže neprošlý build nechá databázi netknutou
-– běžící aplikace ale může být rozbitá (`npm ci` a build už přepsaly soubory); rollback:
-`git checkout <předchozí commit>` a znovu `deploy.sh`. Ponechává se 10 posledních
+– běžící aplikace ale může být rozbitá (`npm ci` a build už přepsaly soubory). Rollback:
+`DEPLOY_REF=<předchozí commit> /opt/AiSedlacek/deploy.sh`; pokud už proběhla migrace,
+je potřeba obnovit pre-deploy dump (`pg_restore`). Ponechává se 10 posledních
 pre-deploy dumpů.
 
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker

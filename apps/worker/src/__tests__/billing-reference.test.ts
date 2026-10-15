@@ -150,6 +150,32 @@ describe('kontext svazku se nepřepíše neúplným výstupem modelu', () => {
     expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
   });
 
+  it('generate-context při max_tokens nechá kontext beze změny a účtuje', async () => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      id: 'col-1',
+      userId: 'user-1',
+      name: 'Svazek',
+    });
+    mocks.prisma.page.findMany.mockResolvedValue([
+      { displayName: null, filename: 'a.jpg', document: { transcription: 'text' } },
+    ]);
+    mocks.createMessage.mockResolvedValue({
+      text: '# Kontext (useknutý',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 100,
+      outputTokens: 16000,
+      stopReason: 'max_tokens',
+    });
+
+    await expect(
+      handleGenerateContext('job-g', { collectionId: 'col-1', pageIds: ['p1'], userId: 'user-1' }),
+    ).rejects.toThrow(/beze změny/);
+
+    expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+    expect(mocks.createMessage.mock.calls[0]![0].maxTokens).toBe(16_000);
+  });
+
   it('generate-context s prázdným výstupem nechá kontext beze změny', async () => {
     mocks.prisma.collection.findUnique.mockResolvedValue({
       id: 'col-1',

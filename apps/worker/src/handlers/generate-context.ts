@@ -93,7 +93,9 @@ ${concatenated}`;
   // Call Claude Sonnet
   const response = await createMessage({
     model: TEXT_MODEL,
-    maxTokens: 4096,
+    // Kontext se ukládá jen kompletní (stopReason === 'end_turn') – limit musí
+    // stačit i pro velké svazky, stejně jako fetch-context a translate-context.
+    maxTokens: 16_000,
     messages: [{ role: 'user', content: prompt }],
   });
 
