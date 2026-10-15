@@ -14,26 +14,9 @@ import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getOrWait } from '@/lib/infrastructure/prefetch-cache';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
 
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
-
-// Semaphore to limit concurrent sharp operations (sharp uses a fixed-size libuv thread pool)
-let sharpInFlight = 0;
-const SHARP_MAX_CONCURRENT = 3;
-const sharpQueue: Array<() => void> = [];
-
-async function withSharpLimit<T>(fn: () => Promise<T>): Promise<T> {
-  if (sharpInFlight >= SHARP_MAX_CONCURRENT) {
-    await new Promise<void>((resolve) => sharpQueue.push(resolve));
-  }
-  sharpInFlight++;
-  try {
-    return await fn();
-  } finally {
-    sharpInFlight--;
-    sharpQueue.shift()?.();
-  }
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
