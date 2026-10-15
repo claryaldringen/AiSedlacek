@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { isBlockedAddress, assertSafeUrl, UnsafeUrlError } from '../safe-fetch';
 
 describe('isBlockedAddress', () => {
@@ -124,6 +124,53 @@ describe('assertSafeUrl', () => {
     await expect(assertSafeUrl(`http://${ownPublic.address}/`)).rejects.toBeInstanceOf(
       UnsafeUrlError,
     );
+  });
+
+  describe("server's own interfaces (mocked)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function mockInterfaces(): void {
+      vi.spyOn(os, 'networkInterfaces').mockReturnValue({
+        eth0: [
+          {
+            address: '203.0.113.7',
+            netmask: '255.255.255.0',
+            family: 'IPv4',
+            mac: '00:00:00:00:00:00',
+            internal: false,
+            cidr: '203.0.113.7/24',
+          },
+          {
+            address: '2a01:4f9:c012:abcd::1',
+            netmask: 'ffff:ffff:ffff:ffff::',
+            family: 'IPv6',
+            mac: '00:00:00:00:00:00',
+            internal: false,
+            cidr: '2a01:4f9:c012:abcd::1/64',
+            scopeid: 0,
+          },
+        ],
+      });
+    }
+
+    it.each([
+      'http://203.0.113.7/',
+      'http://[::ffff:203.0.113.7]/',
+      'http://[::ffff:cb00:7107]/',
+      'http://[64:ff9b::cb00:7107]/',
+      'http://[2002:cb00:7107::1]/',
+      'http://[2a01:04f9:c012:abcd:0:0:0:1]/',
+    ])('rejects %s', async (url) => {
+      mockInterfaces();
+      await expect(assertSafeUrl(url)).rejects.toBeInstanceOf(UnsafeUrlError);
+    });
+
+    it('still allows other public addresses', async () => {
+      mockInterfaces();
+      await expect(assertSafeUrl('http://8.8.8.8/')).resolves.toBeInstanceOf(URL);
+    });
   });
 
   it('rejects malformed URLs', async () => {

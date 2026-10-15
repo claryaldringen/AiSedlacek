@@ -20,6 +20,9 @@ describe('safeCallbackUrl', () => {
     '/\\evil.com',
     '/\\/evil.com',
     'javascript:alert(1)',
+    '/.//evil.com',
+    '/a/..//evil.com',
+    '/%2e//evil.com',
     '',
     null,
   ])('rejects %s', (raw) => {

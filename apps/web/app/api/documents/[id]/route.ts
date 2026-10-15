@@ -131,6 +131,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
 
   const updated = await prisma.document.findUnique({
     where: { id },
+    // Stejně jako GET – rawResponse u dávek obsahuje výstup i dalších stránek.
+    omit: { rawResponse: true },
     include: { translations: true, glossary: true },
   });
 

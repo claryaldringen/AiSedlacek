@@ -76,22 +76,41 @@ function ipv4FromGroups(hi: number, lo: number): string {
   return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.');
 }
 
+/**
+ * IPv4 vložená do IPv6 adresy (::ffff:0:0/96 mapped, ::/96 IPv4-compatible,
+ * NAT64 64:ff9b::/96, 6to4 2002::/16), jinak null.
+ */
+function embeddedIPv4(g: number[]): string | null {
+  const firstFiveZero = g.slice(0, 5).every((x) => x === 0);
+  if (firstFiveZero && g[5] === 0xffff) return ipv4FromGroups(g[6]!, g[7]!);
+  if (firstFiveZero && g[5] === 0 && g[6] !== 0) return ipv4FromGroups(g[6]!, g[7]!);
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) {
+    return ipv4FromGroups(g[6]!, g[7]!);
+  }
+  if (g[0] === 0x2002) return ipv4FromGroups(g[1]!, g[2]!);
+  return null;
+}
+
+/**
+ * Kanonický tvar IP pro porovnání: IPv4 tečkově (i vložená v IPv6), IPv6 jako
+ * 8 rozbalených skupin – různé zápisy téže adresy se tak shodují.
+ */
+function canonicalIp(ip: string): string | null {
+  if (net.isIP(ip) === 4) return ip;
+  const g = parseIPv6(ip);
+  if (!g) return null;
+  return embeddedIPv4(g) ?? g.map((x) => x.toString(16)).join(':');
+}
+
 function ipv6IsBlocked(ip: string): boolean {
   const g = parseIPv6(ip);
   if (!g) return true; // malformed → treat as unsafe
 
   // Embedded IPv4 musí projít IPv4 pravidly – jinak lze blocklist obejít zápisem
   // `::ffff:a9fe:a9fe`, na který WHATWG URL normalizuje `[::ffff:169.254.169.254]`.
-  const firstFiveZero = g.slice(0, 5).every((x) => x === 0);
-  if (firstFiveZero && g[5] === 0xffff) return ipv4IsBlocked(ipv4FromGroups(g[6]!, g[7]!)); // ::ffff:0:0/96 mapped
-  if (firstFiveZero && g[5] === 0) {
-    // ::/96 – unspecified, loopback a zastaralé IPv4-compatible adresy
-    return g[6] === 0 ? true : ipv4IsBlocked(ipv4FromGroups(g[6]!, g[7]!));
-  }
-  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) {
-    return ipv4IsBlocked(ipv4FromGroups(g[6]!, g[7]!)); // NAT64 64:ff9b::/96
-  }
-  if (g[0] === 0x2002) return ipv4IsBlocked(ipv4FromGroups(g[1]!, g[2]!)); // 6to4 2002::/16
+  const v4 = embeddedIPv4(g);
+  if (v4 !== null) return ipv4IsBlocked(v4);
+  if (g.slice(0, 7).every((x) => x === 0)) return true; // :: a ::1 (unspecified, loopback)
   if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo 2001::/32
   if (g[0] === 0x2001 && g[1] === 0xdb8) return true; // documentation 2001:db8::/32
 
@@ -118,7 +137,8 @@ function localInterfaceAddresses(): Set<string> {
   const addresses = new Set<string>();
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) {
-      addresses.add(entry.address.toLowerCase().replace(/%.*$/, ''));
+      const canonical = canonicalIp(entry.address);
+      if (canonical) addresses.add(canonical);
     }
   }
   return addresses;
@@ -162,7 +182,10 @@ export async function assertSafeUrl(rawUrl: string): Promise<URL> {
   }
   const local = localInterfaceAddresses();
   for (const ip of ips) {
-    if (isBlockedAddress(ip) || local.has(ip.toLowerCase())) {
+    // Kanonický tvar: `[::ffff:<vlastní IPv4>]` nebo jiný zápis vlastní IPv6
+    // by jinak blokaci vlastních rozhraní obešel.
+    const canonical = canonicalIp(ip);
+    if (isBlockedAddress(ip) || canonical === null || local.has(canonical)) {
       throw new UnsafeUrlError(`blocked address: ${ip}`);
     }
   }

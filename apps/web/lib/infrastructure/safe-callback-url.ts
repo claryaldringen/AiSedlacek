@@ -12,9 +12,14 @@ export function safeCallbackUrl(
 ): string {
   if (!raw || !raw.startsWith('/')) return fallback;
   try {
-    const url = new URL(raw, origin);
-    if (url.origin !== new URL(origin).origin) return fallback;
-    return `${url.pathname}${url.search}${url.hash}`;
+    const base = new URL(origin);
+    const url = new URL(raw, base);
+    if (url.origin !== base.origin) return fallback;
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    // Normalizace dot-segmentů umí z `/.//evil.com` udělat `//evil.com`, který
+    // prohlížeč při navigaci čte jako scheme-relative URL na cizí host.
+    if (path.startsWith('//') || path.startsWith('/\\')) return fallback;
+    return path;
   } catch {
     return fallback;
   }
