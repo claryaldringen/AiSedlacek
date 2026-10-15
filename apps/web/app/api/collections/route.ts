@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
-import { computeCostFromTokens } from '@/lib/pricing';
+import { usageCostUsd } from '@ai-sedlacek/shared';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -70,16 +70,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           where: { collectionId: { in: collectionIds } },
           _count: true,
         }),
+        // Po modelech – náklad se počítá sazbou modelu, který dokument zpracoval.
         prisma.$queryRaw<
-          { collectionId: string; inputTokens: bigint | null; outputTokens: bigint | null }[]
+          {
+            collectionId: string;
+            model: string | null;
+            inputTokens: bigint | null;
+            outputTokens: bigint | null;
+          }[]
         >(Prisma.sql`
           SELECT p."collectionId" AS "collectionId",
+                 d."model" AS "model",
                  SUM(d."inputTokens") AS "inputTokens",
                  SUM(d."outputTokens") AS "outputTokens"
           FROM "Document" d
           JOIN "Page" p ON p."id" = d."pageId"
           WHERE p."collectionId" IN (${Prisma.join(collectionIds)})
-          GROUP BY p."collectionId"
+          GROUP BY p."collectionId", d."model"
         `),
       ])
     : [[], []];
@@ -91,14 +98,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     byStatus[s.status] = s._count;
     statusByCollection.set(s.collectionId, byStatus);
   }
-  const tokensByCollection = new Map(tokenSums.map((row) => [row.collectionId, row]));
+  const tokensByCollection = new Map<
+    string,
+    { inputTokens: number; outputTokens: number; costUsd: number }
+  >();
+  for (const row of tokenSums) {
+    const input = Number(row.inputTokens ?? 0);
+    const output = Number(row.outputTokens ?? 0);
+    const acc = tokensByCollection.get(row.collectionId) ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    };
+    acc.inputTokens += input;
+    acc.outputTokens += output;
+    acc.costUsd += usageCostUsd(row.model, input, output);
+    tokensByCollection.set(row.collectionId, acc);
+  }
 
   const collectionsWithStats = collections.map((c) => {
     const byStatus = statusByCollection.get(c.id) ?? {};
     const tokens = tokensByCollection.get(c.id);
-    const inputTokens = Number(tokens?.inputTokens ?? 0);
-    const outputTokens = Number(tokens?.outputTokens ?? 0);
-    const costUsd = computeCostFromTokens(inputTokens, outputTokens);
+    const inputTokens = tokens?.inputTokens ?? 0;
+    const outputTokens = tokens?.outputTokens ?? 0;
+    const costUsd = tokens?.costUsd ?? 0;
 
     return {
       ...c,

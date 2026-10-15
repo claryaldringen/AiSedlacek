@@ -119,6 +119,7 @@ Return ONLY the updated translation in markdown, nothing else.`;
     // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož jobu
     // po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
     `retranslate:${jobId}:${documentId}:${targetLang}`,
+    response.model,
   );
 
   if (!deductResult.success) {

@@ -10,8 +10,6 @@
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "FIO_API_TOKEN",
-    "TOKEN_MULTIPLIER",
-    "TOKEN_PRICE_PER_MILLION",
     "UPLOAD_DIR",
   ],
   "tasks": {

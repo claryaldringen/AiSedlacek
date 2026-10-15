@@ -31,7 +31,8 @@ vi.mock('@ai-sedlacek/db/billing', () => ({
   deductTokensIfSufficient: mocks.deductTokensIfSufficient,
 }));
 vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersion }));
-vi.mock('@ai-sedlacek/ocr', () => ({
+vi.mock('@ai-sedlacek/ocr', async (importOriginal) => ({
+  OcrRefusalError: (await importOriginal<typeof import('@ai-sedlacek/ocr')>()).OcrRefusalError,
   prepareImage: mocks.prepareImage,
   processWithClaudeBatch: mocks.processWithClaudeBatch,
   processWithClaudeBatchCli: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('../lib/storage', () => ({ getStorage: () => ({ read: mocks.storageRead 
 vi.mock('../lib/llm', () => ({ isCliMode: () => false, createMessage: vi.fn() }));
 
 import { processPages, ocrBatchReferenceId } from '../handlers/process-pages';
+import { OcrRefusalError } from '@ai-sedlacek/ocr';
 
 // ── Fixtures ─────────────────────────────────────────────────
 interface PageFixture {
@@ -404,6 +406,31 @@ describe('processPages – překlad k existujícímu dokumentu (S2-11)', () => {
     const createOrder = mocks.prisma.translation.create.mock.invocationCallOrder[0]!;
     const bumpOrder = mocks.prisma.document.update.mock.invocationCallOrder[0]!;
     expect(createOrder).toBeLessThan(bumpOrder);
+  });
+});
+
+// ── Opus 5.5: odmítnutí bezpečnostním filtrem ───────────────
+describe('processPages – odmítnutá dávka', () => {
+  it('stránky dávky označí chybou, naúčtuje spotřebu a job nespadne', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockRejectedValue(
+      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 40 }),
+    );
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1'] })).resolves.not.toThrow();
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: expect.stringContaining('odmítl') },
+    });
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledWith(
+      'user-1',
+      3000,
+      40,
+      expect.stringContaining('odmítnuto'),
+      expect.any(String),
+      'claude-opus-5-5',
+    );
   });
 });
 

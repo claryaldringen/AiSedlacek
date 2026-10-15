@@ -221,6 +221,7 @@ ${glossaryText}`;
           finalMsg.usage.output_tokens,
           `Chat s dokumentem ${id}`,
           `chat-${id}-${Date.now()}`,
+          finalMsg.model,
         );
 
         if (!deductResult.success) {

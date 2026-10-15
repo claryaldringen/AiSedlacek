@@ -23,10 +23,10 @@ Jazyky překladu: `cs`, `en`, `de`, `fr`, `la` (`TRANSLATION_LANGUAGES` v `packa
 - **Auth:** NextAuth v5 (JWT session) – Google, GitHub, e-mail + heslo s ověřením e-mailu; API tokeny pro CLI (Bearer)
 - **Worker:** Node + `tsx`, polling DB fronty `ProcessingJob` á 3 s, max. 5 souběžných jobů
 - **Databáze:** PostgreSQL 16 + Prisma 6 (jediné schéma `packages/db/prisma/schema.prisma`)
-- **LLM:** Claude API – modely v `packages/shared/src/models.ts` (`OCR_MODEL` = Opus 4.6 pro OCR,
+- **LLM:** Claude API – modely v `packages/shared/src/models.ts` (`OCR_MODEL` = Opus 5.5 s `effort: medium` a serverovým fallbackem při odmítnutí,
   `TEXT_MODEL` = Sonnet 4.6 pro retranslaci, chat, kontexty, metadata)
 - **Obrázky:** Sharp (validace formátu z obsahu, náhledy, příprava pro API), soubory na lokálním disku (`UPLOAD_DIR`)
-- **Billing:** append-only ledger `TokenTransaction`, Stripe Checkout + webhook, Fio (převod s VS), QR platby
+- **Billing:** append-only ledger `TokenTransaction`, Stripe Checkout + webhook, Fio (převod s VS), QR platby. Ceník v `packages/shared/src/pricing.ts` – účtuje se skutečný náklad API podle modelu (vstup/výstup zvlášť) × marže; UI počítá stejnou funkcí
 - **E-maily:** Resend (bez `RESEND_API_KEY` jen konzolový výpis – v produkci nutné nastavit)
 - **Deployment:** Hetzner VPS (sdílený s dalšími aplikacemi), PM2 + Caddy – viz [docs/deployment.md](docs/deployment.md)
 
@@ -135,7 +135,7 @@ Server-side fetch uživatelských URL vždy přes `safeFetch` (`lib/infrastructu
 │   │   ├── components/         # DocumentPanel, ResultViewer, FileGrid, DocumentChat, ImportDialog, …
 │   │   ├── hooks/              # useProcessingJob, useJobPolling, useDesktopSelection, …
 │   │   ├── lib/auth.ts         # NextAuth konfigurace
-│   │   ├── lib/pricing.ts      # ceník modelů pro zobrazení nákladů (ne pro účtování)
+│   │   ├── lib/pricing.ts      # zobrazení ceny v UI (výpočet ze shared/pricing.ts)
 │   │   ├── lib/adapters/       # storage (local-storage), email (resend, console)
 │   │   ├── lib/infrastructure/ # authz, billing, safe-fetch, image-validation, rate-limit, versioning, …
 │   │   ├── i18n/, messages/    # next-intl (en, cs)
@@ -195,8 +195,9 @@ ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh
   proti produkci. Každé zpracování stojí peníze za API volání – data se nesmí ztratit. Vždy
   používej inkrementální migrace (`prisma migrate dev` lokálně, `prisma migrate deploy`
   v produkci přes `deploy.sh`), které zachovají existující data.
-- **Model ID jen v `packages/shared/src/models.ts`** – nikde jinde natvrdo. Známá výjimka:
-  ceník `apps/web/lib/pricing.ts` (`MODEL_PRICING` a výchozí sazby) má ID zatím vlastní.
+- **Model ID jen v `packages/shared/src/models.ts`** – nikde jinde natvrdo. Výjimka: ceník
+  `packages/shared/src/pricing.ts` (sazby po modelech). Nový model = nový řádek v ceníku,
+  jinak se účtuje nejdražší sazbou.
 - **Nikdy nemazat `Document`** kvůli regeneraci – přepisuje se na místě s verzemi (`regenerate`).
 
 ### Architektura vrstev

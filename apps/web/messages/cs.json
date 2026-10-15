@@ -156,6 +156,7 @@
     "translationSection": "Překlad",
     "grandTotal": "Celkem",
     "totalGrandPrice": "Celková cena",
+    "chargeValue": "{czk} Kč ({credits} tokenů)",
     "imageSection": "Obrázek",
     "format": "Formát",
     "dimensions": "Rozměry",

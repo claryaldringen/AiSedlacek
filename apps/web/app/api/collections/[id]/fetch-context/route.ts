@@ -162,6 +162,8 @@ ${newContent}`;
     response.usage.input_tokens,
     response.usage.output_tokens,
     'fetch-context',
+    undefined,
+    response.model,
   );
 
   const context = response.content
@@ -245,6 +247,8 @@ ${context}`,
       metaResponse.usage.input_tokens,
       metaResponse.usage.output_tokens,
       'fetch-context-metadata',
+      undefined,
+      metaResponse.model,
     );
 
     const text = metaResponse.content[0]?.type === 'text' ? metaResponse.content[0].text : '';

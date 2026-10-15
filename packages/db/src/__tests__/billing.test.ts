@@ -214,14 +214,15 @@ describe('billing', () => {
   });
 
   describe('deductTokens', () => {
-    it('calculates negative amount as -(input + output) * TOKEN_MULTIPLIER', async () => {
+    it('charges the actual API cost of the model × markup (input and output priced separately)', async () => {
       mockCreate.mockResolvedValue({ id: 'tx-deduct' });
-      await deductTokens('user-1', 1000, 500, 'OCR page 1', 'doc-abc');
+      // Opus 5.5: 1000 × $4 + 500 × $20 = $0.014 → × 23 Kč × 2 = 0.644 Kč = 12 880 kreditů
+      await deductTokens('user-1', 1000, 500, 'OCR page 1', 'doc-abc', 'claude-opus-5-5');
       expect(mockCreate).toHaveBeenCalledWith({
         data: {
           userId: 'user-1',
           type: 'consumption',
-          amount: -3000,
+          amount: -12_880,
           description: 'OCR page 1',
           referenceId: 'doc-abc',
         },
@@ -230,14 +231,14 @@ describe('billing', () => {
 
     it('passes type as consumption', async () => {
       mockCreate.mockResolvedValue({ id: 'tx-type' });
-      await deductTokens('user-1', 100, 200, 'test');
+      await deductTokens('user-1', 100, 200, 'test', undefined, 'claude-sonnet-4-6');
       const createCall = mockCreate.mock.calls[0]![0];
       expect(createCall.data.type).toBe('consumption');
     });
 
     it('handles zero tokens', async () => {
       mockCreate.mockResolvedValue({ id: 'tx-zero' });
-      await deductTokens('user-1', 0, 0, 'empty');
+      await deductTokens('user-1', 0, 0, 'empty', undefined, 'claude-opus-5-5');
       expect(mockCreate).toHaveBeenCalledWith({
         data: {
           userId: 'user-1',
@@ -249,14 +250,15 @@ describe('billing', () => {
       });
     });
 
-    it('ceils the result for fractional multiplier outcomes', async () => {
+    it('ceils fractional credits', async () => {
       mockCreate.mockResolvedValue({ id: 'tx-ceil' });
-      await deductTokens('user-1', 3, 7, 'small job');
+      // Haiku 5.5: 3 × $0.1 + 7 × $0.5 = 3.8 → × 46 / 50 = 3.496 → 4 kredity
+      await deductTokens('user-1', 3, 7, 'small job', undefined, 'claude-haiku-5-5');
       expect(mockCreate).toHaveBeenCalledWith({
         data: {
           userId: 'user-1',
           type: 'consumption',
-          amount: -20,
+          amount: -4,
           description: 'small job',
           referenceId: undefined,
         },
@@ -265,7 +267,7 @@ describe('billing', () => {
 
     it('omits referenceId when not provided', async () => {
       mockCreate.mockResolvedValue({ id: 'tx-no-ref' });
-      await deductTokens('user-1', 100, 50, 'no ref');
+      await deductTokens('user-1', 100, 50, 'no ref', undefined, 'claude-opus-5-5');
       const createCall = mockCreate.mock.calls[0]![0];
       expect(createCall.data.referenceId).toBeUndefined();
     });
@@ -286,18 +288,32 @@ describe('billing', () => {
     });
 
     it('deducts and reports the resulting balance when sufficient', async () => {
-      mockAggregate.mockResolvedValue({ _sum: { amount: 10000 } });
+      mockAggregate.mockResolvedValue({ _sum: { amount: 100_000 } });
       mockFindFirst.mockResolvedValue(null);
-      mockCreate.mockResolvedValue({ id: 'tx-1', amount: -3000 });
+      mockCreate.mockResolvedValue({ id: 'tx-1', amount: -12_880 });
 
-      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      const res = await deductTokensIfSufficient(
+        'u1',
+        1000,
+        500,
+        'job',
+        undefined,
+        'claude-opus-5-5',
+      );
       expect(res.success).toBe(true);
-      expect(res.balance).toBe(7000); // 10000 + (-3000)
+      expect(res.balance).toBe(87_120); // 100 000 + (-12 880) podle ceníku Opus 5.5
     });
 
     it('refuses when balance is not positive', async () => {
       mockAggregate.mockResolvedValue({ _sum: { amount: 0 } });
-      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      const res = await deductTokensIfSufficient(
+        'u1',
+        1000,
+        500,
+        'job',
+        undefined,
+        'claude-opus-5-5',
+      );
       expect(res.success).toBe(false);
       expect(mockCreate).not.toHaveBeenCalled();
     });
@@ -307,7 +323,14 @@ describe('billing', () => {
       mockAggregate.mockResolvedValue({ _sum: { amount: 7000 } });
       mockFindFirst.mockResolvedValue({ id: 'tx-existing', amount: -3000 });
 
-      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job', 'ref-1');
+      const res = await deductTokensIfSufficient(
+        'u1',
+        1000,
+        500,
+        'job',
+        'ref-1',
+        'claude-opus-5-5',
+      );
       expect(res.success).toBe(true);
       expect(res.balance).toBe(7000); // not 4000 — the existing amount is already in the sum
       expect(mockCreate).not.toHaveBeenCalled();
@@ -331,7 +354,14 @@ describe('billing', () => {
           }),
         );
 
-      const res = await deductTokensIfSufficient('u1', 1000, 500, 'job');
+      const res = await deductTokensIfSufficient(
+        'u1',
+        1000,
+        500,
+        'job',
+        undefined,
+        'claude-opus-5-5',
+      );
       expect(res.success).toBe(true);
       expect(mockTransaction).toHaveBeenCalledTimes(2);
     });

@@ -10,7 +10,12 @@ import { LANGUAGE_NAMES } from '../lib/languages';
 import { createMessage, isCliMode } from '../lib/llm';
 import { prisma } from '@ai-sedlacek/db';
 import { checkBalance, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { prepareImage, processWithClaudeBatch, processWithClaudeBatchCli } from '@ai-sedlacek/ocr';
+import {
+  OcrRefusalError,
+  prepareImage,
+  processWithClaudeBatch,
+  processWithClaudeBatchCli,
+} from '@ai-sedlacek/ocr';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
@@ -23,7 +28,7 @@ import {
 } from '../lib/processing-helpers';
 import { resetUnfinishedPages, setPageStatus } from '../lib/page-status';
 import { createBatches } from '../lib/batch-utils';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { OCR_MODEL, TEXT_MODEL } from '@ai-sedlacek/shared';
 
 interface PreparedPage {
   pageId: string;
@@ -240,6 +245,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           origOutput,
           `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
           `copy-${copiedDoc.id}`,
+          // Účtuje se cena původního zpracování podle jeho modelu.
+          existingByHash.model ?? OCR_MODEL,
         );
       }
 
@@ -421,6 +428,63 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     let lastProgressUpdate = 0;
 
     const processBatch = isCliMode() ? processWithClaudeBatchCli : processWithClaudeBatch;
+    let batchResult: Awaited<ReturnType<typeof processWithClaudeBatch>>;
+    try {
+      batchResult = await processBatch(images, userPrompt, {
+        previousContext,
+        estimatedOutputTokens: estimatedTotal,
+        mode,
+        language,
+        onProgress: (currentTokens, estimated) => {
+          const now = Date.now();
+          if (now - lastProgressUpdate < 2000) return;
+          lastProgressUpdate = now;
+
+          const pct = Math.min(99, Math.round((currentTokens / estimated) * 100));
+          void prisma.processingJob
+            .update({
+              where: { id: jobId },
+              data: {
+                currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
+              },
+            })
+            .catch(() => {});
+        },
+      });
+    } catch (err) {
+      // Odmítnutí bezpečnostním filtrem (i po fallbacku) se týká jen této dávky –
+      // stránky dostanou chybu, job pokračuje dalšími dávkami.
+      if (!(err instanceof OcrRefusalError)) throw err;
+      console.warn(
+        `[Worker] Batch ${batchIdx + 1} refused (${err.category ?? 'unknown'}):`,
+        err.message,
+      );
+      if (err.usage.inputTokens + err.usage.outputTokens > 0) {
+        await deductTokensIfSufficient(
+          userId,
+          err.usage.inputTokens,
+          err.usage.outputTokens,
+          `OCR dávka ${batchIdx + 1} – odmítnuto modelem${collectionLabel}`,
+          ocrBatchReferenceId(
+            jobId,
+            sentPages.map((p) => p.pageId),
+          ),
+          err.usage.model,
+        ).catch((billingErr) => {
+          console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
+        });
+      }
+      for (const p of sentPages) {
+        errors.push(`Stránka ${p.pageId}: ${err.message}`);
+        await markPageFailed(p.pageId, p.existingDocId, err.message);
+      }
+      completed += batch.length;
+      await prisma.processingJob.update({
+        where: { id: jobId },
+        data: { completedPages: completed, errors },
+      });
+      continue;
+    }
     const {
       results,
       rawResponse,
@@ -430,27 +494,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       outputTokens,
       truncated,
       parseProblem,
-    } = await processBatch(images, userPrompt, {
-      previousContext,
-      estimatedOutputTokens: estimatedTotal,
-      mode,
-      language,
-      onProgress: (currentTokens, estimated) => {
-        const now = Date.now();
-        if (now - lastProgressUpdate < 2000) return;
-        lastProgressUpdate = now;
-
-        const pct = Math.min(99, Math.round((currentTokens / estimated) * 100));
-        void prisma.processingJob
-          .update({
-            where: { id: jobId },
-            data: {
-              currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
-            },
-          })
-          .catch(() => {});
-      },
-    });
+    } = batchResult;
 
     // Odečet hned po získání usage, ještě před ukládáním – pád workeru mezi uložením
     // a odečtem by jinak nechal zpracování nezaplacené. Klíč je deterministický
@@ -473,6 +517,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           jobId,
           sentPages.map((p) => p.pageId),
         ),
+        model,
       );
     } catch (err) {
       console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchIdx + 1}:`, err);
@@ -766,6 +811,7 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     response.outputTokens,
     `Překlad dokumentu ${doc.id}${collectionLabel}`,
     `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
+    response.model,
   ).catch((err) => {
     // Chybu odečtu nepolykat potichu (BIL-3)
     console.error(

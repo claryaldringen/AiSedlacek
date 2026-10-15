@@ -118,6 +118,7 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         response.outputTokens,
         `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
         `fix-context:${jobId}:${doc.id}`,
+        response.model,
       ).catch((err) => {
         console.warn('[Worker:fix-contexts] Token deduction failed:', err);
       });

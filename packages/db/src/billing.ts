@@ -1,7 +1,5 @@
+import { creditsForUsage, czkToCredits } from '@ai-sedlacek/shared';
 import { prisma } from './client';
-
-const TOKEN_MULTIPLIER = parseInt(process.env.TOKEN_MULTIPLIER ?? '2');
-const TOKEN_PRICE_PER_MILLION = parseFloat(process.env.TOKEN_PRICE_PER_MILLION ?? '50');
 
 export async function getTokenBalance(userId: string): Promise<number> {
   const result = await prisma.tokenTransaction.aggregate({
@@ -55,14 +53,21 @@ export async function createTransaction(data: {
   }
 }
 
+/**
+ * Odečte kredity za volání LLM. Částka se počítá ze skutečného nákladu API
+ * daného modelu (vstup a výstup zvlášť) × marže – viz `@ai-sedlacek/shared`
+ * pricing. Dřív se účtovalo (vstup + výstup) × 2 bez ohledu na model, takže
+ * OCR na Opusu se prodávalo pod náklady.
+ */
 export async function deductTokens(
   userId: string,
   inputTokens: number,
   outputTokens: number,
   description: string,
-  referenceId?: string,
+  referenceId: string | undefined,
+  model: string,
 ): ReturnType<typeof createTransaction> {
-  const amount = -Math.ceil((inputTokens + outputTokens) * TOKEN_MULTIPLIER);
+  const amount = -creditsForUsage(model, inputTokens, outputTokens);
   return createTransaction({
     userId,
     type: 'consumption',
@@ -82,9 +87,11 @@ export async function deductTokensIfSufficient(
   inputTokens: number,
   outputTokens: number,
   description: string,
-  referenceId?: string,
+  referenceId: string | undefined,
+  /** Model, který skutečně odpověděl (`response.model`) – určuje sazbu. */
+  model: string,
 ): Promise<{ success: boolean; balance: number; transaction?: { id: string; amount: number } }> {
-  const amount = -Math.ceil((inputTokens + outputTokens) * TOKEN_MULTIPLIER);
+  const amount = -creditsForUsage(model, inputTokens, outputTokens);
 
   const MAX_RETRIES = 3;
   let lastError: unknown;
@@ -156,8 +163,7 @@ export async function deductTokensIfSufficient(
 
 export function czkToTokens(amountHalire: number): number {
   // amountHalire is in halire (1 CZK = 100 halire)
-  const amountCzk = amountHalire / 100;
-  return Math.floor((amountCzk / TOKEN_PRICE_PER_MILLION) * 1_000_000);
+  return czkToCredits(amountHalire);
 }
 
 export async function generateVariableSymbol(): Promise<number> {

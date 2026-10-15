@@ -1,7 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type {
+  BetaMessage,
+  BetaMessageParam,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import {
   BATCH_OCR_INSTRUCTION,
   TRANSLATE_ONLY_SYSTEM_PROMPT,
+  OCR_EFFORT,
   OCR_MODEL,
 } from '@ai-sedlacek/shared';
 import { parseOcrJson, parseOcrJsonBatchChecked } from './parse';
@@ -32,19 +37,85 @@ Use \\n for newlines inside JSON strings. Return ONLY the JSON object, no markdo
 export const BATCH_OUTPUT_TOKENS_PER_PAGE = 8_000;
 
 /**
- * Strop `max_tokens` dávky. claude-opus-4-6 umí až 128k výstupních tokenů (jen se
- * streamingem, který používáme); volíme konzervativně polovinu. Dávka má podle
- * `createBatches` ve workeru max. ~6 stránek (6 × 8k = 48k) – výstup nad 64k by
- * spíš znamenal zacyklení modelu než legitimní obsah.
+ * Rezerva na thinking. Opus 5.5 uvažuje vždy (adaptive) a thinking se počítá do
+ * `max_tokens`, i když se jeho text nevrací – bez rezervy by se odpověď ořízla.
  */
-export const BATCH_MAX_OUTPUT_TOKENS = 64_000;
+export const THINKING_TOKENS_RESERVE = 16_000;
 
-/** `max_tokens` odvozený od skutečného počtu stránek v dávce (LLM-2). */
+/**
+ * Strop `max_tokens` dávky. Opus 5.5 umí až 128k výstupních tokenů (jen se
+ * streamingem, který používáme). Dávka má podle `createBatches` ve workeru
+ * max. ~6 stránek (16k + 6 × 8k = 64k) – výstup nad 96k by spíš znamenal
+ * zacyklení modelu než legitimní obsah.
+ */
+export const BATCH_MAX_OUTPUT_TOKENS = 96_000;
+
+/** `max_tokens` odvozený od skutečného počtu stránek v dávce (LLM-2) + rezerva na thinking. */
 export function batchMaxTokens(pageCount: number): number {
   return Math.min(
     BATCH_MAX_OUTPUT_TOKENS,
-    Math.max(8192, BATCH_OUTPUT_TOKENS_PER_PAGE * Math.max(1, pageCount)),
+    THINKING_TOKENS_RESERVE + BATCH_OUTPUT_TOKENS_PER_PAGE * Math.max(1, pageCount),
   );
+}
+
+/** Model požadavek odmítl (safety klasifikátor) a odmítl ho i fallback model. */
+export class OcrRefusalError extends Error {
+  constructor(
+    readonly category: string | null,
+    /** Spotřeba odmítnutého volání (částečný výstup se účtuje). */
+    readonly usage: { model: string; inputTokens: number; outputTokens: number },
+  ) {
+    super(
+      `Model odmítl stránku zpracovat (bezpečnostní filtr${category ? `: ${category}` : ''}). ` +
+        'Zkuste to znovu, případně stránku přepište ručně.',
+    );
+    this.name = 'OcrRefusalError';
+  }
+}
+
+/** Text odpovědi – jen textové bloky (odpověď Opus 5.5 začíná bloky `thinking`). */
+function responseText(message: BetaMessage): string {
+  return message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('');
+}
+
+/**
+ * Streamovaný OCR požadavek na `OCR_MODEL`. Opus 5.5 má thinking vždy zapnutý
+ * (řídí se `effort`) a odmítá `temperature`. Při odmítnutí bezpečnostním
+ * klasifikátorem (např. středověké herbáře a receptáře mohou narazit na `bio`)
+ * API samo zopakuje požadavek na doporučeném fallback modelu – `finalMessage.model`
+ * pak nese model, který skutečně odpověděl (podle něj se účtuje).
+ */
+async function streamOcrRequest(params: {
+  system: string;
+  messages: BetaMessageParam[];
+  maxTokens: number;
+  onText: (text: string) => void;
+}): Promise<{ message: BetaMessage; text: string }> {
+  const client = new Anthropic();
+  let streamed = '';
+  const stream = client.beta.messages.stream({
+    model: OCR_MODEL,
+    max_tokens: params.maxTokens,
+    output_config: { effort: OCR_EFFORT },
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    system: params.system,
+    messages: params.messages,
+  });
+  stream.on('text', (text) => {
+    streamed += text;
+    params.onText(text);
+  });
+  const message = await stream.finalMessage();
+
+  if (message.stop_reason === 'refusal') {
+    throw new OcrRefusalError(message.stop_details?.category ?? null, {
+      model: message.model,
+      inputTokens: message.usage.input_tokens,
+      outputTokens: message.usage.output_tokens,
+    });
+  }
+  return { message, text: streamed || responseText(message) };
 }
 
 export async function processWithClaude(
@@ -64,16 +135,14 @@ export async function processWithClaude(
   outputTokens: number;
 }> {
   const startTime = Date.now();
-  const client = new Anthropic();
   const { buffer: imageToSend, mediaType } = await prepareImage(image);
 
   const estimated = estimatedOutputTokens ?? 1500;
-  let fullText = '';
+  let streamedLength = 0;
 
-  const stream = client.messages.stream({
-    model: OCR_MODEL,
-    max_tokens: 8192,
-    temperature: 0.3,
+  const { message: finalMessage, text } = await streamOcrRequest({
+    // Thinking (vždy zapnutý) se počítá do max_tokens – rezerva navíc k odpovědi.
+    maxTokens: THINKING_TOKENS_RESERVE + BATCH_OUTPUT_TOKENS_PER_PAGE,
     system: mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT,
     messages: [
       {
@@ -102,15 +171,11 @@ export async function processWithClaude(
         ],
       },
     ],
+    onText: (delta) => {
+      streamedLength += delta.length;
+      onProgress?.(Math.round(streamedLength / 4), estimated);
+    },
   });
-
-  stream.on('text', (text) => {
-    fullText += text;
-    const currentTokens = Math.round(fullText.length / 4);
-    onProgress?.(currentTokens, estimated);
-  });
-
-  const finalMessage = await stream.finalMessage();
 
   console.log(
     '[Claude] Done:',
@@ -121,9 +186,6 @@ export async function processWithClaude(
       stop_reason: finalMessage.stop_reason,
     }),
   );
-
-  const text =
-    fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
   const parsed = parseOcrJson(text);
 
@@ -162,7 +224,6 @@ export async function processWithClaudeBatch(
   parseProblem: string | null;
 }> {
   const startTime = Date.now();
-  const client = new Anthropic();
 
   // Obrázky se připravují postupně, ne paralelně – sharp dekóduje celý obrázek
   // do paměti a několik velkých skenů najednou zbytečně zvedá špičku (PERF-1).
@@ -205,27 +266,21 @@ export async function processWithClaudeBatch(
   content.push({ type: 'text', text: userPrompt });
 
   const estimated = options?.estimatedOutputTokens ?? 2500 * images.length;
-  let fullText = '';
+  let streamedLength = 0;
   const maxTokens = batchMaxTokens(images.length);
 
-  const stream = client.messages.stream({
-    model: OCR_MODEL,
-    max_tokens: maxTokens,
-    temperature: 0.3,
+  const { message: finalMessage, text } = await streamOcrRequest({
+    maxTokens,
     system:
       (options?.mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) +
       '\n\n' +
       BATCH_OCR_INSTRUCTION,
     messages: [{ role: 'user', content }],
+    onText: (delta) => {
+      streamedLength += delta.length;
+      options?.onProgress?.(Math.round(streamedLength / 4), estimated);
+    },
   });
-
-  stream.on('text', (text) => {
-    fullText += text;
-    const currentTokens = Math.round(fullText.length / 4);
-    options?.onProgress?.(currentTokens, estimated);
-  });
-
-  const finalMessage = await stream.finalMessage();
 
   console.log(
     '[Claude Batch] Done:',
@@ -245,9 +300,6 @@ export async function processWithClaudeBatch(
       `[Claude Batch] Output truncated at max_tokens=${maxTokens} (${images.length} images) – incomplete pages will be reported as errors`,
     );
   }
-
-  const text =
-    fullText || (finalMessage.content[0]?.type === 'text' ? finalMessage.content[0].text : '');
 
   // Useknutý poslední řádek JSONL se nenaparsuje a parser ho zahodí – vrácené
   // výsledky jsou tedy jen kompletní stránky; o zbytku rozhodne volající.

@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { computeCostRaw, formatCost, TOKEN_MULTIPLIER } from '@/lib/pricing';
+import { chargeForUsage, formatCzk } from '@/lib/pricing';
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
@@ -194,6 +194,21 @@ export function ResultViewer({
 }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const tc = useTranslations('common');
+  const locale = useLocale();
+  // Cena pro uživatele – stejný výpočet jako účtování kreditů.
+  const formatCharge = (
+    model: string | null | undefined,
+    inputTokens: number | null | undefined,
+    outputTokens: number | null | undefined,
+  ): string | null => {
+    const charge = chargeForUsage(model, inputTokens, outputTokens);
+    return charge
+      ? t('chargeValue', {
+          czk: formatCzk(charge.czk, locale),
+          credits: charge.credits.toLocaleString(locale),
+        })
+      : null;
+  };
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
 
@@ -493,8 +508,8 @@ export function ResultViewer({
                   value={
                     result.inputTokens != null || result.outputTokens != null
                       ? t('tokensInOut', {
-                          in: (result.inputTokens ?? 0) * TOKEN_MULTIPLIER,
-                          out: (result.outputTokens ?? 0) * TOKEN_MULTIPLIER,
+                          in: (result.inputTokens ?? 0).toLocaleString(locale),
+                          out: (result.outputTokens ?? 0).toLocaleString(locale),
                         })
                       : null
                   }
@@ -507,7 +522,7 @@ export function ResultViewer({
                 />
                 <MetadataRow
                   label={t('totalPrice')}
-                  value={formatCost(result.model, result.inputTokens, result.outputTokens)}
+                  value={formatCharge(result.model, result.inputTokens, result.outputTokens)}
                 />
                 <MetadataRow
                   label={t('createdAt')}
@@ -528,15 +543,15 @@ export function ResultViewer({
                       result.translationInputTokens != null ||
                       result.translationOutputTokens != null
                         ? t('tokensInOut', {
-                            in: (result.translationInputTokens ?? 0) * TOKEN_MULTIPLIER,
-                            out: (result.translationOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                            in: (result.translationInputTokens ?? 0).toLocaleString(locale),
+                            out: (result.translationOutputTokens ?? 0).toLocaleString(locale),
                           })
                         : null
                     }
                   />
                   <MetadataRow
                     label={t('totalPrice')}
-                    value={formatCost(
+                    value={formatCharge(
                       result.translationModel,
                       result.translationInputTokens,
                       result.translationOutputTokens,
@@ -551,13 +566,13 @@ export function ResultViewer({
                   <MetadataRow
                     label={t('tokens')}
                     value={t('tokensInOut', {
-                      in: (result.chatInputTokens ?? 0) * TOKEN_MULTIPLIER,
-                      out: (result.chatOutputTokens ?? 0) * TOKEN_MULTIPLIER,
+                      in: (result.chatInputTokens ?? 0).toLocaleString(locale),
+                      out: (result.chatOutputTokens ?? 0).toLocaleString(locale),
                     })}
                   />
                   <MetadataRow
                     label={t('totalPrice')}
-                    value={formatCost(
+                    value={formatCharge(
                       result.chatModel,
                       result.chatInputTokens,
                       result.chatOutputTokens,
@@ -567,27 +582,25 @@ export function ResultViewer({
               )}
 
               {(() => {
-                const processCost = computeCostRaw(
-                  result.model,
-                  result.inputTokens,
-                  result.outputTokens,
-                );
-                const translationCost = computeCostRaw(
-                  result.translationModel,
-                  result.translationInputTokens,
-                  result.translationOutputTokens,
-                );
-                const chatCost = computeCostRaw(
-                  result.chatModel,
-                  result.chatInputTokens,
-                  result.chatOutputTokens,
-                );
-                const total = processCost + translationCost + chatCost;
-                return total > 0 ? (
+                const charges = [
+                  chargeForUsage(result.model, result.inputTokens, result.outputTokens),
+                  chargeForUsage(
+                    result.translationModel,
+                    result.translationInputTokens,
+                    result.translationOutputTokens,
+                  ),
+                  chargeForUsage(result.chatModel, result.chatInputTokens, result.chatOutputTokens),
+                ];
+                const czk = charges.reduce((sum, c) => sum + (c?.czk ?? 0), 0);
+                const credits = charges.reduce((sum, c) => sum + (c?.credits ?? 0), 0);
+                return credits > 0 ? (
                   <MetadataGroup title={t('grandTotal')}>
                     <MetadataRow
                       label={t('totalGrandPrice')}
-                      value={total < 0.01 ? `$${total.toFixed(4)}` : `$${total.toFixed(3)}`}
+                      value={t('chargeValue', {
+                        czk: formatCzk(czk, locale),
+                        credits: credits.toLocaleString(locale),
+                      })}
                     />
                   </MetadataGroup>
                 ) : null;

@@ -109,6 +109,7 @@ ${concatenated}`;
     `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
     // Deterministický klíč z jobu (BIL-3, dřív Date.now())
     `generate-context:${jobId}:${collectionId}`,
+    response.model,
   ).catch((err) => {
     console.warn('[Worker:generate-context] Token deduction failed:', err);
   });
@@ -171,6 +172,7 @@ ${context}`,
       `Metadata kontextu svazku ${collection.name}`,
       // Deterministický klíč z jobu (BIL-3, dřív Date.now())
       `generate-context-meta:${jobId}:${collectionId}`,
+      metadataResponse.model,
     ).catch((err) => {
       console.warn('[Worker:generate-context] Token deduction failed:', err);
     });

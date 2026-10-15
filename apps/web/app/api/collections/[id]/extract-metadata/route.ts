@@ -91,6 +91,8 @@ ${collection.context}`;
     response.usage.input_tokens,
     response.usage.output_tokens,
     'extract-metadata',
+    undefined,
+    response.model,
   );
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';

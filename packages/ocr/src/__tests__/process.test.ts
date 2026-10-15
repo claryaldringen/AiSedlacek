@@ -16,10 +16,13 @@ const mockStreamOn = vi.fn();
 const mockStreamFinalMessage = vi.fn();
 const mockMessagesStream = vi.fn();
 
+// OCR volá beta endpoint (serverový fallback při odmítnutí – Opus 5.5).
 vi.mock('@anthropic-ai/sdk', () => ({
   default: vi.fn().mockImplementation(() => ({
-    messages: {
-      stream: (...args: unknown[]) => mockMessagesStream(...args),
+    beta: {
+      messages: {
+        stream: (...args: unknown[]) => mockMessagesStream(...args),
+      },
     },
   })),
 }));
@@ -204,11 +207,12 @@ describe('processWithClaudeBatch – max_tokens a stop_reason (LLM-2)', () => {
   const jpeg = () => Buffer.from([0xff, 0xd8, 0xff]);
 
   it('batchMaxTokens roste s počtem stránek a nepřekročí konzervativní strop', () => {
-    expect(batchMaxTokens(1)).toBe(8192);
-    expect(batchMaxTokens(3)).toBe(24_000);
-    expect(batchMaxTokens(6)).toBe(48_000);
+    // 16k rezerva na thinking (Opus 5.5 uvažuje vždy) + 8k na stránku
+    expect(batchMaxTokens(1)).toBe(24_000);
+    expect(batchMaxTokens(3)).toBe(40_000);
+    expect(batchMaxTokens(6)).toBe(64_000);
     expect(batchMaxTokens(50)).toBe(BATCH_MAX_OUTPUT_TOKENS);
-    // claude-opus-4-6 má max. 128k výstupních tokenů
+    // claude-opus-5-5 má max. 128k výstupních tokenů
     expect(BATCH_MAX_OUTPUT_TOKENS).toBeLessThanOrEqual(128_000);
   });
 
@@ -219,8 +223,8 @@ describe('processWithClaudeBatch – max_tokens a stop_reason (LLM-2)', () => {
     await processWithClaudeBatch(images, 'Přepiš text.');
 
     const apiCall = mockMessagesStream.mock.calls[0]![0] as { max_tokens: number };
-    // Dřív 2 500 × 6 = 15 000 – hustým stránkám to nestačilo
-    expect(apiCall.max_tokens).toBe(48_000);
+    // Dřív 2 500 × 6 = 15 000 – hustým stránkám to nestačilo; + 16k na thinking
+    expect(apiCall.max_tokens).toBe(64_000);
   });
 
   it('při stop_reason max_tokens vrátí jen kompletní stránky a příznak truncated', async () => {

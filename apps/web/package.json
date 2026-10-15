@@ -17,7 +17,7 @@
     "@ai-sedlacek/db": "*",
     "@ai-sedlacek/ocr": "*",
     "@ai-sedlacek/shared": "*",
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^0.134.0",
     "@auth/prisma-adapter": "^2.11.1",
     "@prisma/client": "^6",
     "@tailwindcss/typography": "^0.5.19",

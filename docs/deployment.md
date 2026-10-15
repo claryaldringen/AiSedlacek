@@ -119,7 +119,7 @@ systemctl reload caddy
 | `RESEND_API_KEY`, `EMAIL_FROM` | **ano** | Odesílání e-mailů. **Bez nich nefunguje registrace e-mailem** (ověřovací odkaz skončí jen v logu) ani reset hesla. V produkci k 2026-10-14 chybí. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ano | Platby kartou |
 | `FIO_API_TOKEN` | ne | Dobíjení převodem (bez něj se Fio v UI skryje) |
-| `TOKEN_MULTIPLIER`, `TOKEN_PRICE_PER_MILLION` | ne | Ceník kreditů (výchozí ×2 a 50 Kč / 1M tokenů – nezávisle na modelu) |
+| ~~`TOKEN_MULTIPLIER`, `TOKEN_PRICE_PER_MILLION`~~ | – | Od 2026-10 se nepoužívají. Ceník je v kódu (`packages/shared/src/pricing.ts`): uživatel platí skutečný náklad API daného modelu × marže 2 (kurz 23 Kč/USD), 1M kreditů = 50 Kč. |
 | `UPLOAD_DIR` | ano | `/opt/AiSedlacek/uploads` (absolutní cesta) |
 | `LLM_PROVIDER` | ne | `claude` (výchozí). `claude-cli` jen pro lokální vývoj – v produkci worker odmítne start. |
 | `MAX_FILE_SIZE_MB` | ne | Limit uploadu (výchozí 20) |

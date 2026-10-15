@@ -165,7 +165,18 @@ describe('GET /api/collections', () => {
       { collectionId: 'col-1', status: 'pending', _count: 1 },
     ]);
     mockQueryRaw.mockResolvedValue([
-      { collectionId: 'col-1', inputTokens: BigInt(1000), outputTokens: BigInt(500) },
+      {
+        collectionId: 'col-1',
+        model: 'claude-opus-4-6',
+        inputTokens: BigInt(600),
+        outputTokens: BigInt(300),
+      },
+      {
+        collectionId: 'col-1',
+        model: 'claude-opus-5-5',
+        inputTokens: BigInt(400),
+        outputTokens: BigInt(200),
+      },
     ]);
 
     const res = await listCollections(
@@ -181,7 +192,9 @@ describe('GET /api/collections', () => {
     expect(json[0].processableCount).toBe(1);
     expect(json[0].stats.inputTokens).toBe(1000);
     expect(json[0].stats.outputTokens).toBe(500);
-    expect(json[0].stats.costUsd).toBeGreaterThan(0);
+    // Náklad po modelech: 600 × $5 + 300 × $25 + 400 × $4 + 200 × $20 = $0.0161
+    // (0.0105 Opus 4.6 + 0.0056 Opus 5.5) → zaokrouhleno na centy
+    expect(json[0].stats.costUsd).toBe(0.02);
     expect(json[1].name).toBe('Druhy svazek');
     expect(json[1].stats.done).toBe(0);
     expect(json[1].stats.inputTokens).toBe(0);

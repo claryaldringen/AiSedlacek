@@ -28,7 +28,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@prisma/client": "^6"
+    "@prisma/client": "^6",
+    "@ai-sedlacek/shared": "*"
   },
   "devDependencies": {
     "eslint": "^9",

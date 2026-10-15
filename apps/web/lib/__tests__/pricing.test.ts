@@ -1,20 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { computeCostRaw, computeCostFromTokens, MODEL_PRICING } from '../pricing';
+import { chargeForUsage, formatCzk } from '../pricing';
+import { creditsForUsage } from '@ai-sedlacek/shared';
 
-describe('pricing', () => {
-  it('uses current Opus 4.6 rates ($5/$25 per MTok)', () => {
-    expect(MODEL_PRICING['claude-opus-4-6']).toEqual({ input: 5, output: 25 });
-    // 1M vstupních + 1M výstupních tokenů × multiplikátor 2
-    expect(computeCostRaw('claude-opus-4-6', 1_000_000, 1_000_000)).toBe(60);
+describe('UI pricing', () => {
+  it('shows exactly what billing charges', () => {
+    const charge = chargeForUsage('claude-opus-5-5', 3000, 3300);
+    expect(charge?.credits).toBe(creditsForUsage('claude-opus-5-5', 3000, 3300));
+    // 3000 × $4 + 3300 × $20 = $0.078 → × 23 Kč × 2 = 3.588 Kč
+    expect(charge?.czk).toBeCloseTo(3.588);
   });
 
-  it('knows the current model generation', () => {
-    for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']) {
-      expect(computeCostRaw(model, 1000, 1000), model).toBeGreaterThan(0);
-    }
+  it('returns null without usage', () => {
+    expect(chargeForUsage('claude-opus-5-5', 0, 0)).toBeNull();
+    expect(chargeForUsage('claude-opus-5-5', null, undefined)).toBeNull();
   });
 
-  it('collection aggregates default to Opus 4.6 rates', () => {
-    expect(computeCostFromTokens(1_000_000, 0)).toBe(10);
+  it('formats CZK', () => {
+    expect(formatCzk(3.588, 'en')).toBe('3.59');
+    expect(formatCzk(0.0042, 'en')).toBe('0.0042');
   });
 });

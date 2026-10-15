@@ -15,5 +15,6 @@ export {
   batchMaxTokens,
   processWithClaude,
   processWithClaudeBatch,
+  OcrRefusalError,
 } from './process';
 export { processWithClaudeCli, processWithClaudeBatchCli } from './process-cli';

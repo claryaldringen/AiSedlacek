@@ -156,6 +156,7 @@
     "translationSection": "Translation",
     "grandTotal": "Total",
     "totalGrandPrice": "Grand total",
+    "chargeValue": "{czk} CZK ({credits} tokens)",
     "imageSection": "Image",
     "format": "Format",
     "dimensions": "Dimensions",
