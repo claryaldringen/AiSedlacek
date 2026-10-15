@@ -84,34 +84,49 @@ describe('isBlockedAddress', () => {
   });
 });
 
+/**
+ * Ověří, že URL je odmítnuta a z jakého důvodu. Samotné `UnsafeUrlError` nestačí –
+ * např. nepovolený port by odmítl URL dřív, než se vůbec zkontroluje adresa.
+ */
+async function expectRejected(url: string, reason: RegExp): Promise<void> {
+  const err = await assertSafeUrl(url).then(
+    () => null,
+    (e: unknown) => e,
+  );
+  expect(err, url).toBeInstanceOf(UnsafeUrlError);
+  expect((err as Error).message, url).toMatch(reason);
+}
+
 describe('assertSafeUrl', () => {
   it('rejects non-http(s) protocols', async () => {
-    await expect(assertSafeUrl('file:///etc/passwd')).rejects.toBeInstanceOf(UnsafeUrlError);
-    await expect(assertSafeUrl('ftp://example.com/x')).rejects.toBeInstanceOf(UnsafeUrlError);
+    await expectRejected('file:///etc/passwd', /only http\/https/);
+    await expectRejected('ftp://example.com/x', /only http\/https/);
   });
 
   it('rejects literal private/metadata IPs without DNS', async () => {
-    await expect(assertSafeUrl('http://169.254.169.254/latest/meta-data')).rejects.toBeInstanceOf(
-      UnsafeUrlError,
-    );
-    await expect(assertSafeUrl('http://127.0.0.1:5432')).rejects.toBeInstanceOf(UnsafeUrlError);
-    await expect(assertSafeUrl('http://[::1]/')).rejects.toBeInstanceOf(UnsafeUrlError);
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data',
+      'http://127.0.0.1/',
+      'http://[::1]/',
+    ]) {
+      await expectRejected(url, /^blocked address/);
+    }
   });
 
   it('rejects IPv4-mapped IPv6 literals regardless of notation', async () => {
     for (const url of [
       'http://[::ffff:169.254.169.254]/',
-      'http://[::ffff:127.0.0.1]:5432/',
+      'http://[::ffff:127.0.0.1]/',
       'http://[::ffff:a9fe:a9fe]/',
       'http://[64:ff9b::7f00:1]/',
     ]) {
-      await expect(assertSafeUrl(url), url).rejects.toBeInstanceOf(UnsafeUrlError);
+      await expectRejected(url, /^blocked address/);
     }
   });
 
   it('rejects non-standard ports', async () => {
-    await expect(assertSafeUrl('http://8.8.8.8:5432/')).rejects.toBeInstanceOf(UnsafeUrlError);
-    await expect(assertSafeUrl('http://8.8.8.8:3003/')).rejects.toBeInstanceOf(UnsafeUrlError);
+    await expectRejected('http://8.8.8.8:5432/', /^port not allowed/);
+    await expectRejected('http://8.8.8.8:3003/', /^port not allowed/);
     await expect(assertSafeUrl('https://8.8.8.8:8443/')).resolves.toBeInstanceOf(URL);
   });
 
@@ -121,9 +136,7 @@ describe('assertSafeUrl', () => {
       .flat()
       .find((e) => e && e.family === 'IPv4' && !e.internal && !isBlockedAddress(e.address));
     if (!ownPublic) return; // stroj bez veřejné IPv4 na rozhraní (typicky vývojářský notebook za NAT)
-    await expect(assertSafeUrl(`http://${ownPublic.address}/`)).rejects.toBeInstanceOf(
-      UnsafeUrlError,
-    );
+    await expectRejected(`http://${ownPublic.address}/`, /^blocked address/);
   });
 
   describe("server's own interfaces (mocked)", () => {
@@ -164,7 +177,7 @@ describe('assertSafeUrl', () => {
       'http://[2a01:04f9:c012:abcd:0:0:0:1]/',
     ])('rejects %s', async (url) => {
       mockInterfaces();
-      await expect(assertSafeUrl(url)).rejects.toBeInstanceOf(UnsafeUrlError);
+      await expectRejected(url, /^blocked address/);
     });
 
     it('still allows other public addresses', async () => {
@@ -174,7 +187,7 @@ describe('assertSafeUrl', () => {
   });
 
   it('rejects malformed URLs', async () => {
-    await expect(assertSafeUrl('not a url')).rejects.toBeInstanceOf(UnsafeUrlError);
+    await expectRejected('not a url', /^invalid URL/);
   });
 
   it('accepts a public literal IP', async () => {

@@ -54,6 +54,11 @@ export function rateLimit(
   return { ok: true, retryAfterSeconds: 0 };
 }
 
+/** @internal Jen pro testy – počet držených bucketů (ověření stropu MAX_BUCKETS). */
+export function bucketCount(): number {
+  return buckets.size;
+}
+
 /** Best-effort client IP from proxy headers (Caddy sets x-forwarded-for). */
 export function clientIp(request: Request): string {
   const xff = request.headers.get('x-forwarded-for');
