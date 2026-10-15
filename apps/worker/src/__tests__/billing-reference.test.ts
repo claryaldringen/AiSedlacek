@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   prisma: {
     processingJob: { update: vi.fn() },
-    document: { findUnique: vi.fn() },
+    document: { findUnique: vi.fn(), update: vi.fn() },
     translation: { upsert: vi.fn() },
     collection: { findUnique: vi.fn(), update: vi.fn() },
     page: { findMany: vi.fn() },
@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.prisma.processingJob.update.mockResolvedValue({});
   mocks.prisma.translation.upsert.mockResolvedValue({});
+  mocks.prisma.document.update.mockResolvedValue({});
   mocks.prisma.collection.update.mockResolvedValue({});
   mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });
   mocks.createVersion.mockResolvedValue(undefined);
@@ -70,6 +71,11 @@ describe('deterministické referenceId odečtů (BIL-3)', () => {
 
     expect(first).toEqual(['retranslate:job-r:doc-1:cs']);
     expect(second).toEqual(first);
+    // Změna překladu posune Document.updatedAt (detekce konfliktu v `ais push`).
+    expect(mocks.prisma.document.update).toHaveBeenCalledWith({
+      where: { id: 'doc-1' },
+      data: { updatedAt: expect.any(Date) },
+    });
   });
 
   it('translate-context', async () => {
@@ -107,7 +113,7 @@ describe('deterministické referenceId odečtů (BIL-3)', () => {
 
     // Pořadí odečtů není podstatné (hlavní volání se účtuje hned po něm) – jde
     // o deterministické klíče, shodné mezi běhy.
-    expect([...first].sort()).toEqual([
+    expect([...(first ?? [])].sort()).toEqual([
       'generate-context-meta:job-g:col-1',
       'generate-context:job-g:col-1',
     ]);

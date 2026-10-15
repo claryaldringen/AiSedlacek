@@ -147,6 +147,31 @@ describe('PATCH /api/documents/[id] – translationLanguage', () => {
     );
   });
 
+  it('bumps Document.updatedAt when only the translation changes (CLI conflict detection)', async () => {
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC).mockResolvedValueOnce(FAKE_DOC);
+
+    await PATCH(
+      makePatchRequest({ translation: 'Nový překlad', translationLanguage: 'cs' }),
+      routeContext,
+    );
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: 'doc-1' },
+      data: { updatedAt: expect.any(Date) },
+    });
+  });
+
+  it('does not bump updatedAt when the translation is unchanged', async () => {
+    mockFindUnique.mockResolvedValueOnce(FAKE_DOC).mockResolvedValueOnce(FAKE_DOC);
+
+    await PATCH(
+      makePatchRequest({ translation: 'Český překlad', translationLanguage: 'cs' }),
+      routeContext,
+    );
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
   it('still accepts requests without translation (transcription only)', async () => {
     mockFindUnique
       .mockResolvedValueOnce(FAKE_DOC)

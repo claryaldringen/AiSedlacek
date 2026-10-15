@@ -94,7 +94,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
-  const data: Record<string, string> = {};
+  const data: Record<string, string | Date> = {};
 
   if (typeof transcription === 'string' && transcription !== current.transcription) {
     await createVersion(id, 'transcription', current.transcription, 'manual_edit');
@@ -105,15 +105,26 @@ export async function PATCH(request: NextRequest, { params }: RouteContext): Pro
     data.context = context;
   }
 
+  // Změna překladu musí posunout Document.updatedAt – podle něj `ais push`
+  // detekuje konflikt (Translation vlastní updatedAt nemá).
+  const existingTranslation =
+    typeof translationLanguage === 'string'
+      ? current.translations.find((t) => t.language === translationLanguage)
+      : undefined;
+  if (
+    typeof translation === 'string' &&
+    typeof translationLanguage === 'string' &&
+    existingTranslation?.text !== translation
+  ) {
+    data.updatedAt = new Date();
+  }
+
   if (Object.keys(data).length > 0) {
     await prisma.document.update({ where: { id }, data });
   }
 
   // Update translation if provided
   if (typeof translation === 'string' && typeof translationLanguage === 'string') {
-    const existingTranslation = current.translations.find(
-      (t) => t.language === translationLanguage,
-    );
     if (existingTranslation && existingTranslation.text !== translation) {
       await createVersion(
         id,
