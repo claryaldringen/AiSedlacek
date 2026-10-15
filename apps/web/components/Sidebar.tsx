@@ -17,6 +17,8 @@ export interface Collection {
   createdAt: string;
   isPublic: boolean;
   slug: string | null;
+  /** false u cizího svazku ve sdíleném/veřejném workspace (jen pro čtení). */
+  canEdit?: boolean;
   _count: { pages: number };
   processableCount: number;
   stats: {

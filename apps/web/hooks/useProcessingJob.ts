@@ -220,7 +220,13 @@ export function useProcessingJob({
     const expandedPageIds = new Set<string>();
     const knownPages = new Map(pages.map((p) => [p.id, p]));
 
+    const foreignCollectionIds = new Set(
+      collections.filter((c) => c.canEdit === false).map((c) => c.id),
+    );
+
     for (const id of selectedIds) {
+      // Cizí svazky (sdílený/veřejný workspace) zpracovávat nelze – API by vrátilo 403.
+      if (foreignCollectionIds.has(id)) continue;
       if (collectionIds.has(id)) {
         try {
           const res = await apiFetch(`/api/collections/${id}`);

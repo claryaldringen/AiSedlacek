@@ -155,7 +155,13 @@ describe('GET /api/collections', () => {
   it('returns a list of collections', async () => {
     const collections = [
       { ...FAKE_COLLECTION, _count: { pages: 3 } },
-      { ...FAKE_COLLECTION, id: 'col-2', name: 'Druhy svazek', _count: { pages: 0 } },
+      {
+        ...FAKE_COLLECTION,
+        id: 'col-2',
+        name: 'Druhy svazek',
+        userId: 'other-user',
+        _count: { pages: 0 },
+      },
     ];
     // 1. volání: synchronizace vlastních svazků do home workspace, 2. volání: výpis
     mockFindMany
@@ -198,6 +204,9 @@ describe('GET /api/collections', () => {
     // (0.0105 Opus 4.6 + 0.0056 Opus 5.5) → zaokrouhleno na centy
     expect(json[0].stats.costUsd).toBe(0.02);
     expect(json[1].name).toBe('Druhy svazek');
+    // Cizí svazek ve workspace je jen pro čtení
+    expect(json[0].canEdit).toBe(true);
+    expect(json[1].canEdit).toBe(false);
     expect(json[1].stats.done).toBe(0);
     expect(json[1].stats.inputTokens).toBe(0);
     expect(mockPageGroupBy).toHaveBeenCalledTimes(1);

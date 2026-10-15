@@ -125,6 +125,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     return {
       ...c,
+      // Sdílené a veřejné workspacy obsahují cizí svazky – UI je nabízí jen ke čtení.
+      canEdit: c.userId === userId,
       processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
       stats: {
         done: byStatus['done'] ?? 0,

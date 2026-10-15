@@ -66,7 +66,11 @@ function mapDocToResult(
   locale: string,
   cached: boolean,
 ): DocumentResult | null {
-  const translation = doc.translations.find((tr) => tr.language === locale);
+  // Cizí dokument (canEdit false) si uživatel nemůže nechat přeložit do svého
+  // jazyka – ukázat aspoň existující překlad v jiném jazyce.
+  const translation =
+    doc.translations.find((tr) => tr.language === locale) ??
+    (doc.canEdit === false ? doc.translations[0] : undefined);
   if (!translation) return null;
   const context = translation?.context || doc.context;
   const glossary: { term: string; definition: string }[] = translation?.glossaryJson
@@ -351,15 +355,19 @@ function WorkspaceContent(): React.JSX.Element {
           | PageItem[]
           | { pages: PageItem[] }
           | { id: string; pages: PageItem[]; canEdit?: boolean };
+        const canEditCollection = collectionId === null || readCanEdit(data);
         if (collectionId !== null) {
-          setCollectionAccess({ id: collectionId, canEdit: readCanEdit(data) });
+          setCollectionAccess({ id: collectionId, canEdit: canEditCollection });
         }
 
         // Pages with status 'done' but no translation in the current locale
         // should appear as 'pending' (needs translation)
+        // U cizího svazku (jen pro čtení) neměnit – uživatel překlad doplnit nemůže
+        // a stránku by viděl jako nezpracovanou.
         const adjustStatus = (pages: PageItem[]): PageItem[] =>
           pages.map((p) => {
             if (
+              canEditCollection &&
               p.status === 'done' &&
               p.document &&
               !p.document.translations.some((tr) => tr.language === locale)

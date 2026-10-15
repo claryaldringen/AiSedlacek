@@ -790,7 +790,7 @@ export function FileGrid({
         },
       ];
 
-      if (onShareItem) {
+      if (onShareItem && col.canEdit !== false) {
         items.push({ type: 'divider' });
         items.push({
           label: col.isPublic ? t('contextMenuShareSettings') : t('contextMenuSharePublic'),
@@ -1140,6 +1140,9 @@ export function FileGrid({
                     handleContextMenu(e, 'collection', col);
                   }}
                   onDragOver={(e) => {
+                    // Do cizího svazku (jen pro čtení) přesouvat nelze – bez
+                    // preventDefault prohlížeč drop nepovolí.
+                    if (col.canEdit === false) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                     setDragOverCollectionId(col.id);
@@ -1149,7 +1152,7 @@ export function FileGrid({
                     e.preventDefault();
                     setDragOverCollectionId(null);
                     const ids = getDraggedPageIds(e);
-                    if (ids.length > 0) onMovePages?.(ids, col.id);
+                    if (ids.length > 0 && col.canEdit !== false) onMovePages?.(ids, col.id);
                   }}
                   className={[
                     'group relative cursor-pointer rounded-lg border-2 transition-all',
