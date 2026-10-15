@@ -195,15 +195,33 @@ ssh root@204.168.176.128 /opt/AiSedlacek/deploy.sh
   proti produkci. Každé zpracování stojí peníze za API volání – data se nesmí ztratit. Vždy
   používej inkrementální migrace (`prisma migrate dev` lokálně, `prisma migrate deploy`
   v produkci přes `deploy.sh`), které zachovají existující data.
-- **Model ID jen v `packages/shared/src/models.ts`** – nikde jinde natvrdo.
+- **Model ID jen v `packages/shared/src/models.ts`** – nikde jinde natvrdo. Známá výjimka:
+  ceník `apps/web/lib/pricing.ts` (`MODEL_PRICING` a výchozí sazby) má ID zatím vlastní.
 - **Nikdy nemazat `Document`** kvůli regeneraci – přepisuje se na místě s verzemi (`regenerate`).
 
 ### Architektura vrstev
+
+Cílový stav (nový kód ho dodržuje; známé výjimky níže jsou dluh, ne vzor k napodobení):
 
 - Doménová rozhraní a sdílené typy v `packages/shared` (`IStorageProvider`, `IEmailProvider`, prompty, modely).
 - Volání Claude a parsování výstupu v `packages/ocr`; DB přístup, billing a verzování v `packages/db`.
 - API routes a worker handlery volají Prismu napřímo; sdílená logika patří do `packages/*`,
   ne do kopie ve webu i workeru.
+
+Známé výjimky (zatím neodstraněné):
+
+- **Přímá volání Claude mimo `packages/ocr`:** `apps/web/app/api/documents/[id]/chat/route.ts`,
+  `apps/web/app/api/collections/[id]/fetch-context/route.ts`,
+  `apps/web/app/api/collections/[id]/extract-metadata/route.ts` a `apps/worker/src/lib/llm.ts`.
+- **Kopie `LocalStorageProvider`:** `apps/web/lib/adapters/storage/local-storage.ts`
+  a `apps/worker/src/lib/local-storage.ts`.
+- **`MAX_INPUT_PIXELS` a sharp limity dvakrát:** `apps/web/lib/infrastructure/image-validation.ts`
+  a `packages/ocr/src/prepare-image.ts`.
+- **Detekce formátu obrázku třikrát:** `apps/cli/src/lib/mime.ts`,
+  `apps/web/lib/infrastructure/image-validation.ts` a `packages/ocr/src/parse.ts`.
+- **Aplikace OCR výsledku na dokument s verzemi dvakrát:** reparse
+  (`apps/web/app/api/documents/[id]/reparse/route.ts`) a regenerate ve workeru
+  (`apps/worker/src/lib/processing-helpers.ts`).
 
 ---
 
