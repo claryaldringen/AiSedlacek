@@ -201,3 +201,82 @@ describe('kontext svazku se nepřepíše neúplným výstupem modelu', () => {
     expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
   });
 });
+
+// R-8: metadata se účtují před parsováním – neplatný JSON nesmí udělat volání zadarmo.
+describe('generate-context – metadata z druhého volání (R-8)', () => {
+  const CONTEXT = '# Kontext\n\nKronika města.';
+
+  beforeEach(() => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      id: 'col-1',
+      userId: 'user-1',
+      name: 'Svazek',
+    });
+    mocks.prisma.page.findMany.mockResolvedValue([
+      { displayName: null, filename: 'a.jpg', document: { transcription: 'text' } },
+    ]);
+  });
+
+  function mockResponses(metadataText: string): void {
+    mocks.createMessage
+      .mockResolvedValueOnce({
+        text: CONTEXT,
+        model: 'claude-sonnet-4-6',
+        inputTokens: 100,
+        outputTokens: 500,
+        stopReason: 'end_turn',
+      })
+      .mockResolvedValueOnce({
+        text: metadataText,
+        model: 'claude-sonnet-4-6',
+        inputTokens: 80,
+        outputTokens: 40,
+        stopReason: 'end_turn',
+      });
+  }
+
+  function referenceIds(): string[] {
+    return mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4] as string);
+  }
+
+  it('metadata v ```json bloku naparsuje a uloží', async () => {
+    mockResponses('```json\n{"title": "Kronika", "yearFrom": 1450, "author": null}\n```');
+
+    await handleGenerateContext('job-g', {
+      collectionId: 'col-1',
+      pageIds: ['p1'],
+      userId: 'user-1',
+    });
+
+    expect(referenceIds()).toEqual([
+      'generate-context:job-g:col-1',
+      'generate-context-meta:job-g:col-1',
+    ]);
+    expect(mocks.prisma.collection.update).toHaveBeenCalledWith({
+      where: { id: 'col-1' },
+      data: { context: CONTEXT, contextLanguage: 'cs', title: 'Kronika', yearFrom: 1450 },
+    });
+  });
+
+  it('nevalidní JSON metadat: obě volání se zaúčtují, kontext se uloží bez metadat', async () => {
+    mockResponses('Metadata: {title: Kronika');
+
+    await handleGenerateContext('job-g', {
+      collectionId: 'col-1',
+      pageIds: ['p1'],
+      userId: 'user-1',
+    });
+
+    // Účtování metadat proběhlo, přestože parsování selhalo.
+    expect(referenceIds()).toEqual([
+      'generate-context:job-g:col-1',
+      'generate-context-meta:job-g:col-1',
+    ]);
+    const [, input, output] = mocks.deductTokensIfSufficient.mock.calls[1]!;
+    expect([input, output]).toEqual([80, 40]);
+    expect(mocks.prisma.collection.update).toHaveBeenCalledWith({
+      where: { id: 'col-1' },
+      data: { context: CONTEXT, contextLanguage: 'cs' },
+    });
+  });
+});

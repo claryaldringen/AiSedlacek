@@ -309,27 +309,38 @@ describe('processPages – useknutý výstup dávky (LLM-2)', () => {
 });
 
 // ── R-9 (review větve) ───────────────────────────────────────
-describe('processPages – selhání billingu po volání API', () => {
+describe('processPages – selhání billingu po volání API (R-9)', () => {
   it('výsledky už zaplacené dávky uloží a další dávky zastaví', async () => {
+    // Průměr 8000 tokenů/stránku → max. 2 stránky na dávku: [p1, p2], [p3]
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
     addPage('p1');
-    mocks.processWithClaudeBatch.mockResolvedValue({
-      results: [{ index: 0, result: ocrResult(0) }],
-      rawResponse: '{...}',
-      processingTimeMs: 1000,
-      model: 'claude-opus-4-6',
-      inputTokens: 3000,
-      outputTokens: 2000,
-      stopReason: 'end_turn',
-      truncated: false,
-    });
+    addPage('p2');
+    addPage('p3');
     mocks.deductTokensIfSufficient.mockRejectedValue(new Error('P2034 serialization failure'));
 
-    await processPages({ ...baseJob, pageIds: ['p1'] });
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
 
-    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
-    expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p1');
+    // Jen první dávka šla do API – její výstup je zaplacený, proto se uloží.
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(1);
+    const savedPageIds = mocks.prisma.document.create.mock.calls.map((c) => c[0].data.pageId);
+    expect(savedPageIds).toEqual(['p1', 'p2']);
+    // Druhá dávka se nespustí – její stránka se vrátí z `processing` do výchozího stavu.
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p3'] }, status: 'processing' },
+      data: { status: 'pending', errorMessage: null },
+    });
+    // Job skončí chybou s pravdivým důvodem (ne „Nedostatečný kredit", S2-9).
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'error',
+      currentStep: 'Odečet kreditu selhal',
+      errors: expect.arrayContaining([expect.stringContaining('Odečet kreditu selhal')]),
+    });
   });
+});
 
+// ── R-22 (review větve) ──────────────────────────────────────
+describe('processPages – archivovaná stránka (R-22)', () => {
   it('archivovanou stránku nezpracuje', async () => {
     addPage('p1', { status: 'archived' });
 
