@@ -40,7 +40,8 @@ export async function handleTranslateContext(
 
   const response = await createMessage({
     model: TEXT_MODEL,
-    maxTokens: 4096,
+    // Dlouhý kontext se do 4096 tokenů nevešel a useknutý překlad nahradil originál.
+    maxTokens: 16_000,
     messages: [
       {
         role: 'user',
@@ -51,14 +52,8 @@ ${collection.context}`,
     ],
   });
 
-  const context = response.text;
-
-  await prisma.collection.update({
-    where: { id: collectionId },
-    data: { context, contextLanguage: targetLanguage },
-  });
-
-  // Deduct tokens
+  // Odečíst hned po volání (BIL-3) – i když se výsledek neuloží, tokeny
+  // se spotřebovaly.
   await deductTokensIfSufficient(
     userId,
     response.inputTokens,
@@ -68,6 +63,18 @@ ${collection.context}`,
     `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
   ).catch((err) => {
     console.warn('[Worker:translate-context] Token deduction failed:', err);
+  });
+
+  // Kontext svazku nemá historii a překlad nahrazuje originál – přepsat ho smí
+  // jen kompletní, neprázdný výstup (DAT-2).
+  const context = response.text.trim();
+  if (response.stopReason !== 'end_turn' || context === '') {
+    throw new Error('Model nevrátil kompletní překlad kontextu – kontext svazku zůstal beze změny');
+  }
+
+  await prisma.collection.update({
+    where: { id: collectionId },
+    data: { context, contextLanguage: targetLanguage },
   });
 
   // Mark job as completed

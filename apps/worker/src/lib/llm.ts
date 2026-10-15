@@ -17,6 +17,8 @@ export interface LlmResponse {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** stop_reason z API (u claude-cli vždy 'end_turn'). Jiná hodnota než 'end_turn' = neúplný výstup. */
+  stopReason: string | null;
 }
 
 export function isCliMode(): boolean {
@@ -56,10 +58,11 @@ async function createMessageApi(params: {
   });
 
   return {
-    text: response.content[0]?.type === 'text' ? response.content[0].text : '',
+    text: response.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join(''),
     model: response.model,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
+    stopReason: response.stop_reason,
   };
 }
 
@@ -114,6 +117,7 @@ async function createMessageCli(params: {
       model: 'claude-cli',
       inputTokens: 0,
       outputTokens: 0,
+      stopReason: 'end_turn',
     };
   } finally {
     await Promise.all(tmpFiles.map((f) => unlink(f).catch(() => {})));

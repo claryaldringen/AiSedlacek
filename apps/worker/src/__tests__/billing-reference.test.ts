@@ -40,6 +40,7 @@ beforeEach(() => {
     model: 'claude-sonnet-4-6',
     inputTokens: 100,
     outputTokens: 50,
+    stopReason: 'end_turn',
   });
 });
 
@@ -118,5 +119,58 @@ describe('deterministické referenceId odečtů (BIL-3)', () => {
       'generate-context:job-g:col-1',
     ]);
     expect(second).toEqual(first);
+  });
+});
+
+// DAT-2 / R-11: kontext svazku nemá historii – useknutý výstup ho nesmí přepsat.
+describe('kontext svazku se nepřepíše neúplným výstupem modelu', () => {
+  it('translate-context při max_tokens nechá kontext beze změny (ale účtuje)', async () => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      context: 'Původní kontext',
+      contextLanguage: 'cs',
+      name: 'Svazek',
+    });
+    mocks.createMessage.mockResolvedValue({
+      text: 'Truncated transl',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 100,
+      outputTokens: 16000,
+      stopReason: 'max_tokens',
+    });
+
+    await expect(
+      handleTranslateContext('job-t', {
+        collectionId: 'col-1',
+        targetLanguage: 'en',
+        userId: 'user-1',
+      }),
+    ).rejects.toThrow(/beze změny/);
+
+    expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+  });
+
+  it('generate-context s prázdným výstupem nechá kontext beze změny', async () => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      id: 'col-1',
+      userId: 'user-1',
+      name: 'Svazek',
+    });
+    mocks.prisma.page.findMany.mockResolvedValue([
+      { displayName: null, filename: 'a.jpg', document: { transcription: 'text' } },
+    ]);
+    mocks.createMessage.mockResolvedValue({
+      text: '',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 100,
+      outputTokens: 0,
+      stopReason: 'end_turn',
+    });
+
+    await expect(
+      handleGenerateContext('job-g', { collectionId: 'col-1', pageIds: ['p1'], userId: 'user-1' }),
+    ).rejects.toThrow(/beze změny/);
+
+    expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
   });
 });

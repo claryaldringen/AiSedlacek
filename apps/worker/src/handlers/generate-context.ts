@@ -111,6 +111,12 @@ ${concatenated}`;
     console.warn('[Worker:generate-context] Token deduction failed:', err);
   });
 
+  // Kontext svazku nemá historii – přepsat ho smí jen kompletní, neprázdný
+  // výstup (DAT-2, stejně jako fetch-context ve webu).
+  if (response.stopReason !== 'end_turn' || context.trim() === '') {
+    throw new Error('Model nevrátil kompletní kontext – kontext svazku zůstal beze změny');
+  }
+
   await prisma.processingJob.update({
     where: { id: jobId },
     data: {
