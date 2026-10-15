@@ -842,6 +842,22 @@ function WorkspaceContent(): React.JSX.Element {
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
+      const reloadPanel = async (): Promise<PageItem | null> => {
+        const pageRes = await apiFetch(`/api/pages/${pageId}`);
+        if (!pageRes.ok) return null;
+        const updatedPage = (await pageRes.json()) as PageItem;
+        setPanelPage(updatedPage);
+        setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+        if (updatedPage.document) {
+          const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
+          if (docRes.ok) {
+            const doc = (await docRes.json()) as DocApiResponse;
+            setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+          }
+        }
+        return updatedPage;
+      };
+
       setRegenerating(true);
       setRegenerateStep(t('preparingRetranslation'));
       setRegenerateProgress(0);
@@ -939,7 +955,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await response.json()) as { jobId: string };
 
-        await pollJob(jobId, {
+        const outcome = await pollJob(jobId, {
           onStep: (step) => setRegenerateStep(step),
           onProgress: (completed, total) => {
             if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
@@ -947,21 +963,16 @@ function WorkspaceContent(): React.JSX.Element {
         });
 
         // Reload the document after job completes
-        const pageRes = await apiFetch(`/api/pages/${pageId}`);
-        if (pageRes.ok) {
-          const updatedPage = (await pageRes.json()) as PageItem;
-          setPanelPage(updatedPage);
-          setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
-          if (updatedPage.document) {
-            const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
-            if (docRes.ok) {
-              const doc = (await docRes.json()) as DocApiResponse;
-              setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
-            }
-          }
+        const updatedPage = await reloadPanel();
+        // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
+        // uživatel musí vidět, že se nic nezměnilo.
+        if (outcome !== 'completed' || updatedPage?.errorMessage) {
+          setError(updatedPage?.errorMessage ?? t('regenerationFailed'));
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : t('regenerationFailed'));
+        // Panel se na začátku vyprázdnil – vrátit původní dokument (nic se nesmazalo).
+        await reloadPanel().catch(() => undefined);
       } finally {
         setRegenerating(false);
         setRegenerateStep(undefined);
