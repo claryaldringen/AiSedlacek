@@ -6,6 +6,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import HeroCarousel from '@/components/HeroCarousel';
 import AnimatedCounter from '@/components/AnimatedCounter';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
+import { getPublicCollectionCards, type PublicCollectionCard } from '@/lib/public-collections';
 
 async function getStats(): Promise<{
   pages: number;
@@ -30,50 +31,9 @@ async function getStats(): Promise<{
   }
 }
 
-async function getPublicCollections(locale: string): Promise<
-  {
-    id: string;
-    name: string;
-    slug: string | null;
-    context: string | null;
-    pages: { imageUrl: string }[];
-    pageCount: number;
-  }[]
-> {
+async function getPublicCollections(locale: string): Promise<PublicCollectionCard[]> {
   try {
-    const collections = await prisma.collection.findMany({
-      where: { isPublic: true },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        context: true,
-        pages: {
-          where: { status: 'done', document: { isNot: null } },
-          select: {
-            imageUrl: true,
-            document: { select: { translations: { select: { language: true } } } },
-          },
-        },
-      },
-    });
-
-    // Filter pages that have a translation in the current locale
-    return collections
-      .map((c) => {
-        const pagesWithLocale = c.pages.filter((p) =>
-          p.document?.translations.some((t) => t.language === locale),
-        );
-        return {
-          id: c.id,
-          name: c.name,
-          slug: c.slug,
-          context: c.context,
-          pages: pagesWithLocale.slice(0, 1).map((p) => ({ imageUrl: p.imageUrl })),
-          pageCount: pagesWithLocale.length,
-        };
-      })
-      .filter((c) => c.pages.length > 0);
+    return await getPublicCollectionCards(locale);
   } catch (e) {
     console.error('getPublicCollections error:', e);
     return [];
@@ -257,10 +217,11 @@ export default async function LandingPage(): Promise<React.ReactElement> {
                   >
                     <div className="aspect-[4/3] overflow-hidden bg-[#e8dcc4]">
                       <img
-                        src={col.pages[0]?.imageUrl}
+                        src={col.coverUrl}
                         alt={col.name}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         loading="lazy"
+                        decoding="async"
                       />
                     </div>
                     <div className="p-5">
