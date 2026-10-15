@@ -99,9 +99,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     await createVersion(document.id, 'context', context, 'ai_initial', model);
   }
 
-  // Update page status
-  await prisma.page.update({
-    where: { id },
+  // Update page status – podmíněně: stránka mohla být mezitím archivována.
+  await prisma.page.updateMany({
+    where: { id, status: { not: 'archived' } },
     data: { status: 'done' },
   });
 

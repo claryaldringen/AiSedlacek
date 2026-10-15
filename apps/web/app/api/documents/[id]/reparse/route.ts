@@ -90,9 +90,9 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     }),
   ]);
 
-  // Mark page as done
-  await prisma.page.update({
-    where: { id: doc.page.id },
+  // Mark page as done – archivovanou („smazanou") stránku nechat archivovanou.
+  await prisma.page.updateMany({
+    where: { id: doc.page.id, status: { not: 'archived' } },
     data: { status: 'done', errorMessage: null },
   });
 

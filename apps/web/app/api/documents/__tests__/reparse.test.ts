@@ -6,7 +6,7 @@ import { NextRequest } from 'next/server';
 const mockDocFindUnique = vi.fn();
 const mockTranslationFindUnique = vi.fn();
 const mockTransaction = vi.fn();
-const mockPageUpdate = vi.fn();
+const mockPageUpdateMany = vi.fn();
 const mockCreateVersion = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
@@ -23,7 +23,7 @@ vi.mock('@/lib/infrastructure/db', () => ({
       deleteMany: vi.fn((args: unknown) => ({ op: 'glossary.deleteMany', args })),
       createMany: vi.fn((args: unknown) => ({ op: 'glossary.createMany', args })),
     },
-    page: { update: (...args: unknown[]) => mockPageUpdate(...args) },
+    page: { updateMany: (...args: unknown[]) => mockPageUpdateMany(...args) },
     $transaction: (...args: unknown[]) => mockTransaction(...args),
   },
 }));
@@ -71,7 +71,7 @@ describe('POST /api/documents/[id]/reparse', () => {
     });
     mockTranslationFindUnique.mockResolvedValue({ text: 'Starý překlad' });
     mockTransaction.mockResolvedValue([]);
-    mockPageUpdate.mockResolvedValue({});
+    mockPageUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   it('versions transcription, context and translation before overwriting', async () => {
@@ -97,6 +97,15 @@ describe('POST /api/documents/[id]/reparse', () => {
       'glossary.deleteMany',
       'glossary.createMany',
     ]);
+  });
+
+  it('does not un-archive a page archived in the meantime', async () => {
+    await POST(makeRequest(), routeContext);
+
+    expect(mockPageUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'page-1', status: { not: 'archived' } },
+      data: { status: 'done', errorMessage: null },
+    });
   });
 
   it('returns 422 and writes nothing when rawResponse cannot be parsed', async () => {

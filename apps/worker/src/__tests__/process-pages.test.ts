@@ -255,8 +255,8 @@ describe('processPages – obrázky až pro konkrétní dávku (PERF-1)', () => 
       ['p3', 1],
     ]);
     // p2 → chyba s jasnou hláškou
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p2' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p2', status: { not: 'archived' } },
       data: {
         status: 'error',
         errorMessage: expect.stringContaining('Obrázek nelze připravit pro OCR'),
@@ -295,8 +295,8 @@ describe('processPages – useknutý výstup dávky (LLM-2)', () => {
     expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
     expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p1');
     // p2 → chyba s jasnou hláškou, nic se neuložilo
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p2' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p2', status: { not: 'archived' } },
       data: { status: 'error', errorMessage: expect.stringContaining('useknut') },
     });
     // Účtuje se celé volání (skutečná spotřeba API), ne odhad
@@ -334,9 +334,37 @@ describe('processPages – selhání billingu po volání API', () => {
     await processPages({ ...baseJob, pageIds: ['p1'] });
 
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
-    expect(mocks.prisma.page.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'p1' } }),
+    expect(mocks.prisma.page.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'p1' }) }),
     );
+  });
+});
+
+// ── S2-6: archivace během zpracování ─────────────────────────
+describe('processPages – archivace během zpracování', () => {
+  it('zápis stavu stránky se podmíní tím, že není archivovaná', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [{ index: 0, result: ocrResult(0) }],
+      rawResponse: '{...}',
+      processingTimeMs: 1000,
+      model: 'claude-opus-4-6',
+      inputTokens: 3000,
+      outputTokens: 2000,
+      stopReason: 'end_turn',
+      truncated: false,
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    // Žádný nepodmíněný zápis stavu – archivace během dávky má přednost.
+    expect(mocks.prisma.page.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: expect.any(String) }) }),
+    );
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'done', errorMessage: null },
+    });
   });
 });
 
@@ -363,8 +391,8 @@ describe('processPages – nejednoznačné přiřazení výsledků dávky (LLM-3
 
     expect(mocks.prisma.document.create).not.toHaveBeenCalled();
     for (const id of ['p1', 'p2']) {
-      expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-        where: { id },
+      expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+        where: { id, status: { not: 'archived' } },
         data: { status: 'error', errorMessage: problem },
       });
     }
@@ -514,8 +542,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     expect(upsert.where).toEqual({ documentId_language: { documentId: 'doc-1', language: 'cs' } });
     expect(upsert.update).toMatchObject({ text: 'překlad 0', context: null, glossaryJson: null });
 
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: null },
     });
     // Účtuje se jako běžné OCR
@@ -545,8 +573,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     // Přeskočená stránka nesmí zůstat ve stavu 'processing'.
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: null },
     });
   });
@@ -560,8 +588,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
 
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: null },
     });
   });
@@ -583,8 +611,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: 'Model nevrátil výsledek pro tuto stránku' },
     });
   });
@@ -601,8 +629,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     await processPages({ ...baseJob, pageIds: ['p1'], regenerate: true });
 
     expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(mocks.prisma.page.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
       data: { status: 'done', errorMessage: null },
     });
   });

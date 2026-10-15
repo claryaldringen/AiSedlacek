@@ -24,3 +24,23 @@ export async function resetUnfinishedPages(pageIds: string[]): Promise<number> {
   });
   return withDocument.count + withoutDocument.count;
 }
+
+/**
+ * Zapíše stav zpracování stránky – jen pokud ji uživatel mezitím nearchivoval
+ * („smazal"). Worker zpracovává dávku minuty; archivace během té doby má
+ * přednost, jinak by se smazaná stránka vrátila a ve veřejném svazku se znovu
+ * zveřejnila.
+ *
+ * @returns true, pokud se stav zapsal
+ */
+export async function setPageStatus(
+  pageId: string,
+  status: 'pending' | 'processing' | 'done' | 'error',
+  errorMessage: string | null = null,
+): Promise<boolean> {
+  const { count } = await prisma.page.updateMany({
+    where: { id: pageId, status: { not: 'archived' } },
+    data: { status, errorMessage },
+  });
+  return count > 0;
+}

@@ -21,7 +21,7 @@ import {
   hashImage,
   loadImage,
 } from '../lib/processing-helpers';
-import { resetUnfinishedPages } from '../lib/page-status';
+import { resetUnfinishedPages, setPageStatus } from '../lib/page-status';
 import { createBatches } from '../lib/batch-utils';
 import { TEXT_MODEL } from '@ai-sedlacek/shared';
 
@@ -158,10 +158,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Regenerace: stránku, kterou tento job už přegeneroval (batchId = jobId),
     // po restartu workeru znovu neposílat – zbytečně by se platilo podruhé.
     if (regenerate && page.document !== null && page.document.batchId === jobId) {
-      await prisma.page.update({
-        where: { id: pageId },
-        data: { status: 'done', errorMessage: null },
-      });
+      await setPageStatus(pageId, 'done');
       skippedCount.alreadyRegenerated++;
       continue;
     }
@@ -175,10 +172,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       if (hasTranslation) {
         // Web při spuštění jobu přepne stránky na 'processing' – přeskočenou
         // stránku je nutné vrátit, jinak v UI visí jako zpracovávaná.
-        await prisma.page.update({
-          where: { id: pageId },
-          data: { status: 'done', errorMessage: null },
-        });
+        await setPageStatus(pageId, 'done');
         skippedCount.alreadyTranslated++;
         continue;
       }
@@ -188,10 +182,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         | { language: string; text: string }
         | undefined;
       if (sourceTranslation) {
-        await prisma.page.update({
-          where: { id: pageId },
-          data: { status: 'processing', errorMessage: null },
-        });
+        await setPageStatus(pageId, 'processing');
 
         try {
           await translateExistingDocument(
@@ -206,17 +197,11 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
             language,
             collectionLabel,
           );
-          await prisma.page.update({
-            where: { id: pageId },
-            data: { status: 'done', errorMessage: null },
-          });
+          await setPageStatus(pageId, 'done');
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Chyba překladu';
           errors.push(msg);
-          await prisma.page.update({
-            where: { id: pageId },
-            data: { status: 'done', errorMessage: msg },
-          });
+          await setPageStatus(pageId, 'done', msg);
         }
 
         completed++;
@@ -229,10 +214,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     }
 
     // Set page to processing
-    await prisma.page.update({
-      where: { id: pageId },
-      data: { status: 'processing', errorMessage: null },
-    });
+    await setPageStatus(pageId, 'processing');
 
     // Hash obrázku (buffer se hned zahodí, viz hashImage)
     const { imageHash, fileSize } = await hashImage(page.imageUrl);
@@ -291,10 +273,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         }
       }
 
-      await prisma.page.update({
-        where: { id: pageId },
-        data: { status: 'done', errorMessage: null },
-      });
+      await setPageStatus(pageId, 'done');
 
       skippedCount.deduped++;
       completed++;
@@ -541,10 +520,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
         savedDocs.push({ pageId: pageInfo.pageId, docId: doc.id });
 
-        await prisma.page.update({
-          where: { id: pageInfo.pageId },
-          data: { status: 'done', errorMessage: null },
-        });
+        await setPageStatus(pageInfo.pageId, 'done');
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Neznámá chyba';
         console.error(`[Worker] Save failed for page ${pageInfo.pageId}:`, message);
@@ -606,7 +582,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           status: 'error',
           completedPages: completed,
           errors,
-          currentStep: 'Nedostatečný kredit',
+          currentStep: billingFailed ? 'Odečet kreditu selhal' : 'Nedostatečný kredit',
         },
       });
       return;
@@ -657,10 +633,7 @@ async function markPageFailed(
   existingDocId: string | null,
   message: string,
 ): Promise<void> {
-  await prisma.page.update({
-    where: { id: pageId },
-    data: { status: existingDocId ? 'done' : 'error', errorMessage: message },
-  });
+  await setPageStatus(pageId, existingDocId ? 'done' : 'error', message);
 }
 
 /**
