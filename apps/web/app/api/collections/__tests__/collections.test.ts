@@ -407,7 +407,8 @@ describe('GET /api/collections/[id]', () => {
       include: {
         pages: {
           where: { status: { not: 'archived' } },
-          orderBy: { order: 'asc' },
+          // Shodné order (stránky z ais upload) → čas vzniku, stejně jako veřejné zobrazení
+          orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
           include: {
             document: {
               select: {
