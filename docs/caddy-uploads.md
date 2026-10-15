@@ -109,3 +109,34 @@ curl -sI https://aisedlacek.com/uploads/test.svg
   obsah z jiné domény bez cookies aplikace (např. `files.aisedlacek.com`).
 - `/api/images/*` (starší URL obrázků) obsluhuje Next.js – tam hlavičky
   z `next.config.ts` platí a změna v Caddy není potřeba.
+
+## Limit velikosti requestů na API
+
+Route handlery Next.js nemají limit těla requestu (dřív ho náhodou suplovalo
+middleware, které tělo nad 10 MB ořezávalo – rozbíjelo to ale uploady). Aplikace
+odmítá upload nad 5 souborů a nad deklarovanou velikost
+(`apps/web/app/api/pages/upload/route.ts`), druhou vrstvou má být Caddy – tělo
+nad limit pak k Next.js vůbec nedojde:
+
+```caddyfile
+aisedlacek.com {
+	# Upload: max. 5 souborů × 20 MB (MAX_FILE_SIZE_MB) + rezerva
+	@pageUpload path /api/pages/upload
+	request_body @pageUpload {
+		max_size 110MB
+	}
+
+	# Ostatní API (JSON, webhooky, chat) – stačí řádově jednotky MB
+	@apiOther {
+		path /api/*
+		not path /api/pages/upload
+	}
+	request_body @apiOther {
+		max_size 10MB
+	}
+
+	# … stávající handle /uploads/* a reverse_proxy …
+}
+```
+
+Po úpravě opět `caddy validate` a `systemctl reload caddy`.

@@ -209,6 +209,40 @@ describe('POST /api/pages/upload – content validation', () => {
 
 // ── POST /api/pages/import-url ───────────────────────────
 
+describe('POST /api/pages/upload – request size limits', () => {
+  it('rejects a request whose declared body exceeds the limit before parsing it', async () => {
+    const form = new FormData();
+    form.append('files', file(HTML, 'x.jpg', { type: 'image/jpeg' }));
+    const req = new NextRequest('http://localhost/api/pages/upload', {
+      method: 'POST',
+      body: form,
+      headers: { 'x-locale': 'cs', 'content-length': String(500 * 1024 * 1024) },
+    });
+
+    const res = await upload(req);
+
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe(cs.api.requestTooLarge);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('rejects more than 5 files in one request', async () => {
+    const form = new FormData();
+    for (let i = 0; i < 6; i++)
+      form.append('files', file(HTML, `${i}.jpg`, { type: 'image/jpeg' }));
+    const req = new NextRequest('http://localhost/api/pages/upload', {
+      method: 'POST',
+      body: form,
+      headers: { 'x-locale': 'cs' },
+    });
+
+    const res = await upload(req);
+
+    expect(res.status).toBe(413);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/pages/import-url – content validation', () => {
   it('rejects HTML served as image/jpeg and stores nothing', async () => {
     mockSafeFetch.mockResolvedValue(

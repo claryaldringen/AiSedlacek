@@ -16,6 +16,9 @@ import { naturalCompare } from '@/lib/infrastructure/natural-sort';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 const MAX_SIZE_MB = parseInt(process.env['MAX_FILE_SIZE_MB'] ?? '20', 10);
+const MAX_FILES_PER_REQUEST = 5;
+// + 1 MB na multipart hlavičky a pole collectionId
+const MAX_REQUEST_BYTES = MAX_SIZE_MB * 1024 * 1024 * MAX_FILES_PER_REQUEST + 1024 * 1024;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const t = await getApiTranslations(request, 'api');
@@ -23,6 +26,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const auth = await resolveUserId(request);
   if (auth.error) return auth.error;
   const { userId } = auth;
+
+  // Route handlery v App Routeru nemají limit těla a formData() celý multipart
+  // načte do paměti. UI posílá po jednom souboru, CLI také – víc než
+  // MAX_FILES_PER_REQUEST souborů nebo větší tělo odmítnout dřív, než se čte.
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json({ error: t('requestTooLarge') }, { status: 413 });
+  }
 
   let formData: FormData;
   try {
@@ -42,6 +53,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const files = formData.getAll('files');
+  if (files.length > MAX_FILES_PER_REQUEST) {
+    return NextResponse.json(
+      { error: t('tooManyFiles', { max: MAX_FILES_PER_REQUEST }) },
+      { status: 413 },
+    );
+  }
   if (files.length === 0) {
     return NextResponse.json({ error: t('noFile') }, { status: 400 });
   }

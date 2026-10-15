@@ -279,6 +279,8 @@
     "invalidJson": "Invalid JSON",
     "serverError": "Internal server error",
     "invalidBody": "Invalid request body",
+    "requestTooLarge": "Request is too large",
+    "tooManyFiles": "At most {max} files can be uploaded at once",
     "contextIncomplete": "The model did not return a complete context – the existing context was left unchanged. Try a shorter text.",
     "unsupportedLanguage": "Unsupported translation language",
     "invalidMessages": "Invalid message format",

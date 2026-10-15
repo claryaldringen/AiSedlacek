@@ -141,40 +141,52 @@ export function ImportDialog({
         prev.map((s) => (s.state === 'pending' ? { ...s, state: 'uploading' as const } : s)),
       );
 
+      // Po jednom souboru se souběžností 2: server celý multipart request drží
+      // v paměti a jeden request se 40 skeny po 15 MB by web proces shodil.
+      // Navíc průběh a chyby po souborech.
+      const uploadOne = async (status: (typeof validFiles)[number]): Promise<UploadedPage[]> => {
+        const setState = (patch: { state: 'done' | 'error'; error?: string }): void =>
+          setFileStatuses((prev) =>
+            prev.map((s) => (s.file === status.file ? { ...s, ...patch } : s)),
+          );
+        try {
+          const formData = new FormData();
+          formData.append('files', status.file);
+          if (collectionId) formData.append('collectionId', collectionId);
+
+          const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
+          const data = (await response.json().catch(() => ({}))) as {
+            pages?: UploadedPage[];
+            errors?: { filename: string; error: string }[];
+            error?: string;
+          };
+          if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
+
+          const pages = data.pages ?? [];
+          if (pages.length > 0) setState({ state: 'done' });
+          else setState({ state: 'error', error: data.errors?.[0]?.error ?? t('uploadFailed') });
+          return pages;
+        } catch (err) {
+          setState({
+            state: 'error',
+            error: err instanceof Error ? err.message : t('unknownError'),
+          });
+          return [];
+        }
+      };
+
       try {
-        const formData = new FormData();
-        for (const s of validFiles) formData.append('files', s.file);
-        if (collectionId) formData.append('collectionId', collectionId);
-
-        const response = await apiFetch('/api/pages/upload', { method: 'POST', body: formData });
-        const data = (await response.json()) as {
-          pages?: UploadedPage[];
-          errors?: { filename: string; error: string }[];
-          error?: string;
+        const uploadedPages: UploadedPage[] = [];
+        let nextIndex = 0;
+        const runQueue = async (): Promise<void> => {
+          while (nextIndex < validFiles.length) {
+            const status = validFiles[nextIndex++]!;
+            uploadedPages.push(...(await uploadOne(status)));
+          }
         };
-        if (!response.ok) throw new Error(data.error ?? t('uploadFailed'));
-
-        const uploadedPages = data.pages ?? [];
-        const uploadErrors = data.errors ?? [];
-
-        setFileStatuses((prev) =>
-          prev.map((s) => {
-            const page = uploadedPages.find((p) => p.filename === s.file.name);
-            if (page) return { ...s, state: 'done' as const };
-            const err = uploadErrors.find((e) => e.filename === s.file.name);
-            if (err) return { ...s, state: 'error' as const, error: err.error };
-            return s;
-          }),
-        );
+        await Promise.all([runQueue(), runQueue()]);
 
         if (uploadedPages.length > 0) onPagesImported(uploadedPages);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : t('unknownError');
-        setFileStatuses((prev) =>
-          prev.map((s) =>
-            s.state === 'uploading' ? { ...s, state: 'error' as const, error: message } : s,
-          ),
-        );
       } finally {
         setIsUploading(false);
       }

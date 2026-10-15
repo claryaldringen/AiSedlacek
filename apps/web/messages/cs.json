@@ -279,6 +279,8 @@
     "invalidJson": "Neplatný JSON",
     "serverError": "Interní chyba serveru",
     "invalidBody": "Neplatné tělo požadavku",
+    "requestTooLarge": "Požadavek je příliš velký",
+    "tooManyFiles": "Najednou lze nahrát nejvýše {max} souborů",
     "contextIncomplete": "Model nevrátil kompletní kontext – stávající kontext zůstal beze změny. Zkuste kratší text.",
     "unsupportedLanguage": "Nepodporovaný jazyk překladu",
     "invalidMessages": "Neplatný formát zpráv",
