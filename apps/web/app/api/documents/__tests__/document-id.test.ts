@@ -105,7 +105,13 @@ describe('GET /api/documents/[id]', () => {
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { id: 'doc-1' },
       omit: { rawResponse: true },
-      include: { translations: true, glossary: true, page: { select: { userId: true } } },
+      include: {
+        translations: true,
+        glossary: true,
+        page: {
+          select: { id: true, userId: true, isPublic: true, status: true, collectionId: true },
+        },
+      },
     });
   });
 

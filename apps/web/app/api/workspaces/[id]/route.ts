@@ -24,7 +24,8 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
         include: {
           collection: {
             include: {
-              _count: { select: { pages: true } },
+              // Archivované („smazané") stránky se nepočítají.
+              _count: { select: { pages: { where: { status: { not: 'archived' } } } } },
             },
           },
           page: {
@@ -58,11 +59,18 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     }
   }
 
-  // Separate collections and orphan pages for convenience
+  // Separate collections and orphan pages for convenience. Archivované stránky
+  // nevidí nikdo; ve veřejném workspace jen to, co je (stále) veřejné.
+  const isPublicWorkspace = workspace.id === PUBLIC_WORKSPACE_ID;
   const collections = workspace.items
-    .filter((item) => item.collection !== null)
-    .map((item) => item.collection);
-  const orphanPages = workspace.items.filter((item) => item.page !== null).map((item) => item.page);
+    .map((item) => item.collection)
+    .filter((c): c is NonNullable<typeof c> => c !== null && (!isPublicWorkspace || c.isPublic));
+  const orphanPages = workspace.items
+    .map((item) => item.page)
+    .filter(
+      (p): p is NonNullable<typeof p> =>
+        p !== null && p.status !== 'archived' && (!isPublicWorkspace || p.isPublic),
+    );
 
   return NextResponse.json({
     ...workspace,

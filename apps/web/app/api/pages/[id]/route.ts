@@ -5,6 +5,7 @@ import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { canReadPage } from '@/lib/infrastructure/authz';
 
 const CLIENT_SETTABLE_STATUSES = new Set(['pending', 'blank', 'archived']);
 
@@ -34,11 +35,12 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     },
   });
 
-  if (!page || page.userId !== userId) {
+  // Číst smí i členové sdíleného workspace (canReadPage); upravovat jen vlastník.
+  if (!page || !(await canReadPage(userId, page))) {
     return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json(page);
+  return NextResponse.json({ ...page, canEdit: page.userId === userId });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {

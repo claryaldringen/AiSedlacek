@@ -12,6 +12,7 @@ const mockPublicSlugDeleteMany = vi.fn();
 const mockPageGroupBy = vi.fn();
 const mockDocumentAggregate = vi.fn();
 const mockQueryRaw = vi.fn();
+const mockWorkspaceItemFindFirst = vi.fn();
 const mockWorkspaceFindUnique = vi.fn();
 const mockWorkspaceMemberFindUnique = vi.fn();
 const mockWorkspaceItemCreateMany = vi.fn();
@@ -59,6 +60,7 @@ vi.mock('@/lib/infrastructure/db', () => ({
     workspaceItem: {
       createMany: (...args: unknown[]) => mockWorkspaceItemCreateMany(...args),
       create: (...args: unknown[]) => mockWorkspaceItemCreate(...args),
+      findFirst: (...args: unknown[]) => mockWorkspaceItemFindFirst(...args),
     },
     publicSlug: {
       deleteMany: (...args: unknown[]) => mockPublicSlugDeleteMany(...args),
@@ -404,6 +406,41 @@ describe('GET /api/collections/[id]', () => {
         },
       },
     });
+  });
+
+  it('lets a member of a shared workspace read a foreign collection (read-only)', async () => {
+    mockFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      userId: 'other-user',
+      isPublic: false,
+      pages: [],
+    });
+    mockWorkspaceItemFindFirst.mockResolvedValue({ id: 'item-1' });
+
+    const res = await getCollection(
+      new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).canEdit).toBe(false);
+  });
+
+  it("returns 404 for a foreign collection outside the user's workspaces", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...FAKE_COLLECTION,
+      userId: 'other-user',
+      isPublic: false,
+      pages: [],
+    });
+    mockWorkspaceItemFindFirst.mockResolvedValue(null);
+
+    const res = await getCollection(
+      new NextRequest('http://localhost/api/collections/col-1', { headers: CS_LOCALE }),
+      routeContext,
+    );
+
+    expect(res.status).toBe(404);
   });
 
   it('returns 404 when collection does not exist', async () => {

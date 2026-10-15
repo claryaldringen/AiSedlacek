@@ -21,3 +21,52 @@ export async function getOwnedCollection(
   if (!collection || collection.userId !== userId) return null;
   return collection;
 }
+
+/**
+ * Čtení svazku: vlastník, veřejný svazek, nebo člen workspace, do kterého je
+ * svazek zařazen (sdílené workspacy). Změny dál smí jen vlastník
+ * (`getOwnedCollection` / kontrola `userId` v zápisových routách).
+ */
+export async function canReadCollection(
+  userId: string,
+  collection: { id: string; userId: string; isPublic: boolean },
+): Promise<boolean> {
+  if (collection.userId === userId || collection.isPublic) return true;
+  const shared = await prisma.workspaceItem.findFirst({
+    where: { collectionId: collection.id, workspace: { members: { some: { userId } } } },
+    select: { id: true },
+  });
+  return shared !== null;
+}
+
+/**
+ * Čtení stránky (a jejího dokumentu): vlastník, veřejná stránka, čitelný svazek,
+ * nebo stránka sdílená přímo do workspace, jehož je uživatel členem.
+ * Archivované („smazané") stránky vidí jen vlastník.
+ */
+export async function canReadPage(
+  userId: string,
+  page: {
+    id: string;
+    userId: string;
+    isPublic: boolean;
+    status: string;
+    collectionId: string | null;
+  },
+): Promise<boolean> {
+  if (page.userId === userId) return true;
+  if (page.status === 'archived') return false;
+  if (page.isPublic) return true;
+  if (page.collectionId) {
+    const collection = await prisma.collection.findUnique({
+      where: { id: page.collectionId },
+      select: { id: true, userId: true, isPublic: true },
+    });
+    if (collection && (await canReadCollection(userId, collection))) return true;
+  }
+  const shared = await prisma.workspaceItem.findFirst({
+    where: { pageId: page.id, workspace: { members: { some: { userId } } } },
+    select: { id: true },
+  });
+  return shared !== null;
+}

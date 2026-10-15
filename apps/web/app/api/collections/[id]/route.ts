@@ -4,6 +4,7 @@ import { generateUniqueSlug, validateSlug } from '@/lib/infrastructure/slugify';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { PUBLIC_WORKSPACE_ID } from '@/lib/infrastructure/workspace';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
+import { canReadCollection } from '@/lib/infrastructure/authz';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -35,11 +36,13 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     },
   });
 
-  if (!collection || collection.userId !== userId) {
+  // Číst smí i členové sdíleného workspace a kdokoli u veřejného svazku;
+  // canEdit řekne UI, zda nabízet úpravy (zápisové routy kontrolují vlastníka).
+  if (!collection || !(await canReadCollection(userId, collection))) {
     return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json(collection);
+  return NextResponse.json({ ...collection, canEdit: collection.userId === userId });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {

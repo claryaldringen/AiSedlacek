@@ -4,6 +4,7 @@ import { createVersion } from '@/lib/infrastructure/versioning';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { isTranslationLanguage } from '@ai-sedlacek/shared';
+import { canReadPage } from '@/lib/infrastructure/authz';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -20,14 +21,21 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     where: { id },
     // rawResponse u dávkového OCR obsahuje výstup celé dávky (i dalších stránek).
     omit: { rawResponse: true },
-    include: { translations: true, glossary: true, page: { select: { userId: true } } },
+    include: {
+      translations: true,
+      glossary: true,
+      page: {
+        select: { id: true, userId: true, isPublic: true, status: true, collectionId: true },
+      },
+    },
   });
 
-  if (!doc || doc.page.userId !== userId) {
+  // Číst smí i členové sdíleného workspace; PATCH/DELETE níže dál jen vlastník.
+  if (!doc || !(await canReadPage(userId, doc.page))) {
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json(doc);
+  return NextResponse.json({ ...doc, canEdit: doc.page.userId === userId });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {
