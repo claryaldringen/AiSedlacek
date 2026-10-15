@@ -7,9 +7,16 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     processingJob: { update: vi.fn() },
     document: { findUnique: vi.fn(), update: vi.fn() },
-    translation: { upsert: vi.fn() },
+    translation: {
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    documentVersion: { findFirst: vi.fn(), create: vi.fn() },
     collection: { findUnique: vi.fn(), update: vi.fn() },
     page: { findMany: vi.fn() },
+    $transaction: vi.fn(),
   },
   createMessage: vi.fn(),
   deductTokensIfSufficient: vi.fn(),
@@ -31,6 +38,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.prisma.processingJob.update.mockResolvedValue({});
   mocks.prisma.translation.upsert.mockResolvedValue({});
+  // Retranslace ukládá v transakci – klientem transakce je tady přímo mock prismy
+  mocks.prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+    fn(mocks.prisma),
+  );
+  mocks.prisma.translation.findUnique.mockResolvedValue({ text: 'starý překlad' });
+  mocks.prisma.translation.updateMany.mockResolvedValue({ count: 1 });
+  mocks.prisma.translation.create.mockResolvedValue({});
+  mocks.prisma.documentVersion.findFirst.mockResolvedValue({ version: 2 });
+  mocks.prisma.documentVersion.create.mockResolvedValue({});
   mocks.prisma.document.update.mockResolvedValue({});
   mocks.prisma.collection.update.mockResolvedValue({});
   mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });

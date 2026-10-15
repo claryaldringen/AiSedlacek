@@ -18,13 +18,36 @@ export const MAX_RECLAIMS = 2;
 
 /**
  * Značka v `ProcessingJob.errors`, podle které se počítají pokusy. Schéma nemá
- * sloupec `attempts`; pole `errors` worker při dokončení jobu přepisuje, takže
- * značky v něm zůstanou jen u jobů, které nedoběhly.
+ * sloupec `attempts`, proto handlery při přepisu `errors` značky zachovávají
+ * (`errorsKeepingReclaimMarkers`) – jinak by se počítadlo vynulovalo.
  */
 export const RECLAIM_MARKER = 'Přerušeno restartem workeru';
 
+function isReclaimMarker(error: string): boolean {
+  return error.startsWith(RECLAIM_MARKER);
+}
+
 export function countReclaims(errors: string[]): number {
-  return errors.filter((e) => e.startsWith(RECLAIM_MARKER)).length;
+  return errors.filter(isReclaimMarker).length;
+}
+
+/**
+ * Hodnota pro přepis `ProcessingJob.errors`: značky reclaimu, které už v DB jsou,
+ * a za nimi chyby handleru. Prostý přepis (`data: { errors }`) by značky smazal –
+ * job, který opakovaně shazuje worker, by pak obešel MAX_RECLAIMS a vracel se do
+ * fronty donekonečna. Značky se čtou těsně před zápisem, aby se zachovala i ta,
+ * kterou mezitím přidal periodický sweep.
+ */
+export async function errorsKeepingReclaimMarkers(
+  jobId: string,
+  errors: string[],
+): Promise<string[]> {
+  const job = await prisma.processingJob.findUnique({
+    where: { id: jobId },
+    select: { errors: true },
+  });
+  const markers = (job?.errors ?? []).filter(isReclaimMarker);
+  return [...markers, ...errors];
 }
 
 /**

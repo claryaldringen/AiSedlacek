@@ -2,14 +2,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   prisma: {
-    processingJob: { findMany: vi.fn(), update: vi.fn() },
+    processingJob: { findMany: vi.fn(), update: vi.fn(), findUnique: vi.fn() },
     page: { updateMany: vi.fn() },
   },
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
 
-import { reclaimStuckJobs, countReclaims, MAX_RECLAIMS, RECLAIM_MARKER } from '../lib/reclaim';
+import {
+  reclaimStuckJobs,
+  countReclaims,
+  errorsKeepingReclaimMarkers,
+  MAX_RECLAIMS,
+  RECLAIM_MARKER,
+} from '../lib/reclaim';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -76,5 +82,28 @@ describe('reclaimStuckJobs (PERF-1)', () => {
   it('countReclaims počítá jen značky reclaimu, ne ostatní chyby', () => {
     expect(countReclaims(['Stránka p1: chyba', `${RECLAIM_MARKER} (obnova 1/2)`])).toBe(1);
     expect(countReclaims([])).toBe(0);
+  });
+});
+
+describe('errorsKeepingReclaimMarkers', () => {
+  it('k novým chybám přidá značky reclaimu z DB, ostatní staré chyby zahodí', async () => {
+    const marker = `${RECLAIM_MARKER} (obnova 1/${MAX_RECLAIMS})`;
+    mocks.prisma.processingJob.findUnique.mockResolvedValue({
+      errors: [marker, 'Stránka p1: stará chyba'],
+    });
+
+    const errors = await errorsKeepingReclaimMarkers('job-1', ['Stránka p2: nová chyba']);
+
+    expect(errors).toEqual([marker, 'Stránka p2: nová chyba']);
+    expect(countReclaims(errors)).toBe(1);
+    expect(mocks.prisma.processingJob.findUnique).toHaveBeenCalledWith({
+      where: { id: 'job-1' },
+      select: { errors: true },
+    });
+  });
+
+  it('bez jobu nebo značek vrátí jen nové chyby', async () => {
+    mocks.prisma.processingJob.findUnique.mockResolvedValue(null);
+    expect(await errorsKeepingReclaimMarkers('job-x', ['a'])).toEqual(['a']);
   });
 });

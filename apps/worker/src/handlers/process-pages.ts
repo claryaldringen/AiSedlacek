@@ -16,7 +16,7 @@ import {
   processWithClaudeBatch,
   processWithClaudeBatchCli,
 } from '@ai-sedlacek/ocr';
-import type { ProcessingMode } from '@ai-sedlacek/ocr';
+import type { OcrAttemptUsage, ProcessingMode } from '@ai-sedlacek/ocr';
 import {
   getPreviousPageContext,
   saveDocumentResult,
@@ -27,8 +27,15 @@ import {
   loadImage,
 } from '../lib/processing-helpers';
 import { resetUnfinishedPages, setPageStatus } from '../lib/page-status';
+import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 import { createBatches } from '../lib/batch-utils';
 import { OCR_MODEL, TEXT_MODEL } from '@ai-sedlacek/shared';
+
+/**
+ * Hláška pro stránku, jejíž obrázek nejde načíst z úložiště (chybí soubor apod.).
+ * Původní chyba (se serverovou cestou) jde jen do logu, ne k uživateli.
+ */
+export const IMAGE_UNREADABLE_MESSAGE = 'Obrázek stránky nelze načíst';
 
 interface PreparedPage {
   pageId: string;
@@ -108,6 +115,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     alreadyRegenerated: 0,
     deduped: 0,
     notFound: 0,
+    imageUnreadable: 0,
   };
 
   for (let i = 0; i < pageIds.length; i++) {
@@ -221,8 +229,22 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Set page to processing
     await setPageStatus(pageId, 'processing');
 
-    // Hash obrázku (buffer se hned zahodí, viz hashImage)
-    const { imageHash, fileSize } = await hashImage(page.imageUrl);
+    // Hash obrázku (buffer se hned zahodí, viz hashImage). Chybějící nebo
+    // nečitelný soubor skončí chybou jen u této stránky, ne celého jobu.
+    let imageHash: string;
+    let fileSize: number;
+    try {
+      ({ imageHash, fileSize } = await hashImage(page.imageUrl));
+    } catch (err) {
+      console.error(
+        `[Worker] Image of page ${pageId} cannot be read:`,
+        err instanceof Error ? err.message : err,
+      );
+      errors.push(`Stránka ${pageId}: ${IMAGE_UNREADABLE_MESSAGE}`);
+      await markPageFailed(pageId, page.document?.id ?? null, IMAGE_UNREADABLE_MESSAGE);
+      skippedCount.imageUnreadable++;
+      continue;
+    }
 
     // Dedup: existující dokument se stejným hashem – jen v rámci téhož uživatele
     // a jen z výstupu API (SEC-2, viz findDedupSourceDocument). Regenerace se
@@ -308,7 +330,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     skippedCount.alreadyTranslated +
     skippedCount.alreadyRegenerated +
     skippedCount.deduped +
-    skippedCount.notFound;
+    skippedCount.notFound +
+    skippedCount.imageUnreadable;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -325,9 +348,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
-        status: 'completed',
+        status: errors.length > 0 && errors.length >= total ? 'error' : 'completed',
         currentStep: 'Hotovo',
         completedPages: total,
+        errors: await errorsKeepingReclaimMarkers(jobId, errors),
       },
     });
     return;
@@ -363,7 +387,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         data: {
           status: 'error',
           completedPages: completed,
-          errors,
+          errors: await errorsKeepingReclaimMarkers(jobId, errors),
           currentStep: 'Nedostatečný kredit',
         },
       });
@@ -402,8 +426,21 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const images: { buffer: Buffer; pageId: string; index: number }[] = [];
     const sentPages: (typeof batch)[number][] = [];
     for (const p of batch) {
+      let original: Buffer;
       try {
-        const { buffer } = await prepareImage(await loadImage(p.imageUrl));
+        original = await loadImage(p.imageUrl);
+      } catch (err) {
+        // Chyba čtení nese serverovou cestu – do logu, uživateli obecná hláška
+        console.error(
+          `[Worker] Image of page ${p.pageId} cannot be read:`,
+          err instanceof Error ? err.message : err,
+        );
+        errors.push(`Stránka ${p.pageId}: ${IMAGE_UNREADABLE_MESSAGE}`);
+        await markPageFailed(p.pageId, p.existingDocId, IMAGE_UNREADABLE_MESSAGE);
+        continue;
+      }
+      try {
+        const { buffer } = await prepareImage(original);
         images.push({ buffer, pageId: p.pageId, index: sentPages.length });
         sentPages.push(p);
       } catch (err) {
@@ -459,21 +496,25 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         `[Worker] Batch ${batchIdx + 1} refused (${err.category ?? 'unknown'}):`,
         err.message,
       );
-      if (err.usage.inputTokens + err.usage.outputTokens > 0) {
-        await deductTokensIfSufficient(
-          userId,
-          err.usage.inputTokens,
-          err.usage.outputTokens,
-          `OCR dávka ${batchIdx + 1} – odmítnuto modelem${collectionLabel}`,
-          ocrBatchReferenceId(
-            jobId,
-            sentPages.map((p) => p.pageId),
-          ),
-          err.usage.model,
-        ).catch((billingErr) => {
-          console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
-        });
-      }
+      // Vlastní klíč odmítnutí: po reclaimu může tatáž sada stránek projít –
+      // se sdíleným klíčem by se úspěšné OCR „zaplatilo" cenou odmítnutí.
+      const refusedReferenceId = ocrBatchRefusedReferenceId(
+        jobId,
+        sentPages.map((p) => p.pageId),
+      );
+      const refusedDescription = `OCR dávka ${batchIdx + 1} – odmítnuto modelem${collectionLabel}`;
+      const logBillingError = (billingErr: unknown): void => {
+        console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
+      };
+      await deductRefusedAttempt(userId, err.usage, refusedDescription, refusedReferenceId).catch(
+        logBillingError,
+      );
+      await deductDeclinedAttempts(
+        userId,
+        err.declinedAttempts,
+        refusedDescription,
+        refusedReferenceId,
+      ).catch(logBillingError);
       for (const p of sentPages) {
         errors.push(`Stránka ${p.pageId}: ${err.message}`);
         await markPageFailed(p.pageId, p.existingDocId, err.message);
@@ -481,7 +522,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       completed += batch.length;
       await prisma.processingJob.update({
         where: { id: jobId },
-        data: { completedPages: completed, errors },
+        data: {
+          completedPages: completed,
+          errors: await errorsKeepingReclaimMarkers(jobId, errors),
+        },
       });
       continue;
     }
@@ -494,6 +538,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       outputTokens,
       truncated,
       parseProblem,
+      declinedAttempts,
     } = batchResult;
 
     // Odečet hned po získání usage, ještě před ukládáním – pád workeru mezi uložením
@@ -505,20 +550,25 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Chyba billingu (DB, opakované P2034 u Serializable transakce) nesmí
     // zahodit výstup dávky, který už je zaplacený Anthropicu: výsledky se
     // uloží a další dávky se zastaví stejně jako při nedostatku kreditu.
+    // Pokusy, které serverový fallback odmítl, top-level usage nepokrývá – účtují
+    // se zvlášť, každý svým modelem a s klíčem odvozeným od klíče dávky.
     let deductResult: { success: boolean };
     let billingFailed = false;
+    const batchDescription = `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`;
+    const batchReferenceId = ocrBatchReferenceId(
+      jobId,
+      sentPages.map((p) => p.pageId),
+    );
     try {
       deductResult = await deductTokensIfSufficient(
         userId,
         inputTokens,
         outputTokens,
-        `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`,
-        ocrBatchReferenceId(
-          jobId,
-          sentPages.map((p) => p.pageId),
-        ),
+        batchDescription,
+        batchReferenceId,
         model,
       );
+      await deductDeclinedAttempts(userId, declinedAttempts, batchDescription, batchReferenceId);
     } catch (err) {
       console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchIdx + 1}:`, err);
       deductResult = { success: false };
@@ -626,7 +676,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         data: {
           status: 'error',
           completedPages: completed,
-          errors,
+          errors: await errorsKeepingReclaimMarkers(jobId, errors),
           currentStep: billingFailed ? 'Odečet kreditu selhal' : 'Nedostatečný kredit',
         },
       });
@@ -663,7 +713,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       status: errors.length > 0 && errors.length >= total ? 'error' : 'completed',
       currentStep: 'Hotovo',
       completedPages: total,
-      errors,
+      errors: await errorsKeepingReclaimMarkers(jobId, errors),
     },
   });
 }
@@ -688,12 +738,72 @@ async function markPageFailed(
  * stejný klíč (idempotentní odečet) a jiná sada jiný.
  */
 export function ocrBatchReferenceId(jobId: string, pageIds: string[]): string {
-  const digest = crypto
+  return `ocr-batch:${jobId}:${pageSetDigest(pageIds)}`;
+}
+
+/**
+ * `referenceId` odečtu za dávku odmítnutou bezpečnostním filtrem. Liší se od
+ * `ocrBatchReferenceId`, aby po reclaimu úspěšné OCR téže sady stránek nenarazilo
+ * na idempotentní klíč odmítnutí a neprošlo za cenu odmítnutého volání.
+ */
+export function ocrBatchRefusedReferenceId(jobId: string, pageIds: string[]): string {
+  return `ocr-batch-refused:${jobId}:${pageSetDigest(pageIds)}`;
+}
+
+/** `referenceId` i-tého odmítnutého pokusu serverového fallbacku dávky. */
+export function declinedAttemptReferenceId(batchReferenceId: string, index: number): string {
+  return `${batchReferenceId}:declined:${index}`;
+}
+
+function pageSetDigest(pageIds: string[]): string {
+  return crypto
     .createHash('sha256')
     .update([...pageIds].sort().join(','))
     .digest('hex')
     .slice(0, 32);
-  return `ocr-batch:${jobId}:${digest}`;
+}
+
+/**
+ * Naúčtuje odmítnutý pokus. Odmítnutí uprostřed výstupu (už vygenerované tokeny)
+ * Anthropic účtuje běžnou sazbou; zda účtuje odmítnutí před výstupem, závisí na
+ * kategorii – takové se proto konzervativně vůči uživateli neúčtuje.
+ */
+async function deductRefusedAttempt(
+  userId: string,
+  attempt: OcrAttemptUsage,
+  description: string,
+  referenceId: string,
+): Promise<void> {
+  if (attempt.outputTokens === 0) return;
+  await deductTokensIfSufficient(
+    userId,
+    attempt.inputTokens,
+    attempt.outputTokens,
+    description,
+    referenceId,
+    attempt.model,
+  );
+}
+
+/**
+ * Naúčtuje pokusy, které v řetězci serverového fallbacku odmítl předchozí model
+ * (top-level usage je nepokrývá). Každý zvlášť, sazbou svého modelu a s klíčem
+ * odvozeným od klíče dávky – opakované zpracování po restartu neúčtuje dvakrát.
+ */
+async function deductDeclinedAttempts(
+  userId: string,
+  attempts: OcrAttemptUsage[],
+  description: string,
+  batchReferenceId: string,
+): Promise<void> {
+  for (const [i, attempt] of attempts.entries()) {
+    await deductRefusedAttempt(
+      userId,
+      attempt,
+      `${description} – odmítnutý pokus (${attempt.model})`,
+      declinedAttemptReferenceId(batchReferenceId, i),
+    );
+  }
 }
 
 /**
@@ -749,6 +859,31 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     messages: [{ role: 'user', content: prompt }],
   });
 
+  // Odečet hned po volání (BIL-3) – spotřeba vznikla, i když se výsledek neuloží.
+  // Deterministický referenceId (bez Date.now()) – opakovaný běh neúčtuje dvakrát.
+  await deductTokensIfSufficient(
+    userId,
+    response.inputTokens,
+    response.outputTokens,
+    `Překlad dokumentu ${doc.id}${collectionLabel}`,
+    `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
+    response.model,
+  ).catch((err) => {
+    // Chybu odečtu nepolykat potichu (BIL-3)
+    console.error(
+      `[Worker] Token deduction failed for translation of document ${doc.id}:`,
+      err instanceof Error ? err.message : err,
+    );
+  });
+
+  // Useknutý (max_tokens) nebo odmítnutý výstup se neukládá – jinak by se jako
+  // překlad uložil i surový neúplný JSON (`{"translation": "…`).
+  if (response.stopReason !== 'end_turn') {
+    throw new Error(
+      `Model nevrátil kompletní překlad (${response.stopReason ?? 'neznámý důvod'}) – překlad se neuložil`,
+    );
+  }
+
   const text = response.text;
 
   let parsed: {
@@ -801,22 +936,5 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
     where: { id: doc.id },
     data: { updatedAt: new Date() },
     select: { id: true },
-  });
-
-  // Deduct tokens. Deterministic referenceId (no Date.now()) keeps a re-run
-  // idempotent instead of billing the same translation again.
-  await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Překlad dokumentu ${doc.id}${collectionLabel}`,
-    `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
-    response.model,
-  ).catch((err) => {
-    // Chybu odečtu nepolykat potichu (BIL-3)
-    console.error(
-      `[Worker] Token deduction failed for translation of document ${doc.id}:`,
-      err instanceof Error ? err.message : err,
-    );
   });
 }

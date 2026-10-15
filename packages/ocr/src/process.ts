@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type {
+  BetaFallbackMessageIterationUsage,
   BetaMessage,
+  BetaMessageIterationUsage,
   BetaMessageParam,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import {
@@ -58,12 +60,24 @@ export function batchMaxTokens(pageCount: number): number {
   );
 }
 
+/** Spotřeba jednoho pokusu volání (model, který ho skutečně zpracoval). */
+export interface OcrAttemptUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 /** Model požadavek odmítl (safety klasifikátor) a odmítl ho i fallback model. */
 export class OcrRefusalError extends Error {
   constructor(
     readonly category: string | null,
-    /** Spotřeba odmítnutého volání (částečný výstup se účtuje). */
-    readonly usage: { model: string; inputTokens: number; outputTokens: number },
+    /**
+     * Spotřeba pokusu, jehož odmítnutí API vrátilo (top-level `usage` – poslední
+     * pokus řetězce). Částečný výstup se účtuje.
+     */
+    readonly usage: OcrAttemptUsage,
+    /** Dřívější odmítnuté pokusy řetězce fallbacku – viz `declinedAttempts()`. */
+    readonly declinedAttempts: OcrAttemptUsage[] = [],
   ) {
     super(
       `Model odmítl stránku zpracovat (bezpečnostní filtr${category ? `: ${category}` : ''}). ` +
@@ -71,6 +85,43 @@ export class OcrRefusalError extends Error {
     );
     this.name = 'OcrRefusalError';
   }
+}
+
+/**
+ * Odmítnuté pokusy serverového fallbacku, které top-level `usage` nepokrývá.
+ *
+ * Top-level `usage` obsahuje jen pokus, který vrátil zprávu; per-pokus pravdou
+ * je `usage.iterations`. Odmítnutý pokus je položka `message` (`model: null`
+ * = požadovaný model), pokus fallback modelu, jehož výstup je vrácená zpráva,
+ * je `fallback_message`. Vrácenou zprávu vždy vytvoří poslední pokus řetězce –
+ * i když odmítnou všechny modely (vrátí se odmítnutí posledního) nebo když se
+ * fallback pokus kvůli limitům vůbec neprovede (vrátí se předchozí odmítnutí).
+ * OCR nepoužívá serverové nástroje, takže iterace jsou jen pokusy řetězce:
+ * všechny položky kromě poslední jsou odmítnuté pokusy, poslední odpovídá
+ * top-level `usage`. Platí pro úspěch i pro odmítnutí celého řetězce.
+ */
+export function declinedAttempts(message: BetaMessage): OcrAttemptUsage[] {
+  const attempts = (message.usage.iterations ?? []).filter(
+    (it): it is BetaMessageIterationUsage | BetaFallbackMessageIterationUsage =>
+      it.type === 'message' || it.type === 'fallback_message',
+  );
+  const last = attempts.at(-1);
+  if (
+    last &&
+    (last.input_tokens !== message.usage.input_tokens ||
+      last.output_tokens !== message.usage.output_tokens)
+  ) {
+    // Jen pro diagnostiku – kdyby API přestalo dodržovat popsanou sémantiku.
+    console.warn(
+      '[Claude] usage.iterations: poslední pokus neodpovídá top-level usage',
+      JSON.stringify({ iterations: message.usage.iterations, usage: message.usage }),
+    );
+  }
+  return attempts.slice(0, -1).map((it) => ({
+    model: it.model ?? OCR_MODEL,
+    inputTokens: it.input_tokens,
+    outputTokens: it.output_tokens,
+  }));
 }
 
 /** Text odpovědi – jen textové bloky (odpověď Opus 5.5 začíná bloky `thinking`). */
@@ -83,14 +134,15 @@ function responseText(message: BetaMessage): string {
  * (řídí se `effort`) a odmítá `temperature`. Při odmítnutí bezpečnostním
  * klasifikátorem (např. středověké herbáře a receptáře mohou narazit na `bio`)
  * API samo zopakuje požadavek na doporučeném fallback modelu – `finalMessage.model`
- * pak nese model, který skutečně odpověděl (podle něj se účtuje).
+ * pak nese model, který skutečně odpověděl (podle něj se účtuje top-level usage),
+ * a spotřebu odmítnutých pokusů vrací `declinedAttempts` (účtuje je volající).
  */
 async function streamOcrRequest(params: {
   system: string;
   messages: BetaMessageParam[];
   maxTokens: number;
   onText: (text: string) => void;
-}): Promise<{ message: BetaMessage; text: string }> {
+}): Promise<{ message: BetaMessage; text: string; declinedAttempts: OcrAttemptUsage[] }> {
   const client = new Anthropic();
   let streamed = '';
   const stream = client.beta.messages.stream({
@@ -107,15 +159,20 @@ async function streamOcrRequest(params: {
     params.onText(text);
   });
   const message = await stream.finalMessage();
+  const declined = declinedAttempts(message);
 
   if (message.stop_reason === 'refusal') {
-    throw new OcrRefusalError(message.stop_details?.category ?? null, {
-      model: message.model,
-      inputTokens: message.usage.input_tokens,
-      outputTokens: message.usage.output_tokens,
-    });
+    throw new OcrRefusalError(
+      message.stop_details?.category ?? null,
+      {
+        model: message.model,
+        inputTokens: message.usage.input_tokens,
+        outputTokens: message.usage.output_tokens,
+      },
+      declined,
+    );
   }
-  return { message, text: streamed || responseText(message) };
+  return { message, text: streamed || responseText(message), declinedAttempts: declined };
 }
 
 export async function processWithClaude(
@@ -133,6 +190,8 @@ export async function processWithClaude(
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** Odmítnuté pokusy serverového fallbacku (účtují se zvlášť, viz `declinedAttempts()`). */
+  declinedAttempts: OcrAttemptUsage[];
 }> {
   const startTime = Date.now();
   const { buffer: imageToSend, mediaType } = await prepareImage(image);
@@ -140,7 +199,11 @@ export async function processWithClaude(
   const estimated = estimatedOutputTokens ?? 1500;
   let streamedLength = 0;
 
-  const { message: finalMessage, text } = await streamOcrRequest({
+  const {
+    message: finalMessage,
+    text,
+    declinedAttempts: declined,
+  } = await streamOcrRequest({
     // Thinking (vždy zapnutý) se počítá do max_tokens – rezerva navíc k odpovědi.
     maxTokens: THINKING_TOKENS_RESERVE + BATCH_OUTPUT_TOKENS_PER_PAGE,
     system: mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT,
@@ -196,6 +259,7 @@ export async function processWithClaude(
     model: finalMessage.model,
     inputTokens: finalMessage.usage.input_tokens,
     outputTokens: finalMessage.usage.output_tokens,
+    declinedAttempts: declined,
   };
 }
 
@@ -222,6 +286,8 @@ export async function processWithClaudeBatch(
   truncated: boolean;
   /** Proč výstup nešlo jednoznačně přiřadit ke stránkám (pak `results` = []), jinak null. */
   parseProblem: string | null;
+  /** Odmítnuté pokusy serverového fallbacku (účtují se zvlášť, viz `declinedAttempts()`). */
+  declinedAttempts: OcrAttemptUsage[];
 }> {
   const startTime = Date.now();
 
@@ -269,7 +335,11 @@ export async function processWithClaudeBatch(
   let streamedLength = 0;
   const maxTokens = batchMaxTokens(images.length);
 
-  const { message: finalMessage, text } = await streamOcrRequest({
+  const {
+    message: finalMessage,
+    text,
+    declinedAttempts: declined,
+  } = await streamOcrRequest({
     maxTokens,
     system:
       (options?.mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) +
@@ -315,5 +385,6 @@ export async function processWithClaudeBatch(
     stopReason: finalMessage.stop_reason ?? null,
     truncated,
     parseProblem,
+    declinedAttempts: declined,
   };
 }

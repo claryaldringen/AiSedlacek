@@ -116,5 +116,125 @@ describe('OCR request on Opus 5.5', () => {
       inputTokens: 3000,
       outputTokens: 12,
     });
+    // Bez usage.iterations (žádný fallback neproběhl) nejsou další pokusy
+    expect((err as OcrRefusalError).declinedAttempts).toEqual([]);
+  });
+});
+
+// Serverový fallback: top-level usage pokrývá jen pokus, který vrátil zprávu –
+// spotřebu odmítnutých pokusů nese usage.iterations.
+describe('server-side fallback – usage of declined attempts', () => {
+  function iteration(
+    type: 'message' | 'fallback_message',
+    model: string | null,
+    input: number,
+    output: number,
+  ): Record<string, unknown> {
+    return {
+      type,
+      model,
+      input_tokens: input,
+      output_tokens: output,
+      cache_creation: null,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
+  }
+
+  it('returns the declined attempt of the requested model next to the fallback answer', async () => {
+    const jsonl = JSON.stringify({ imageIndex: 0, ...JSON.parse(OCR_JSON) });
+    mocks.stream.mockReturnValue(
+      fakeStream(
+        message({
+          model: 'claude-opus-5',
+          usage: {
+            input_tokens: 3100,
+            output_tokens: 2500,
+            iterations: [
+              // Požadovaný model odmítl uprostřed výstupu (model: null = požadovaný)
+              iteration('message', null, 3000, 420),
+              iteration('fallback_message', 'claude-opus-5', 3100, 2500),
+            ],
+          },
+          content: [
+            { type: 'text', text: 'částečný výstup' },
+            {
+              type: 'fallback',
+              from: { model: 'claude-opus-5-5' },
+              to: { model: 'claude-opus-5' },
+              trigger: { type: 'refusal', category: 'bio' },
+            },
+            { type: 'text', text: jsonl },
+          ],
+        }),
+        [jsonl],
+      ),
+    );
+
+    const res = await processWithClaudeBatch(
+      [{ buffer: Buffer.from('a'), pageId: 'p1', index: 0 }],
+      'Přepiš.',
+    );
+
+    // Top-level usage = odpověď fallback modelu
+    expect(res.model).toBe('claude-opus-5');
+    expect([res.inputTokens, res.outputTokens]).toEqual([3100, 2500]);
+    expect(res.results).toHaveLength(1);
+    // Odmítnutý pokus zvlášť, s požadovaným modelem
+    expect(res.declinedAttempts).toEqual([
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420 },
+    ]);
+  });
+
+  it('without fallback there are no declined attempts', async () => {
+    mocks.stream.mockReturnValue(
+      fakeStream(
+        message({
+          usage: {
+            input_tokens: 3000,
+            output_tokens: 2500,
+            iterations: [iteration('message', null, 3000, 2500)],
+          },
+        }),
+      ),
+    );
+
+    const res = await processWithClaude(Buffer.from('x'), 'Přepiš text.');
+
+    expect(res.declinedAttempts).toEqual([]);
+  });
+
+  it('refusal of the whole chain: usage = last attempt, earlier attempts as declined', async () => {
+    mocks.stream.mockReturnValue(
+      fakeStream(
+        message({
+          model: 'claude-opus-5',
+          stop_reason: 'refusal',
+          stop_details: { type: 'refusal', category: 'bio', explanation: null },
+          usage: {
+            input_tokens: 3100,
+            output_tokens: 30,
+            iterations: [
+              iteration('message', null, 3000, 0),
+              iteration('fallback_message', 'claude-opus-5', 3100, 30),
+            ],
+          },
+          content: [],
+        }),
+      ),
+    );
+
+    const err = await processWithClaudeBatch(
+      [{ buffer: Buffer.from('a'), pageId: 'p1', index: 0 }],
+      'Přepiš.',
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(OcrRefusalError);
+    const refusal = err as OcrRefusalError;
+    expect(refusal.usage).toEqual({ model: 'claude-opus-5', inputTokens: 3100, outputTokens: 30 });
+    // Odmítnutí před výstupem se vrací taky – o účtování rozhoduje volající
+    expect(refusal.declinedAttempts).toEqual([
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0 },
+    ]);
   });
 });

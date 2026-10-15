@@ -17,4 +17,5 @@ export {
   processWithClaudeBatch,
   OcrRefusalError,
 } from './process';
+export type { OcrAttemptUsage } from './process';
 export { processWithClaudeCli, processWithClaudeBatchCli } from './process-cli';

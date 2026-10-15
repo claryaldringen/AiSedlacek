@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   processWithClaudeBatch: vi.fn(),
   prepareImage: vi.fn(),
   storageRead: vi.fn(),
+  createMessage: vi.fn(),
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
@@ -38,10 +39,16 @@ vi.mock('@ai-sedlacek/ocr', async (importOriginal) => ({
   processWithClaudeBatchCli: vi.fn(),
 }));
 vi.mock('../lib/storage', () => ({ getStorage: () => ({ read: mocks.storageRead }) }));
-vi.mock('../lib/llm', () => ({ isCliMode: () => false, createMessage: vi.fn() }));
+vi.mock('../lib/llm', () => ({ isCliMode: () => false, createMessage: mocks.createMessage }));
 
-import { processPages, ocrBatchReferenceId } from '../handlers/process-pages';
+import {
+  processPages,
+  ocrBatchReferenceId,
+  ocrBatchRefusedReferenceId,
+  IMAGE_UNREADABLE_MESSAGE,
+} from '../handlers/process-pages';
 import { OcrRefusalError } from '@ai-sedlacek/ocr';
+import { RECLAIM_MARKER } from '../lib/reclaim';
 
 // ── Fixtures ─────────────────────────────────────────────────
 interface PageFixture {
@@ -142,6 +149,7 @@ beforeEach(() => {
     inputTokens: 1000,
     outputTokens: 500,
     stopReason: 'end_turn',
+    declinedAttempts: [],
   }));
 });
 
@@ -290,6 +298,7 @@ describe('processPages – useknutý výstup dávky (LLM-2)', () => {
       inputTokens: 3000,
       outputTokens: 48000,
       stopReason: 'max_tokens',
+      declinedAttempts: [],
       truncated: true,
     });
 
@@ -367,6 +376,7 @@ describe('processPages – archivace během zpracování', () => {
       inputTokens: 3000,
       outputTokens: 2000,
       stopReason: 'end_turn',
+      declinedAttempts: [],
       truncated: false,
     });
 
@@ -449,6 +459,7 @@ describe('processPages – nejednoznačné přiřazení výsledků dávky (LLM-3
       inputTokens: 1000,
       outputTokens: 500,
       stopReason: 'end_turn',
+      declinedAttempts: [],
       truncated: false,
       parseProblem: problem,
     });
@@ -670,6 +681,7 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
       inputTokens: 1000,
       outputTokens: 10,
       stopReason: 'end_turn',
+      declinedAttempts: [],
       truncated: false,
       parseProblem: null,
     });
@@ -715,5 +727,285 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
       where: { id: { in: ['p1'] }, status: 'processing' },
       data: { status: 'pending', errorMessage: null },
     });
+  });
+});
+
+// ── Serverový fallback: odmítnuté pokusy (review 2026-10, nález 1) ──
+describe('processPages – účtování odmítnutých pokusů serverového fallbacku', () => {
+  it('odmítnutý pokus naúčtuje zvlášť jeho modelem; odmítnutí před výstupem ne', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      results: [{ index: 0, result: ocrResult(0) }],
+      rawResponse: '{}',
+      processingTimeMs: 1000,
+      model: 'claude-opus-5',
+      inputTokens: 3100,
+      outputTokens: 2500,
+      stopReason: 'end_turn',
+      truncated: false,
+      parseProblem: null,
+      declinedAttempts: [
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 420 },
+        { model: 'claude-opus-4-8', inputTokens: 3050, outputTokens: 0 },
+      ],
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const batchRef = ocrBatchReferenceId('job-1', ['p1']);
+    const calls = mocks.deductTokensIfSufficient.mock.calls.map((c) => [c[1], c[2], c[4], c[5]]);
+    expect(calls).toEqual([
+      // Hlavní odečet = top-level usage s modelem, který odpověděl
+      [3100, 2500, batchRef, 'claude-opus-5'],
+      // Odmítnutý pokus uprostřed výstupu – vlastní model i klíč
+      [3000, 420, `${batchRef}:declined:0`, 'claude-opus-5-5'],
+      // Pokus s 0 výstupními tokeny (odmítnutí před výstupem) se neúčtuje
+    ]);
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('odmítnutí celého řetězce: poslední pokus i dřívější odmítnuté pokusy s klíčem odmítnutí', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockRejectedValue(
+      new OcrRefusalError('bio', { model: 'claude-opus-5', inputTokens: 3100, outputTokens: 30 }, [
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 15 },
+      ]),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const refusedRef = ocrBatchRefusedReferenceId('job-1', ['p1']);
+    const calls = mocks.deductTokensIfSufficient.mock.calls.map((c) => [c[1], c[2], c[4], c[5]]);
+    expect(calls).toEqual([
+      [3100, 30, refusedRef, 'claude-opus-5'],
+      [3000, 15, `${refusedRef}:declined:0`, 'claude-opus-5-5'],
+    ]);
+    expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+  });
+
+  it('odmítnutí před výstupem (0 výstupních tokenů) se neúčtuje', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockRejectedValue(
+      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0 }),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.deductTokensIfSufficient).not.toHaveBeenCalled();
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: expect.stringContaining('odmítl') },
+    });
+  });
+});
+
+// ── Odlišný klíč odmítnuté dávky (review 2026-10, nález 2) ──
+describe('processPages – referenceId odmítnuté dávky', () => {
+  it('po reclaimu úspěšné OCR téže sady stránek nesdílí klíč s odmítnutím', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockRejectedValueOnce(
+      new OcrRefusalError('bio', { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 40 }),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+    const refusedKey = mocks.deductTokensIfSufficient.mock.calls[0]![4] as string;
+
+    // Reclaim téhož jobu – tentokrát model stránku zpracuje
+    mocks.deductTokensIfSufficient.mockClear();
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+    const successKey = mocks.deductTokensIfSufficient.mock.calls[0]![4] as string;
+
+    expect(refusedKey).toBe(ocrBatchRefusedReferenceId('job-1', ['p1']));
+    expect(successKey).toBe(ocrBatchReferenceId('job-1', ['p1']));
+    expect(successKey).not.toBe(refusedKey);
+    expect(ocrBatchRefusedReferenceId('job-1', ['p1'])).toMatch(
+      /^ocr-batch-refused:job-1:[0-9a-f]{32}$/,
+    );
+  });
+});
+
+// ── Chybějící soubor obrázku (review 2026-10, nález 5) ──
+describe('processPages – chybějící soubor obrázku', () => {
+  function enoent(path: string): Error {
+    return Object.assign(
+      new Error(`ENOENT: no such file or directory, open '/srv/uploads/${path}'`),
+      { code: 'ENOENT' },
+    );
+  }
+
+  it('v přípravě: stránka skončí chybou bez serverové cesty, ostatní se zpracují', async () => {
+    addPage('p1');
+    addPage('p2');
+    mocks.storageRead.mockImplementation(async (path: string) => {
+      if (path === 'p1.jpg') throw enoent(path);
+      return Buffer.from(`image:${path}`);
+    });
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1', 'p2'] })).resolves.toBeUndefined();
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: IMAGE_UNREADABLE_MESSAGE },
+    });
+    // Do API jde jen p2
+    const images = mocks.processWithClaudeBatch.mock.calls[0]![0] as { pageId: string }[];
+    expect(images.map((i) => i.pageId)).toEqual(['p2']);
+    expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p2');
+    // Job doběhne (ne vše selhalo) a chyba stránky je v errors bez cesty
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.status).toBe('completed');
+    expect(lastJobUpdate.data.errors).toEqual([`Stránka p1: ${IMAGE_UNREADABLE_MESSAGE}`]);
+    expect(JSON.stringify(lastJobUpdate.data.errors)).not.toContain('/srv/');
+  });
+
+  it('jediná stránka s chybějícím obrázkem: job skončí chybou, nespadne', async () => {
+    addPage('p1');
+    mocks.storageRead.mockRejectedValue(enoent('p1.jpg'));
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'error',
+      errors: [`Stránka p1: ${IMAGE_UNREADABLE_MESSAGE}`],
+    });
+  });
+
+  it('soubor zmizí mezi přípravou a dávkou: stránka skončí chybou bez serverové cesty', async () => {
+    addPage('p1');
+    addPage('p2');
+    let reads = 0;
+    mocks.storageRead.mockImplementation(async (path: string) => {
+      // příprava čte p1, p2; dávka pak p1 (zmizel) a p2
+      reads++;
+      if (path === 'p1.jpg' && reads > 2) throw enoent(path);
+      return Buffer.from(`image:${path}`);
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2'] });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: IMAGE_UNREADABLE_MESSAGE },
+    });
+    const images = mocks.processWithClaudeBatch.mock.calls[0]![0] as { pageId: string }[];
+    expect(images.map((i) => i.pageId)).toEqual(['p2']);
+  });
+});
+
+// ── Značky reclaimu v errors (review 2026-10, nález 6) ──
+describe('processPages – přepis errors zachová značky reclaimu', () => {
+  const marker = `${RECLAIM_MARKER} (obnova 1/2)`;
+
+  it('mezikrokový i závěrečný zápis errors značky ponechá', async () => {
+    // Max. 2 stránky na dávku → [p1, p2] (odmítnuto), [p3]
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+    mocks.prisma.processingJob.findUnique.mockResolvedValue({
+      status: 'running',
+      errors: [marker, 'Stránka p9: stará chyba z přerušeného běhu'],
+    });
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch
+      .mockRejectedValueOnce(
+        new OcrRefusalError('bio', {
+          model: 'claude-opus-5-5',
+          inputTokens: 3000,
+          outputTokens: 40,
+        }),
+      )
+      .mockImplementation(ocrDefault);
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+
+    const errorWrites = mocks.prisma.processingJob.update.mock.calls
+      .map((c) => c[0].data.errors as string[] | undefined)
+      .filter((e): e is string[] => Array.isArray(e));
+    // mezikrokový zápis po odmítnuté dávce + závěrečný
+    expect(errorWrites).toHaveLength(2);
+    for (const errors of errorWrites) {
+      expect(errors[0]).toBe(marker);
+      expect(errors).toEqual(expect.arrayContaining([expect.stringContaining('Stránka p1:')]));
+      // Staré chyby (ne značky) se nepřenášejí
+      expect(errors).not.toContain('Stránka p9: stará chyba z přerušeného běhu');
+    }
+  });
+
+  it('zápis při nedostatku kreditu značky ponechá', async () => {
+    addPage('p1');
+    mocks.checkBalance.mockResolvedValue({ balance: 0, sufficient: false });
+    mocks.prisma.processingJob.findUnique.mockResolvedValue({
+      status: 'running',
+      errors: [marker],
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.errors).toEqual([marker, 'Nedostatečný kredit pro zpracování']);
+  });
+});
+
+// ── stop_reason u překladu existujícího dokumentu (review 2026-10, nález 3) ──
+describe('processPages – překlad existujícího dokumentu do dalšího jazyka', () => {
+  beforeEach(() => {
+    addPage('p1', {
+      document: {
+        id: 'doc-1',
+        context: 'kontext',
+        translations: [{ language: 'en', text: 'English translation' }],
+        glossary: [],
+      },
+    });
+  });
+
+  it('useknutý výstup (max_tokens) neuloží, ale naúčtuje', async () => {
+    mocks.createMessage.mockResolvedValue({
+      text: '{"translation": "useknutý překl',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 1200,
+      outputTokens: 8192,
+      stopReason: 'max_tokens',
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.translation.upsert).not.toHaveBeenCalled();
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledWith(
+      'user-1',
+      1200,
+      8192,
+      expect.any(String),
+      'translate-doc-job-1-doc-1-cs',
+      'claude-sonnet-4-6',
+    );
+    // Stránka má dokument → zůstane done, chyba v errorMessage
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'done', errorMessage: expect.stringContaining('nevrátil kompletní překlad') },
+    });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.errors).toEqual([
+      expect.stringContaining('nevrátil kompletní překlad'),
+    ]);
+  });
+
+  it('kompletní výstup uloží', async () => {
+    mocks.createMessage.mockResolvedValue({
+      text: '{"translation": "Český překlad", "context": "kontext", "glossary": []}',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 1200,
+      outputTokens: 300,
+      stopReason: 'end_turn',
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.translation.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.translation.upsert.mock.calls[0]![0].create.text).toBe('Český překlad');
+    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
   });
 });
