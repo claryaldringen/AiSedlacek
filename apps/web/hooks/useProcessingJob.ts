@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import type { PageItem } from '@/components/FileGrid';
 import type { Collection } from '@/components/Sidebar';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import { jobErrorMessageKey } from '@/lib/job-errors';
 
 interface UseProcessingJobOptions {
   pages: PageItem[];
@@ -33,6 +35,8 @@ interface JobStatusResponse {
   currentPageId: string | null;
   currentStep: string | null;
   errors: string[];
+  /** Kód chyby jobu (JobErrorCode) – UI podle něj ukáže lokalizovanou hlášku. */
+  errorCode?: string | null;
   pageIds: string[];
   progress: number;
   donePages: string[];
@@ -47,6 +51,7 @@ export function useProcessingJob({
   loadingPages,
   locale,
 }: UseProcessingJobOptions): UseProcessingJobReturn {
+  const tWorkspace = useTranslations('workspace');
   const [processingPageIds, setProcessingPageIds] = useState<Set<string>>(new Set());
   const [processingStep, setProcessingStep] = useState<string | undefined>(undefined);
   const [processingProgress, setProcessingProgress] = useState<number | undefined>(undefined);
@@ -159,7 +164,13 @@ export function useProcessingJob({
               ),
             );
           } else if (data.status === 'error') {
-            const errorMsg = data.errors.length > 0 ? data.errors.join('; ') : 'Chyba zpracování';
+            // Známý kód (nedostatek kreditu) → hláška v jazyce UI s výzvou k dobití
+            const key = jobErrorMessageKey(data.errorCode);
+            const errorMsg = key
+              ? tWorkspace(key)
+              : data.errors.length > 0
+                ? data.errors.join('; ')
+                : 'Chyba zpracování';
             setError(errorMsg);
             setProcessingStep('Chyba');
           }
@@ -180,7 +191,7 @@ export function useProcessingJob({
         return false;
       }
     },
-    [setPages, refreshPage],
+    [setPages, refreshPage, tWorkspace],
   );
 
   /** Start polling for a job */

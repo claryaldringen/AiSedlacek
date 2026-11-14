@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chargeForUsage, formatCzk, documentCharge } from '../pricing';
+import { chargeForUsage, formatCzk, documentCharge, resultCharges } from '../pricing';
 import { creditsForUsage } from '@ai-sedlacek/shared';
 
 describe('UI pricing', () => {
@@ -45,6 +45,40 @@ describe('documentCharge (BIL-11)', () => {
       czk: 0,
       credits: 0,
       estimated: false,
+    });
+  });
+});
+
+describe('resultCharges – ceny v panelu metadat', () => {
+  const result = {
+    chargedCredits: null,
+    model: 'claude-opus-5-5',
+    inputTokens: 1000,
+    outputTokens: 500,
+    chatModel: 'claude-sonnet-4-6',
+    chatInputTokens: 100,
+    chatOutputTokens: 50,
+  };
+
+  it('chat se účtuje přesně – jeho cena se neoznačuje jako odhad', () => {
+    const charges = resultCharges(result, false);
+    expect(charges.chat).toMatchObject({ credits: 966, estimated: false });
+    // Starý dokument bez záznamu odečtu je odhad, a tím i celkem
+    expect(charges.ocr).toMatchObject({ credits: 12_880, estimated: true });
+    expect(charges.total).toMatchObject({ credits: 12_880 + 966, estimated: true });
+  });
+
+  it('se skutečným odečtem dokumentu není odhad ani celkem', () => {
+    const charges = resultCharges({ ...result, chargedCredits: 12_000 }, false);
+    expect(charges.total).toMatchObject({ credits: 12_966, estimated: false });
+  });
+
+  it('cizí dokument (jen pro čtení) ceny nezobrazuje', () => {
+    expect(resultCharges(result, true)).toEqual({
+      ocr: null,
+      translation: null,
+      chat: null,
+      total: null,
     });
   });
 });

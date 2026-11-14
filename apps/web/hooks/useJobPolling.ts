@@ -5,6 +5,8 @@ import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface JobStatus {
   status: string;
+  /** Kód chyby jobu (JobErrorCode) pro lokalizovanou hlášku. */
+  errorCode?: string | null;
   currentStep?: string;
   completedPages?: number;
   totalPages?: number;
@@ -24,6 +26,8 @@ export function useJobPolling(): {
       intervalMs?: number;
       onStep?: (step: string) => void;
       onProgress?: (completed: number, total: number) => void;
+      /** Kód chyby jobu, když skončí `error` (např. `insufficient_credit`). */
+      onErrorCode?: (errorCode: string | null) => void;
     },
   ) => Promise<JobOutcome>;
   stopPolling: () => void;
@@ -57,6 +61,7 @@ export function useJobPolling(): {
         intervalMs?: number;
         onStep?: (step: string) => void;
         onProgress?: (completed: number, total: number) => void;
+        onErrorCode?: (errorCode: string | null) => void;
       },
     ): Promise<'completed' | 'error' | 'cancelled'> => {
       const ms = options?.intervalMs ?? 2000;
@@ -94,6 +99,7 @@ export function useJobPolling(): {
               data.status === 'error' ||
               data.status === 'cancelled'
             ) {
+              if (data.status === 'error') options?.onErrorCode?.(data.errorCode ?? null);
               settle(data.status as 'completed' | 'error' | 'cancelled');
             }
           } catch {

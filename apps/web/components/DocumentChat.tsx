@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -194,7 +195,9 @@ export function DocumentChat({
     abortRef.current = abortController;
 
     try {
-      const res = await fetch(`/api/documents/${documentId}/chat`, {
+      // apiFetch posílá x-locale – hláška 402 (nedostatek kreditu) i chyby přijdou
+      // v jazyce UI, ne anglicky
+      const res = await apiFetch(`/api/documents/${documentId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: allMessages }),

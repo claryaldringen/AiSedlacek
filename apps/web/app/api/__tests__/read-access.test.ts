@@ -98,7 +98,13 @@ function findWorkspaceItem({ where }: { where: ItemWhere }): { id: string } | nu
 }
 
 function documentFor(pageId: string): Record<string, unknown> {
-  return { id: `doc-${pageId}`, pageId, translations: [], glossary: [] };
+  return {
+    id: `doc-${pageId}`,
+    pageId,
+    chargedCredits: 72_000,
+    translations: [{ language: 'en', text: 'x', chargedCredits: 900 }],
+    glossary: [],
+  };
 }
 
 // ── Mocks ────────────────────────────────────────────────
@@ -211,6 +217,32 @@ describe.each([
   it('archived page is 404 even for a member of the shared workspace', async () => {
     expect((await read('member', 'page-archived')).status).toBe(404);
     expect((await read('owner', 'page-archived')).status).toBe(200);
+  });
+
+  // BIL-11: skutečné odečty jsou útrata vlastníka – čtenáři cizího obsahu je nedostanou
+  function documentOf(body: Record<string, unknown>): {
+    chargedCredits: number | null;
+    translations: { chargedCredits: number | null }[];
+  } {
+    return (body.document ?? body) as {
+      chargedCredits: number | null;
+      translations: { chargedCredits: number | null }[];
+    };
+  }
+
+  it('skutečné odečty kreditu vidí jen vlastník', async () => {
+    const own = documentOf(await (await read('owner', 'page-shared')).json());
+    expect(own.chargedCredits).toBe(72_000);
+    expect(own.translations[0]!.chargedCredits).toBe(900);
+
+    for (const [user, pageId] of [
+      ['member', 'page-shared'],
+      ['stranger', 'page-public'],
+    ] as const) {
+      const doc = documentOf(await (await read(user, pageId)).json());
+      expect(doc.chargedCredits).toBeNull();
+      expect(doc.translations[0]!.chargedCredits).toBeNull();
+    }
   });
 
   it('anyone reads a public page or a page in a public collection, read-only', async () => {

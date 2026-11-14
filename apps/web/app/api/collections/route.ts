@@ -164,10 +164,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const inputTokens = tokens?.inputTokens ?? 0;
     const outputTokens = tokens?.outputTokens ?? 0;
 
+    const isOwner = c.userId === userId;
     return {
       ...c,
       // Sdílené a veřejné workspacy obsahují cizí svazky – UI je nabízí jen ke čtení.
-      canEdit: c.userId === userId,
+      canEdit: isOwner,
       processableCount: (byStatus['pending'] ?? 0) + (byStatus['error'] ?? 0),
       stats: {
         done: byStatus['done'] ?? 0,
@@ -177,11 +178,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         blank: byStatus['blank'] ?? 0,
         inputTokens,
         outputTokens,
-        // Na 4 desetinná místa – formatCzk u haléřových částek ukazuje víc míst.
-        chargeCzk: Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000,
-        chargeCredits: tokens?.chargeCredits ?? 0,
+        // Cena (skutečné odečty kreditu) je útrata vlastníka – čtenářům cizího
+        // svazku null, UI ji pak nezobrazí. Na 4 desetinná místa – formatCzk
+        // u haléřových částek ukazuje víc míst.
+        chargeCzk: isOwner ? Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000 : null,
+        chargeCredits: isOwner ? (tokens?.chargeCredits ?? 0) : null,
         // Část ceny odhadnutá z tokenů (dokumenty bez záznamu odečtu); 0 = vše skutečné
-        chargeEstimatedCredits: tokens?.estimatedCredits ?? 0,
+        chargeEstimatedCredits: isOwner ? (tokens?.estimatedCredits ?? 0) : null,
       },
     };
   });

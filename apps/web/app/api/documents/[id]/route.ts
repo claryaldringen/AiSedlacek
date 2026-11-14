@@ -5,6 +5,7 @@ import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { canReadPage } from '@/lib/infrastructure/authz';
+import { hideChargesFromReader } from '@/lib/infrastructure/charges';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -35,7 +36,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json({ ...doc, canEdit: doc.page.userId === userId });
+  const canEdit = doc.page.userId === userId;
+  // Skutečné odečty kreditu (útrata vlastníka) jen vlastníkovi
+  return NextResponse.json({ ...hideChargesFromReader(doc, canEdit), canEdit });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {

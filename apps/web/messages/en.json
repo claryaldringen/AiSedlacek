@@ -123,6 +123,7 @@
     "fixContextFromCollection": "Fix document context using work context",
     "callingModel": "Calling model…",
     "generationFailed": "Context generation failed",
+    "jobInsufficientCredit": "Insufficient credit – processing stopped. Top up your tokens (Top up tokens in the account menu) and start it again.",
     "renameCollectionPrompt": "New volume name:",
     "readOnlyCollection": "Read-only – this volume belongs to another user"
   },

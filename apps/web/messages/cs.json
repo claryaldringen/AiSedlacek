@@ -123,6 +123,7 @@
     "fixContextFromCollection": "Opravit kontext dokumentu podle kontextu díla",
     "callingModel": "Volám model…",
     "generationFailed": "Generování kontextu selhalo",
+    "jobInsufficientCredit": "Nedostatek kreditu – zpracování se zastavilo. Dobijte tokeny (Dobít tokeny v nabídce účtu) a spusťte ho znovu.",
     "renameCollectionPrompt": "Nový název svazku:",
     "readOnlyCollection": "Jen pro čtení – svazek patří jinému uživateli"
   },

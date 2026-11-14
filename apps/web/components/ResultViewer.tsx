@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { chargeForUsage, documentCharge, formatCzk } from '@/lib/pricing';
+import { formatCzk, resultCharges, type DisplayedCharge } from '@/lib/pricing';
 import { isJobErrorCode, type JobErrorCode } from '@ai-sedlacek/shared';
 
 /**
@@ -231,22 +231,16 @@ export function ResultViewer({
   const t = useTranslations('document');
   const tc = useTranslations('common');
   const locale = useLocale();
-  // Cena pro uživatele (BIL-11): skutečný odečet, u starších dokumentů odhad
-  // stejným výpočtem jako účtování kreditů – v UI označený.
-  const formatCharge = (
-    chargedCredits: number | null | undefined,
-    model: string | null | undefined,
-    inputTokens: number | null | undefined,
-    outputTokens: number | null | undefined,
-  ): string | null => {
-    const charge = documentCharge(chargedCredits, model, inputTokens, outputTokens);
-    return charge
+  // Ceny pro panel metadat (BIL-11): skutečný odečet, u starších dokumentů
+  // označený odhad, chat přesně; u cizího dokumentu (readOnly) se nezobrazují.
+  const charges = resultCharges(result, readOnly);
+  const chargeLabel = (charge: DisplayedCharge): string | null =>
+    charge
       ? t(charge.estimated ? 'chargeValueEstimated' : 'chargeValue', {
           czk: formatCzk(charge.czk, locale),
           credits: charge.credits.toLocaleString(locale),
         })
       : null;
-  };
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
   // Během retranslace se texty needitují – ruční úprava překladu by se srazila
@@ -584,15 +578,7 @@ export function ResultViewer({
                     result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
                   }
                 />
-                <MetadataRow
-                  label={t('totalPrice')}
-                  value={formatCharge(
-                    result.chargedCredits,
-                    result.model,
-                    result.inputTokens,
-                    result.outputTokens,
-                  )}
-                />
+                <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.ocr)} />
                 <MetadataRow
                   label={t('createdAt')}
                   value={result.createdAt ? formatDate(result.createdAt) : null}
@@ -618,15 +604,7 @@ export function ResultViewer({
                         : null
                     }
                   />
-                  <MetadataRow
-                    label={t('totalPrice')}
-                    value={formatCharge(
-                      result.translationChargedCredits,
-                      result.translationModel,
-                      result.translationInputTokens,
-                      result.translationOutputTokens,
-                    )}
-                  />
+                  <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.translation)} />
                 </MetadataGroup>
               )}
 
@@ -640,52 +618,15 @@ export function ResultViewer({
                       out: (result.chatOutputTokens ?? 0).toLocaleString(locale),
                     })}
                   />
-                  <MetadataRow
-                    label={t('totalPrice')}
-                    value={formatCharge(
-                      null,
-                      result.chatModel,
-                      result.chatInputTokens,
-                      result.chatOutputTokens,
-                    )}
-                  />
+                  <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.chat)} />
                 </MetadataGroup>
               )}
 
-              {(() => {
-                const charges = [
-                  documentCharge(
-                    result.chargedCredits,
-                    result.model,
-                    result.inputTokens,
-                    result.outputTokens,
-                  ),
-                  documentCharge(
-                    result.translationChargedCredits,
-                    result.translationModel,
-                    result.translationInputTokens,
-                    result.translationOutputTokens,
-                  ),
-                  // Chat se účtuje přesně podle usage odpovědí v této relaci
-                  chargeForUsage(result.chatModel, result.chatInputTokens, result.chatOutputTokens),
-                ];
-                const czk = charges.reduce((sum, c) => sum + (c?.czk ?? 0), 0);
-                const credits = charges.reduce((sum, c) => sum + (c?.credits ?? 0), 0);
-                const estimated = charges.some(
-                  (c) => c !== null && 'estimated' in c && c.estimated,
-                );
-                return credits > 0 ? (
-                  <MetadataGroup title={t('grandTotal')}>
-                    <MetadataRow
-                      label={t('totalGrandPrice')}
-                      value={t(estimated ? 'chargeValueEstimated' : 'chargeValue', {
-                        czk: formatCzk(czk, locale),
-                        credits: credits.toLocaleString(locale),
-                      })}
-                    />
-                  </MetadataGroup>
-                ) : null;
-              })()}
+              {charges.total && (
+                <MetadataGroup title={t('grandTotal')}>
+                  <MetadataRow label={t('totalGrandPrice')} value={chargeLabel(charges.total)} />
+                </MetadataGroup>
+              )}
 
               {(result.mimeType || result.width || result.hash) && (
                 <MetadataGroup title={t('imageSection')}>

@@ -21,6 +21,7 @@ import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
+import { jobErrorMessageKey } from '@/lib/job-errors';
 import { JoinWorkspaceDialog } from '@/components/JoinWorkspaceDialog';
 import { ManageWorkspaceDialog } from '@/components/ManageWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
@@ -443,13 +444,15 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
+        let errorCode: string | null = null;
         const result = await pollJob(jobId, {
           onStep: (step) => setFixingContextsProgress(step),
+          onErrorCode: (code) => (errorCode = code),
         });
         setFixingContexts(false);
         setFixingContextsProgress(null);
         if (result === 'error') {
-          setError(t('contextFixesFailed'));
+          setError(t(jobErrorMessageKey(errorCode) ?? 'contextFixesFailed'));
         }
         // Reload pages to get updated contexts
         void loadPages(selectedCollectionId);
@@ -479,10 +482,12 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await res.json()) as { jobId: string };
 
-        const result = await pollJob(jobId);
+        let errorCode: string | null = null;
+        const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
         setTranslatingContext(false);
         if (result === 'error') {
-          setError('Context translation failed');
+          const key = jobErrorMessageKey(errorCode);
+          setError(key ? t(key) : 'Context translation failed');
         }
         void loadCollections();
       } catch (err) {
@@ -490,7 +495,7 @@ function WorkspaceContent(): React.JSX.Element {
         setTranslatingContext(false);
       }
     },
-    [locale, loadCollections, setError, pollJob],
+    [locale, loadCollections, setError, pollJob, t],
   );
 
   const handleCollectionSelect = useCallback(
@@ -631,13 +636,14 @@ function WorkspaceContent(): React.JSX.Element {
       const { jobId } = data;
       if (!jobId) throw new Error('Server nevrátil jobId');
 
-      const result = await pollJob(jobId);
+      let errorCode: string | null = null;
+      const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
       setGeneratingContext(false);
       if (result === 'completed') {
         // Reload collection to get updated context and metadata
         void loadCollections();
       } else if (result === 'error') {
-        setError(t('generationFailed'));
+        setError(t(jobErrorMessageKey(errorCode) ?? 'generationFailed'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('error'));
@@ -931,18 +937,20 @@ function WorkspaceContent(): React.JSX.Element {
                 throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
               }
               const { jobId } = (await retransRes.json()) as { jobId: string };
+              let errorCode: string | null = null;
               const outcome = await pollJob(jobId, {
                 onStep: (step) => setRegenerateStep(step),
                 onProgress: (completed, total) => {
                   if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
                 },
+                onErrorCode: (code) => (errorCode = code),
               });
               // Reload page and document with new translation
               await reloadPanel();
               // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
               // musí vidět, že překlad nevznikl.
               if (outcome !== 'completed') {
-                setError(t('regenerationFailed'));
+                setError(t(jobErrorMessageKey(errorCode) ?? 'regenerationFailed'));
               }
               return;
             }
@@ -984,18 +992,24 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await response.json()) as { jobId: string };
 
+        let errorCode: string | null = null;
         const outcome = await pollJob(jobId, {
           onStep: (step) => setRegenerateStep(step),
           onProgress: (completed, total) => {
             if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
           },
+          onErrorCode: (code) => (errorCode = code),
         });
 
         // Reload the document after job completes
         const updatedPage = await reloadPanel();
         // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
-        // uživatel musí vidět, že se nic nezměnilo.
-        if (outcome !== 'completed' || updatedPage?.errorMessage) {
+        // uživatel musí vidět, že se nic nezměnilo. Nedostatek kreditu má vlastní
+        // lokalizovanou hlášku s výzvou k dobití.
+        const creditKey = jobErrorMessageKey(errorCode);
+        if (creditKey) {
+          setError(t(creditKey));
+        } else if (outcome !== 'completed' || updatedPage?.errorMessage) {
           setError(updatedPage?.errorMessage ?? t('regenerationFailed'));
         }
       } catch (err) {
@@ -1541,28 +1555,31 @@ function WorkspaceContent(): React.JSX.Element {
                             {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
                           </span>
                         </div>
-                        <div className="flex justify-between border-t border-slate-100 pt-1">
-                          <span className="font-medium text-slate-600">{t('price')}</span>
-                          {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
-                          <span className="font-semibold text-slate-800">
-                            {/* Skutečné odečty; část za dokumenty zpracované před
+                        {/* Cenu (útratu vlastníka) API vrací jen vlastníkovi svazku */}
+                        {selectedCollection.stats?.chargeCredits != null && (
+                          <div className="flex justify-between border-t border-slate-100 pt-1">
+                            <span className="font-medium text-slate-600">{t('price')}</span>
+                            {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
+                            <span className="font-semibold text-slate-800">
+                              {/* Skutečné odečty; část za dokumenty zpracované před
                                 záznamem odečtu je odhad (BIL-11) */}
-                            {tDoc(
-                              (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
-                                ? 'chargeValuePartlyEstimated'
-                                : 'chargeValue',
-                              {
-                                czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
-                                credits: (
-                                  selectedCollection.stats?.chargeCredits ?? 0
-                                ).toLocaleString(locale),
-                                estimated: (
-                                  selectedCollection.stats?.chargeEstimatedCredits ?? 0
-                                ).toLocaleString(locale),
-                              },
-                            )}
-                          </span>
-                        </div>
+                              {tDoc(
+                                (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
+                                  ? 'chargeValuePartlyEstimated'
+                                  : 'chargeValue',
+                                {
+                                  czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
+                                  credits: (
+                                    selectedCollection.stats?.chargeCredits ?? 0
+                                  ).toLocaleString(locale),
+                                  estimated: (
+                                    selectedCollection.stats?.chargeEstimatedCredits ?? 0
+                                  ).toLocaleString(locale),
+                                },
+                              )}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

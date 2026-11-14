@@ -230,8 +230,10 @@ describe('GET /api/collections', () => {
     expect(json[1].canEdit).toBe(false);
     expect(json[1].stats.done).toBe(0);
     expect(json[1].stats.inputTokens).toBe(0);
-    expect(json[1].stats.chargeCzk).toBe(0);
-    expect(json[1].stats.chargeCredits).toBe(0);
+    // Cena (útrata vlastníka) se u cizího svazku nevrací – UI ji skryje
+    expect(json[1].stats.chargeCzk).toBeNull();
+    expect(json[1].stats.chargeCredits).toBeNull();
+    expect(json[1].stats.chargeEstimatedCredits).toBeNull();
     expect(mockPageGroupBy).toHaveBeenCalledTimes(1);
     expect(mockQueryRaw).toHaveBeenCalledTimes(1);
     // Synchronizace do home workspace zapisuje jen svazky, které tam ještě nejsou.
