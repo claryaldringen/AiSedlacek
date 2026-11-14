@@ -101,6 +101,18 @@ fi
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
+# Ověření dumpu plným přečtením: pg_restore --list čte jen obsah (TOC) na
+# začátku souboru, poškozená nebo useknutá data za ním by prošla. Výstup do
+# /dev/null projde celý soubor včetně dat všech tabulek (bez připojení k DB).
+verify_dump() {
+  pg_restore --file=/dev/null "$1" >/dev/null 2>&1
+}
+
+# Rozepsané dumpy po přerušeném běhu (SIGKILL, pád serveru, restart) na začátku
+# smazat: služba je oneshot, takže žádný jiný běh tohoto skriptu je nepíše.
+# Jen vlastní prefix – pre-deploy dump z deploy.sh může zrovna běžet.
+find "$BACKUP_DIR" -maxdepth 1 -name 'aisedlacek-*.dump.partial' -delete
+
 # Dump se píše do .partial a na .dump se přejmenuje až po ověření – nepovedený
 # dump (přerušený zápis, plný disk) tak nikdy neleží jako *.dump a neodejde
 # off-site (tam by ho --ignore-existing už nikdy nenahradil).
@@ -109,23 +121,26 @@ chmod 700 "$BACKUP_DIR"
 dump="$BACKUP_DIR/aisedlacek-$(date +%Y%m%d-%H%M%S).dump"
 partial="$dump.partial"
 env -u PGPASSWORD "${pg_env[@]}" pg_dump --format=custom --file="$partial"
-pg_restore --list "$partial" >/dev/null
+if ! verify_dump "$partial"; then
+  echo "CHYBA: dump $partial nejde celý přečíst (pg_restore) – zahazuji ho" >&2
+  exit 1
+fi
 mv "$partial" "$dump"
 partial=""
 echo "DB dump: $dump ($(du -h "$dump" | cut -f1))"
 
 # Rotace lokálních dumpů (pre-deploy dumpy z deploy.sh včetně) a starých
-# rozepsaných dumpů, které po sobě nechal přerušený běh (SIGKILL, pád serveru).
+# rozepsaných dumpů, které po sobě nechal přerušený deploy.
 find "$BACKUP_DIR" \( -name '*.dump' -o -name '*.dump.partial' \) -mtime +"$RETENTION_DAYS" -delete
 
 if [ -n "$BACKUP_REMOTE" ]; then
-  # Off-site jdou jen ověřené *.dump (i pre-deploy dumpy z deploy.sh, které se
-  # zapisují přímo): poškozený soubor by tam s --ignore-existing zůstal navždy.
+  # Off-site jdou jen *.dump ověřené plným přečtením (i pre-deploy dumpy
+  # z deploy.sh): poškozený soubor by tam s --ignore-existing zůstal navždy.
   ship_list="$work_dir/ship.list"
   : >"$ship_list"
   for f in "$BACKUP_DIR"/*.dump; do
     [ -e "$f" ] || continue
-    if pg_restore --list "$f" >/dev/null 2>&1; then
+    if verify_dump "$f"; then
       printf '%s\n' "$(basename "$f")" >>"$ship_list"
     else
       echo "VAROVÁNÍ: $f není platný dump – off-site se neposílá" >&2
