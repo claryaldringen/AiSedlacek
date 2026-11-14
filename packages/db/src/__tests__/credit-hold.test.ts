@@ -107,6 +107,29 @@ vi.mock('../client', () => {
       ),
     },
     $executeRaw: vi.fn(async () => 1),
+    // Kapacita vyúčtování (settleCreditHold): zůstatek − živé rezervace kromě
+    // vyúčtovávané; parametry dotazu v pořadí userId, userId, now (ISO), holdId
+    $queryRaw: vi.fn(
+      async (
+        _sql: TemplateStringsArray,
+        userId: string,
+        _u: string,
+        nowIso: string,
+        holdId: string,
+      ) => {
+        const now = new Date(nowIso);
+        const balance = db.transactions
+          .filter((t) => t.userId === userId)
+          .reduce((n, t) => n + t.amount, 0);
+        const reserved = db.holds
+          .filter(
+            (h) =>
+              h.userId === userId && h.status === 'active' && h.expiresAt > now && h.id !== holdId,
+          )
+          .reduce((n, h) => n + h.amount, 0);
+        return [{ capacity: BigInt(balance - reserved) }];
+      },
+    ),
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(client)),
   };
   return { prisma: client };
@@ -307,6 +330,30 @@ describe('rezervace kreditu', () => {
     const settle = await settleCreditHold(a, [fixed('a', 400)]);
     expect(settle).toMatchObject({ charged: 250, uncovered: 150 });
     expect(await getCreditState('u1')).toEqual({ balance: 250, reserved: 250, available: 0 });
+  });
+
+  it('kapacitu vyúčtování čte jedním dotazem – stav vlastní rezervace zvlášť nečte', async () => {
+    // Úklid rezervací neběží pod zámkem uživatele: čtení vlastní rezervace a pak
+    // volného kreditu zvlášť by při souběžném uvolnění započetlo rezervaci dvakrát.
+    topUp('u1', 1000);
+    const hold = await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 500,
+      referenceId: 'op',
+      description: 't',
+    });
+    await reserveCreditsOrThrow({ userId: 'u1', amount: 300, referenceId: 'b', description: 't' });
+    vi.mocked(prisma.creditHold.findUnique).mockClear();
+    vi.mocked(prisma.creditHold.aggregate).mockClear();
+    vi.mocked(prisma.$queryRaw).mockClear();
+
+    const settle = await settleCreditHold(hold, [fixed('op', 900)]);
+
+    expect(settle).toMatchObject({ charged: 700, uncovered: 200 });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.creditHold.findUnique).not.toHaveBeenCalled();
+    expect(prisma.creditHold.aggregate).not.toHaveBeenCalled();
+    expect(db.holds.find((h) => h.id === hold.id)!.status).toBe('settled');
   });
 
   it('víc položek (odmítnuté pokusy fallbacku) dělí kapacitu postupně', async () => {

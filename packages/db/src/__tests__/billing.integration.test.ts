@@ -216,4 +216,39 @@ describe.skipIf(!url)('billing – rezervace proti PostgreSQL', () => {
     expect(settle).toMatchObject({ charged: 100, uncovered: 600 });
     expect(await billing.getTokenBalance(userId)).toBe(900);
   });
+
+  it('kapacita vyúčtování jedním dotazem: zůstatek − živé cizí rezervace (prošlé ne)', async () => {
+    const userId = await userWithBalance(1000);
+    const hold = await billing.reserveCreditsOrThrow({
+      userId,
+      amount: 500,
+      referenceId: 'own',
+      description: 't',
+    });
+    await billing.reserveCreditsOrThrow({
+      userId,
+      amount: 300,
+      referenceId: 'live',
+      description: 't',
+    });
+    const expired = await billing.reserveCreditsOrThrow({
+      userId,
+      amount: 150,
+      referenceId: 'expired',
+      description: 't',
+    });
+    // Prošlá jen o chvíli – při chybném převodu časové zóny (spojení není v UTC)
+    // by se počítala jako živá
+    await prisma.creditHold.update({
+      where: { id: expired.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    // Strop = 1000 − 300 (vlastní rezervace se nepočítá ani dvakrát, ani vůbec)
+    const settle = await billing.settleCreditHold(hold, [fixed('own', 900)]);
+    expect(settle).toMatchObject({ charged: 700, uncovered: 200 });
+    expect(await billing.getTokenBalance(userId)).toBe(300);
+    const own = await prisma.creditHold.findUniqueOrThrow({ where: { id: hold.id } });
+    expect(own.status).toBe('settled');
+  });
 });

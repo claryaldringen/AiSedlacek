@@ -391,28 +391,46 @@ function logUncovered(userId: string, ref: string, result: SettleResult): void {
  * Rezervaci, kterou mezitím uvolnil úklid (TTL, pád jobu), lze vyúčtovat také –
  * jen z volného kreditu.
  */
+/**
+ * Kolik lze při vyúčtování rezervace nejvýš odečíst: zůstatek minus živé
+ * (aktivní, nevypršené) rezervace uživatele KROMĚ té vyúčtovávané – jedním
+ * dotazem. Dřív se stav vlastní rezervace četl zvlášť a k volnému kreditu se
+ * přičítal; úklid rezervací neběží pod zámkem uživatele, takže uvolnění mezi
+ * oběma čteními započetlo vlastní rezervaci dvakrát a zůstatek mohl jít do minusu.
+ * (`expiresAt` je `timestamp` v UTC – okamžik se proto předává jako ISO řetězec
+ * a převádí explicitně, nezávisle na časové zóně spojení.)
+ */
+async function settleCapacity(
+  tx: Tx,
+  hold: Pick<CreditHoldHandle, 'id' | 'userId'>,
+  now: Date,
+): Promise<number> {
+  const rows = await tx.$queryRaw<{ capacity: bigint | number | null }[]>`
+    SELECT
+      COALESCE((SELECT SUM("amount") FROM "TokenTransaction" WHERE "userId" = ${hold.userId}), 0)
+      - COALESCE((
+          SELECT SUM("amount") FROM "CreditHold"
+          WHERE "userId" = ${hold.userId}
+            AND "status" = 'active'
+            AND "expiresAt" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+            AND "id" <> ${hold.id}
+        ), 0) AS "capacity"`;
+  return Number(rows[0]?.capacity ?? 0);
+}
+
 export async function settleCreditHold(
   hold: CreditHoldHandle,
   charges: CreditCharge[],
 ): Promise<SettleResult> {
   const result = await withUserLock(hold.userId, async (tx) => {
     const now = new Date();
-    const current = await tx.creditHold.findUnique({
-      where: { id: hold.id },
-      select: { status: true, amount: true, expiresAt: true },
+    const capacity = await settleCapacity(tx, hold, now);
+    const settled = await writeCharges(tx, hold.userId, charges, capacity);
+    // Jen aktivní rezervace přejde na settled; uvolněnou (úklid jobu, TTL) nechat
+    await tx.creditHold.updateMany({
+      where: { id: hold.id, status: 'active' },
+      data: { status: 'settled', closedAt: now },
     });
-    // Vlastní rezervaci lze přičíst jen tehdy, když ji `readCreditState` odečetl –
-    // tedy aktivní a nevypršenou. Prošlá rezervace se do `available` nepočítá;
-    // přičíst ji by kapacitu započetlo dvakrát a zůstatek by šel do minusu.
-    const ownLive = current?.status === 'active' && current.expiresAt > now ? current.amount : 0;
-    const { available } = await readCreditState(tx, hold.userId, now);
-    const settled = await writeCharges(tx, hold.userId, charges, available + ownLive);
-    if (current?.status === 'active') {
-      await tx.creditHold.update({
-        where: { id: hold.id },
-        data: { status: 'settled', closedAt: now },
-      });
-    }
     return settled;
   });
   console.log(
