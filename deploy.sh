@@ -141,6 +141,7 @@ pg_bin_for_server() { # $1 = server_version_num (např. 160015)
 }
 pg_server_num="$(pg_run psql -X -tAc 'SHOW server_version_num' 2>/dev/null || true)"
 PG_BIN="$(pg_bin_for_server "$pg_server_num")"
+echo "Nástroje Postgresu: ${PG_BIN:-PATH} (server ${pg_server_num:-neznámý})"
 
 echo "=== Checking migration history ==="
 # Pojistka ještě před npm ci a buildem (ty přepisují běžící aplikaci): historie

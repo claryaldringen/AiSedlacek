@@ -291,9 +291,10 @@ přejmenuje – nic se neztratí.
 ```bash
 cd /opt/AiSedlacek
 pm2 stop ai-sedlacek-web ai-sedlacek-worker        # během obnovy nic nezapisuje
+sudo -u postgres psql -X -tAc "SELECT pid, usename, application_name FROM pg_stat_activity WHERE datname = 'aisedlacek'"  # musí být prázdné
 sudo -u postgres psql -X -c 'ALTER DATABASE aisedlacek RENAME TO aisedlacek_pred_obnovou_RRRRMMDD'
-sudo -u postgres createdb -O <uživatel z DATABASE_URL> aisedlacek
-sudo -u postgres pg_restore --exit-on-error --single-transaction -d aisedlacek < <soubor.dump>
+# --create: DB vznikne z template0 s původním vlastníkem, encodingem, locale, ACL i nastavením
+sudo -u postgres pg_restore --create --exit-on-error -d postgres < <soubor.dump>
 # kód odpovídající dumpu: DEPLOY_REF=<commit z doby dumpu> ./deploy.sh  (jinak jen:)
 pm2 start ecosystem.config.cjs --update-env
 ```
@@ -324,7 +325,7 @@ header`) a `pg_restore` 17 do serveru 16 obnovuje s chybou (`transaction_timeout
 nainstalovanou): dumpy jsou ve formátu verze serveru a přečte je i výchozí
 `sudo -u postgres pg_restore`. Po upgradu clusteru se verze posune sama.
 
-**Rollback na commity `f39a9b9` až před touto opravou** (2026-11-14): jejich `deploy.sh`
+**Rollback na commity od `505db6a` (PR #6) až před touto opravou** (2026-11-14): jejich `deploy.sh`
 spadne na ověření dumpu (`pg_dump` 17 / `pg_restore` 16). Spustit s nástroji verze serveru:
 `PATH=/usr/lib/postgresql/16/bin:$PATH DEPLOY_REF=<commit> /opt/AiSedlacek/deploy.sh`.
 

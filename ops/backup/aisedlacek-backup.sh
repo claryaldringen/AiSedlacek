@@ -122,6 +122,7 @@ pg_bin_for_server() { # $1 = server_version_num (např. 160015)
 }
 pg_server_num="$(env -u PGPASSWORD "${pg_env[@]}" psql -X -tAc 'SHOW server_version_num' 2>/dev/null || true)"
 PG_BIN="$(pg_bin_for_server "$pg_server_num")"
+echo "Nástroje Postgresu: ${PG_BIN:-PATH} (server ${pg_server_num:-neznámý})"
 
 # Ověření dumpu plným přečtením: pg_restore --list čte jen obsah (TOC) na
 # začátku souboru, poškozená nebo useknutá data za ním by prošla. Výstup do
