@@ -60,3 +60,57 @@ describe('useJobPolling – kód chyby ukončeného jobu', () => {
     expect(await poll({ status: 'cancelled' })).toEqual({ outcome: 'cancelled', codes: [] });
   });
 });
+
+// Oprava kontextů počítá přeskočené dokumenty z `errors` ukončeného jobu.
+describe('useJobPolling – errors ukončeného jobu (onErrors)', () => {
+  async function pollErrors(
+    body: Record<string, unknown>,
+  ): Promise<{ outcome: string; errors: string[][] }> {
+    mockApiFetch.mockResolvedValue(statusResponse(body));
+    const { pollJob } = createJobPolling();
+    const errors: string[][] = [];
+    const promise = pollJob('job-1', { onErrors: (e) => errors.push(e) });
+    await vi.advanceTimersByTimeAsync(2000);
+    return { outcome: await promise, errors };
+  }
+
+  it('předá errors u jobu ukončeného chybou i doběhlého jobu', async () => {
+    const errors = ['Dokument doc-1: přeskočen …', 'Nedostatečný kredit …'];
+    expect(await pollErrors({ status: 'error', errorCode: 'credit_busy', errors })).toEqual({
+      outcome: 'error',
+      errors: [errors],
+    });
+    expect(await pollErrors({ status: 'completed', errors: ['Stránka p1: …'] })).toEqual({
+      outcome: 'completed',
+      errors: [['Stránka p1: …']],
+    });
+  });
+
+  it('chybějící nebo nečitelné errors → prázdné pole', async () => {
+    for (const errors of [undefined, null, 'text', { 0: 'x' }]) {
+      expect(await pollErrors({ status: 'error', errors })).toEqual({
+        outcome: 'error',
+        errors: [[]],
+      });
+    }
+    expect(await pollErrors({ status: 'completed' })).toEqual({
+      outcome: 'completed',
+      errors: [[]],
+    });
+  });
+
+  it('zrušený ani ještě běžící job errors nepředá', async () => {
+    expect(await pollErrors({ status: 'cancelled', errors: ['x'] })).toEqual({
+      outcome: 'cancelled',
+      errors: [],
+    });
+
+    mockApiFetch.mockResolvedValue(statusResponse({ status: 'running', errors: ['x'] }));
+    const { pollJob, stopPolling } = createJobPolling();
+    const received: string[][] = [];
+    void pollJob('job-1', { onErrors: (e) => received.push(e) });
+    await vi.advanceTimersByTimeAsync(4000);
+    stopPolling();
+    expect(received).toEqual([]);
+  });
+});

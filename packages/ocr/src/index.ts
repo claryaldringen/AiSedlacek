@@ -17,6 +17,7 @@ export {
   processWithClaude,
   processWithClaudeBatch,
   OcrRefusalError,
+  OcrStreamInterruptedError,
 } from './process';
-export type { OcrAttemptUsage } from './process';
+export type { OcrAttemptUsage, OcrPartialUsage } from './process';
 export { processWithClaudeCli, processWithClaudeBatchCli } from './process-cli';

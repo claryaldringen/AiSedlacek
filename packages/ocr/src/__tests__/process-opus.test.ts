@@ -20,6 +20,10 @@ import {
   processWithClaude,
   processWithClaudeBatch,
   OcrRefusalError,
+  OcrStreamInterruptedError,
+  BATCH_OUTPUT_TOKENS_PER_PAGE,
+  THINKING_TOKENS_RESERVE,
+  partialUsage,
   batchMaxTokens,
   ocrBatchReservationCredits,
 } from '../process';
@@ -185,6 +189,7 @@ describe('server-side fallback – usage of declined attempts', () => {
     );
 
     // Top-level usage = odpověď fallback modelu
+    expect(res.interrupted).toBe(false);
     expect(res.model).toBe('claude-opus-5');
     expect([res.inputTokens, res.outputTokens]).toEqual([3100, 2500]);
     expect(res.results).toHaveLength(1);
@@ -297,6 +302,244 @@ describe('server-side fallback – usage of declined attempts', () => {
     expect(refusal.declinedAttempts).toEqual([
       { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: 'cyber' },
     ]);
+  });
+});
+
+// Stream spadne uprostřed generování (overloaded_error v SSE, reset spojení) –
+// vstup i vygenerovaný výstup Anthropic účtuje, spotřeba jde se chybou k volajícímu.
+describe('přerušený stream – spotřeba ze snapshotu', () => {
+  function failingStream(
+    error: Error,
+    snapshot: Record<string, unknown> | undefined,
+    textDeltas: string[] = [],
+  ): unknown {
+    return {
+      on: (event: string, cb: (text: string) => void) => {
+        if (event === 'text') textDeltas.forEach(cb);
+      },
+      finalMessage: () => Promise.reject(error),
+      currentMessage: snapshot,
+    };
+  }
+
+  it('chyba uprostřed generování: OcrStreamInterruptedError se spotřebou a původní chybou', async () => {
+    const overloaded = new Error('overloaded_error');
+    const generated = 'x'.repeat(4_001);
+    mocks.stream.mockReturnValue(
+      failingStream(
+        overloaded,
+        // Snapshot po message_start: výstupní počítadlo z message_start (1),
+        // vygenerovaný text a thinking v content
+        message({
+          usage: { input_tokens: 3000, output_tokens: 1 },
+          content: [
+            { type: 'thinking', thinking: 'y'.repeat(399), signature: '' },
+            { type: 'text', text: generated },
+          ],
+        }),
+        [generated],
+      ),
+    );
+
+    const err = await processWithClaude(Buffer.from('x'), 'Přepiš text.').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(OcrStreamInterruptedError);
+    const interrupted = err as OcrStreamInterruptedError;
+    expect(interrupted.cause).toBe(overloaded);
+    // Výstup odhadnutý z vygenerovaných znaků (4 400 / 4), počítadlo API je nižší
+    expect(interrupted.usage).toEqual({
+      model: 'claude-opus-5-5',
+      inputTokens: 3000,
+      outputTokens: 1_100,
+    });
+    // Streamovaný text jde s chybou – zaplacený výstup se nezahazuje
+    expect(interrupted.text).toBe(generated);
+  });
+
+  it('dávka: přerušení zpracuje jako useknutí – vrátí kompletní stránky se spotřebou', async () => {
+    const page0 = JSON.stringify({ imageIndex: 0, ...JSON.parse(OCR_JSON) });
+    const page1 = JSON.stringify({ imageIndex: 1, ...JSON.parse(OCR_JSON) });
+    // Třetí stránka useknutá uprostřed řádku
+    const streamedText = `${page0}\n${page1}\n{"imageIndex": 2, "transcription": "Usek`;
+    mocks.stream.mockReturnValue(
+      failingStream(
+        new Error('overloaded_error'),
+        message({
+          usage: { input_tokens: 9000, output_tokens: 1 },
+          content: [{ type: 'text', text: streamedText }],
+        }),
+        [streamedText],
+      ),
+    );
+
+    const res = await processWithClaudeBatch(
+      [
+        { buffer: Buffer.from('a'), pageId: 'p1', index: 0 },
+        { buffer: Buffer.from('b'), pageId: 'p2', index: 1 },
+        { buffer: Buffer.from('c'), pageId: 'p3', index: 2 },
+      ],
+      'Přepiš.',
+    );
+
+    expect(res.interrupted).toBe(true);
+    expect(res.truncated).toBe(false);
+    expect(res.stopReason).toBeNull();
+    expect(res.results.map((r) => r.index)).toEqual([0, 1]);
+    expect(res.parseProblem).toBeNull();
+    expect(res.rawResponse).toBe(streamedText);
+    expect([res.model, res.inputTokens, res.outputTokens]).toEqual([
+      'claude-opus-5-5',
+      9000,
+      Math.ceil(streamedText.length / 4),
+    ]);
+    expect(res.declinedAttempts).toEqual([]);
+  });
+
+  it('dávka: odmítnuté pokusy fallbacku ze snapshotu (po message_delta) jdou s výsledkem', async () => {
+    mocks.stream.mockReturnValue(
+      failingStream(
+        new Error('Connection reset'),
+        message({
+          model: 'claude-opus-5',
+          usage: {
+            input_tokens: 3100,
+            output_tokens: 500,
+            iterations: [
+              {
+                type: 'message',
+                model: null,
+                input_tokens: 3000,
+                output_tokens: 0,
+                cache_creation: null,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+              },
+              {
+                type: 'fallback_message',
+                model: 'claude-opus-5',
+                input_tokens: 3100,
+                output_tokens: 500,
+                cache_creation: null,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+              },
+            ],
+          },
+          content: [
+            {
+              type: 'fallback',
+              from: { model: 'claude-opus-5-5' },
+              to: { model: 'claude-opus-5' },
+              trigger: { type: 'refusal', category: 'bio' },
+            },
+            { type: 'text', text: '{"imageIndex": 0, "transcr' },
+          ],
+        }),
+      ),
+    );
+
+    const res = await processWithClaudeBatch(
+      [{ buffer: Buffer.from('a'), pageId: 'p1', index: 0 }],
+      'Přepiš.',
+    );
+
+    expect(res.interrupted).toBe(true);
+    expect(res.results).toEqual([]);
+    expect(res.model).toBe('claude-opus-5');
+    expect(res.declinedAttempts).toEqual([
+      { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: 'bio' },
+    ]);
+  });
+
+  it('po message_delta má přednost vyšší počítadlo API', async () => {
+    mocks.stream.mockReturnValue(
+      failingStream(
+        new Error('Connection reset'),
+        message({
+          model: 'claude-opus-5',
+          usage: { input_tokens: 3100, output_tokens: 9_000 },
+          content: [{ type: 'text', text: 'krátký' }],
+        }),
+      ),
+    );
+
+    const err = await processWithClaude(Buffer.from('x'), 'Přepiš text.').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(OcrStreamInterruptedError);
+    expect((err as OcrStreamInterruptedError).usage).toEqual({
+      model: 'claude-opus-5',
+      inputTokens: 3100,
+      outputTokens: 9_000,
+    });
+  });
+
+  it('stream skončí bez message_stop: spotřeba z posledního snapshotu streamEvent', async () => {
+    // SDK při řádném konci spojení bez message_stop snapshot vynuluje
+    // (currentMessage undefined) a finalMessage() odmítne
+    const ended = new Error('stream ended without producing a Message with role=assistant');
+    const snapshot = message({
+      usage: { input_tokens: 3000, output_tokens: 1 },
+      content: [{ type: 'text', text: 'z'.repeat(800) }],
+    });
+    mocks.stream.mockReturnValue({
+      on: (event: string, cb: (...args: unknown[]) => void) => {
+        if (event === 'streamEvent') cb({ type: 'content_block_delta' }, snapshot);
+      },
+      finalMessage: () => Promise.reject(ended),
+      currentMessage: undefined,
+    });
+
+    const err = await processWithClaude(Buffer.from('x'), 'Přepiš text.').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(OcrStreamInterruptedError);
+    expect((err as OcrStreamInterruptedError).cause).toBe(ended);
+    expect((err as OcrStreamInterruptedError).usage).toEqual({
+      model: 'claude-opus-5-5',
+      inputTokens: 3000,
+      outputTokens: 200,
+    });
+  });
+
+  it('odhad výstupu nepřekročí max_tokens volání (zacyklené opakování)', async () => {
+    // 1 stránka → max_tokens 24 000; 200 000 znaků by dalo odhad 50 000 tokenů
+    mocks.stream.mockReturnValue(
+      failingStream(
+        new Error('overloaded_error'),
+        message({
+          usage: { input_tokens: 3000, output_tokens: 1 },
+          content: [{ type: 'text', text: 'ab'.repeat(100_000) }],
+        }),
+      ),
+    );
+
+    const err = await processWithClaude(Buffer.from('x'), 'Přepiš text.').catch((e: unknown) => e);
+
+    expect((err as OcrStreamInterruptedError).usage.outputTokens).toBe(
+      THINKING_TOKENS_RESERVE + BATCH_OUTPUT_TOKENS_PER_PAGE,
+    );
+  });
+
+  it('partialUsage: max z počítadla API a odhadu, nejvýš max_tokens', () => {
+    const snap = (outputTokens: number, text: string) =>
+      message({
+        usage: { input_tokens: 10, output_tokens: outputTokens },
+        content: [{ type: 'text', text }],
+      }) as unknown as Parameters<typeof partialUsage>[0];
+    expect(partialUsage(snap(1, 'x'.repeat(400)), 1000).outputTokens).toBe(100);
+    expect(partialUsage(snap(700, 'x'.repeat(400)), 1000).outputTokens).toBe(700);
+    expect(partialUsage(snap(1, 'x'.repeat(40_000)), 1000).outputTokens).toBe(1000);
+  });
+
+  it('chyba před prvním eventem (bez snapshotu): původní chyba beze změny', async () => {
+    const networkError = new Error('ECONNREFUSED');
+    mocks.stream.mockReturnValue(failingStream(networkError, undefined));
+
+    const err = await processWithClaudeBatch(
+      [{ buffer: Buffer.from('a'), pageId: 'p1', index: 0 }],
+      'Přepiš.',
+    ).catch((e: unknown) => e);
+
+    expect(err).toBe(networkError);
   });
 });
 

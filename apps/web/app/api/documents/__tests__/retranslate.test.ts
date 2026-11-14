@@ -105,7 +105,7 @@ describe('POST /api/documents/[id]/retranslate', () => {
           { jobData: { contains: '"language":"cs"' } },
         ],
       },
-      select: { id: true },
+      select: { id: true, jobData: true },
     });
     expect(checkBalance).not.toHaveBeenCalled();
     expect(mockJobCreate).not.toHaveBeenCalled();

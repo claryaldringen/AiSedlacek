@@ -133,6 +133,77 @@ export class OcrRefusalError extends Error {
   }
 }
 
+/** Spotřeba přerušeného streamu – vstup a dosud vygenerovaný výstup. */
+export interface OcrPartialUsage {
+  /** Model ze snapshotu streamu (po serverovém fallbacku model, který odpovídal). */
+  model: string;
+  inputTokens: number;
+  /**
+   * Max. z počítadla API a odhadu z vygenerovaného textu, nejvýš `max_tokens`
+   * volání (viz `partialUsage`).
+   */
+  outputTokens: number;
+}
+
+/**
+ * Stream OCR spadl uprostřed generování (chyba API v SSE, např. `overloaded_error`,
+ * reset spojení, konec spojení bez `message_stop`) – vstup i dosud vygenerovaný
+ * výstup už Anthropic účtuje. Nese spotřebu (`usage`), dosud streamovaný text
+ * (`text` – zaplacený výstup se nezahazuje) a původní chybu (`cause`).
+ * `processWithClaudeBatch` ji sám zpracuje jako useknutý výstup (kompletní
+ * stránky vrátí s příznakem `interrupted`). Bez snapshotu (chyba před prvním
+ * eventem) se vyhazuje původní chyba beze změny – žádná spotřeba nevznikla.
+ */
+export class OcrStreamInterruptedError extends Error {
+  constructor(
+    cause: unknown,
+    readonly usage: OcrPartialUsage,
+    /** Text odpovědi streamovaný do přerušení. */
+    readonly text: string = '',
+    /** Odmítnuté pokusy serverového fallbacku, pokud je snapshot už nese. */
+    readonly declinedAttempts: OcrAttemptUsage[] = [],
+  ) {
+    super(`OCR stream přerušen: ${cause instanceof Error ? cause.message : String(cause)}`, {
+      cause,
+    });
+    this.name = 'OcrStreamInterruptedError';
+  }
+}
+
+/** Odhad tokenů z vygenerovaných znaků – stejně jako chat (spíš podhodnocuje). */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * Spotřeba přerušeného streamu ze snapshotu `currentMessage`: vstup a model
+ * z `message_start`, výstup z posledního `message_delta`. Ten během generování
+ * nepřichází (počítadlo zůstává na hodnotě z `message_start`), proto se výstup
+ * odhadne i z dosud vygenerovaného textu a thinkingu (4 znaky na token) – bere
+ * se vyšší z obou. Thinking, jehož text API nevrací, odhad nepokryje – uživatel
+ * tak nezaplatí víc, než spotřeboval. Horní mez je `max_tokens` volání: víc
+ * model vygenerovat nemohl a odhad po znacích u zacyklených opakování (krátké
+ * tokeny) nadhodnocuje.
+ */
+export function partialUsage(snapshot: BetaMessage, maxTokens: number): OcrPartialUsage {
+  const generatedChars = snapshot.content.reduce(
+    (n, block) =>
+      n +
+      (block.type === 'text'
+        ? block.text.length
+        : block.type === 'thinking'
+          ? block.thinking.length
+          : 0),
+    0,
+  );
+  return {
+    model: snapshot.model,
+    inputTokens: snapshot.usage.input_tokens,
+    outputTokens: Math.min(
+      maxTokens,
+      Math.max(snapshot.usage.output_tokens, Math.ceil(generatedChars / CHARS_PER_TOKEN)),
+    ),
+  };
+}
+
 /**
  * Odmítnuté pokusy serverového fallbacku, které top-level `usage` nepokrývá.
  *
@@ -222,7 +293,41 @@ async function streamOcrRequest(params: {
     streamed += text;
     params.onText(text);
   });
-  const message = await stream.finalMessage();
+  // Poslední snapshot zprávy se drží i mimo stream: když spojení skončí řádně,
+  // ale bez `message_stop`, SDK snapshot při ukončení requestu vynuluje
+  // (`currentMessage` je pak undefined) a `finalMessage()` odmítne – spotřeba
+  // přitom vznikla. SDK snapshot průběžně mutuje, odkaz tak nese poslední stav.
+  let lastSnapshot: BetaMessage | undefined;
+  stream.on('streamEvent', (_event, snapshot) => {
+    lastSnapshot = snapshot;
+  });
+  let message: BetaMessage;
+  try {
+    message = await stream.finalMessage();
+  } catch (err) {
+    // Chyba uprostřed generování: spotřebu ze snapshotu přibalit k chybě, ať ji
+    // volající vyúčtuje. Bez snapshotu (chyba před message_start) nic nevzniklo.
+    const snapshot = stream.currentMessage ?? lastSnapshot;
+    if (!snapshot) throw err;
+    const usage = partialUsage(snapshot, params.maxTokens);
+    // Odmítnuté pokusy fallbacku nese snapshot až po message_delta (usage.iterations)
+    let declined: OcrAttemptUsage[] = [];
+    try {
+      declined = declinedAttempts(snapshot);
+    } catch (declinedErr) {
+      console.error('[Claude] Nelze vyhodnotit odmítnuté pokusy fallbacku:', declinedErr);
+    }
+    // Surová chyba jen do logu
+    console.warn(
+      '[Claude] Stream přerušen uprostřed generování:',
+      JSON.stringify({
+        id: snapshot.id,
+        ...usage,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    throw new OcrStreamInterruptedError(err, usage, streamed || responseText(snapshot), declined);
+  }
   // Diagnostika fallbacku nesmí zahodit hotový (Anthropicu už zaplacený) výstup.
   let declined: OcrAttemptUsage[] = [];
   try {
@@ -356,6 +461,12 @@ export async function processWithClaudeBatch(
   stopReason: string | null;
   /** Výstup byl useknut limitem `max_tokens` – chybějící stránky nejsou kompletní. */
   truncated: boolean;
+  /**
+   * Stream přerušila chyba uprostřed generování (viz `OcrStreamInterruptedError`):
+   * `results` jsou jen kompletní stránky z dosud vygenerovaného textu, spotřeba
+   * (`model`, tokeny) je ze snapshotu streamu.
+   */
+  interrupted: boolean;
   /** Proč výstup nešlo jednoznačně přiřadit ke stránkám (pak `results` = []), jinak null. */
   parseProblem: string | null;
   /** Odmítnuté pokusy serverového fallbacku (účtují se zvlášť, viz `declinedAttempts()`). */
@@ -407,19 +518,47 @@ export async function processWithClaudeBatch(
   let streamedLength = 0;
   const maxTokens = batchMaxTokens(images.length);
 
-  const {
-    message: finalMessage,
-    text,
-    declinedAttempts: declined,
-  } = await streamOcrRequest({
-    maxTokens,
-    system: batchSystemPrompt(options?.mode),
-    messages: [{ role: 'user', content }],
-    onText: (delta) => {
-      streamedLength += delta.length;
-      options?.onProgress?.(Math.round(streamedLength / 4), estimated);
-    },
-  });
+  let streamResult: Awaited<ReturnType<typeof streamOcrRequest>>;
+  try {
+    streamResult = await streamOcrRequest({
+      maxTokens,
+      system: batchSystemPrompt(options?.mode),
+      messages: [{ role: 'user', content }],
+      onText: (delta) => {
+        streamedLength += delta.length;
+        options?.onProgress?.(Math.round(streamedLength / 4), estimated);
+      },
+    });
+  } catch (err) {
+    if (!(err instanceof OcrStreamInterruptedError)) throw err;
+    // Přerušení uprostřed generování se zpracuje jako useknutí max_tokens:
+    // zaplacený výstup se nezahazuje – kompletní stránky z dosud vygenerovaného
+    // textu se vrátí, useknutý poslední řádek JSONL parser zahodí.
+    const { results, problem } = parseOcrJsonBatchChecked(err.text, images.length);
+    console.warn(
+      '[Claude Batch] Stream interrupted – returning complete pages:',
+      JSON.stringify({
+        ...err.usage,
+        completePages: results.length,
+        imageCount: images.length,
+        maxTokens,
+      }),
+    );
+    return {
+      results,
+      rawResponse: err.text,
+      processingTimeMs: Date.now() - startTime,
+      model: err.usage.model,
+      inputTokens: err.usage.inputTokens,
+      outputTokens: err.usage.outputTokens,
+      stopReason: null,
+      truncated: false,
+      interrupted: true,
+      parseProblem: problem,
+      declinedAttempts: err.declinedAttempts,
+    };
+  }
+  const { message: finalMessage, text, declinedAttempts: declined } = streamResult;
 
   console.log(
     '[Claude Batch] Done:',
@@ -453,6 +592,7 @@ export async function processWithClaudeBatch(
     outputTokens: finalMessage.usage.output_tokens,
     stopReason: finalMessage.stop_reason ?? null,
     truncated,
+    interrupted: false,
     parseProblem,
     declinedAttempts: declined,
   };

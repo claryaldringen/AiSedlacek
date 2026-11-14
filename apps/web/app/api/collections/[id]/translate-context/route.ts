@@ -49,10 +49,12 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: 'No context to translate' }, { status: 400 });
   }
 
-  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu)
+  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu);
+  // překlad do jiného jazyka → 409 bez jobId s hláškou „počkejte“
   const running = await runningJobConflict(t, userId, {
     type: 'translate-context',
     collectionId: id,
+    targetLanguage,
   });
   if (running) return running;
 

@@ -126,8 +126,8 @@
     "jobInsufficientCredit": "Nedostatek kreditu – zpracování se zastavilo. Dobijte tokeny (Dobít tokeny v nabídce účtu) a spusťte ho znovu.",
     "jobCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – akce se zastavila a nedokončené stránky čekají na nové spuštění. Spusťte ji znovu po dokončení běžícího zpracování (dobíjet netřeba).",
     "jobCreditBusyText": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – akce se zastavila. Spusťte ji znovu po dokončení běžícího zpracování (dobíjet netřeba).",
-    "fixContextsInsufficientCredit": "Nedostatek kreditu – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů. Dobijte tokeny (Dobít tokeny v nabídce účtu); nové spuštění opraví znovu všechny dokumenty svazku.",
-    "fixContextsCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů. Nové spuštění po dokončení běžícího zpracování opraví znovu všechny dokumenty svazku.",
+    "fixContextsInsufficientCredit": "Nedostatek kreditu – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů.{skipped, plural, =0 {} one { 1 dokument přeskočen – zpracoval ho už přerušený běh a oprava se tehdy nemusela uložit.} few { # dokumenty přeskočeny – zpracoval je už přerušený běh a oprava se tehdy nemusela uložit.} other { # dokumentů přeskočeno – zpracoval je už přerušený běh a oprava se tehdy nemusela uložit.}} Dobijte tokeny (Dobít tokeny v nabídce účtu); nové spuštění opraví znovu všechny dokumenty svazku.",
+    "fixContextsCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů.{skipped, plural, =0 {} one { 1 dokument přeskočen – zpracoval ho už přerušený běh a oprava se tehdy nemusela uložit.} few { # dokumenty přeskočeny – zpracoval je už přerušený běh a oprava se tehdy nemusela uložit.} other { # dokumentů přeskočeno – zpracoval je už přerušený běh a oprava se tehdy nemusela uložit.}} Nové spuštění po dokončení běžícího zpracování opraví znovu všechny dokumenty svazku.",
     "jobPartialInsufficientCredit": "Část stránek se kvůli nedostatku kreditu nezpracovala. Dobijte tokeny (Dobít tokeny v nabídce účtu) a spusťte zpracování těchto stránek znovu.",
     "renameCollectionPrompt": "Nový název svazku:",
     "readOnlyCollection": "Jen pro čtení – svazek patří jinému uživateli"
@@ -360,6 +360,7 @@
     "insufficientCreditDetail": "Nedostatečný kredit – akce potřebuje volných alespoň {required} tokenů, k dispozici je {available}. Rezervuje se maximální možná cena, nevyužitá část se po dokončení vrací.",
     "creditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – spusťte akci znovu po jeho dokončení.",
     "actionAlreadyRunning": "Stejná akce už běží – počkejte na její dokončení.",
+    "actionRunningWithOtherParams": "Pro tento svazek už běží stejná akce s jinými parametry (jiné stránky nebo jazyk) – počkejte na její dokončení a pak ji spusťte znovu.",
     "processingAlreadyRunning": "Pro tento svazek již probíhá zpracování",
     "noActiveProcessing": "Žádné aktivní zpracování",
     "jobNotFound": "Job nenalezen",

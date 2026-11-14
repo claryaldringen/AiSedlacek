@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { createTranslator } from 'next-intl';
+import { FIX_CONTEXT_SKIPPED_NOTE } from '@ai-sedlacek/shared';
 import { fixContextsCreditMessage, jobErrorMessageKey, jobOutcomeMessageKey } from '../job-errors';
 import cs from '../../messages/cs.json';
 import en from '../../messages/en.json';
@@ -60,10 +62,13 @@ describe('fixContextsCreditMessage – oprava kontextů zastavená kvůli kredit
   it('řekne, kolik je opraveno, a že nové spuštění opraví všechny dokumenty znovu', () => {
     expect(
       fixContextsCreditMessage('error', 'insufficient_credit', { completed: 3, total: 10 }),
-    ).toEqual({ key: 'fixContextsInsufficientCredit', values: { fixed: 3, total: 10 } });
+    ).toEqual({
+      key: 'fixContextsInsufficientCredit',
+      values: { fixed: 3, total: 10, skipped: 0 },
+    });
     expect(fixContextsCreditMessage('error', 'credit_busy', { completed: 0, total: 4 })).toEqual({
       key: 'fixContextsCreditBusy',
-      values: { fixed: 0, total: 4 },
+      values: { fixed: 0, total: 4, skipped: 0 },
     });
     for (const messages of [cs, en]) {
       for (const key of ['fixContextsInsufficientCredit', 'fixContextsCreditBusy'] as const) {
@@ -73,6 +78,47 @@ describe('fixContextsCreditMessage – oprava kontextů zastavená kvůli kredit
     }
     expect(cs.workspace.fixContextsCreditBusy).toMatch(/opraví znovu všechny dokumenty svazku/);
     expect(en.workspace.fixContextsInsufficientCredit).toMatch(/fixes all documents/);
+  });
+
+  // Po reclaimu: dokumenty zaplacené v přerušeném běhu se přeskočí – nejsou
+  // opravené v tomto běhu (oprava se tehdy nemusela uložit), vykazují se zvlášť.
+  it('přeskočené dokumenty spočítá z poznámek v errors a nehlásí je jako opravené', () => {
+    const errors = [
+      'Přerušeno restartem workeru (obnova 1/2)',
+      `Dokument doc-1: ${FIX_CONTEXT_SKIPPED_NOTE}`,
+      `Dokument doc-2: ${FIX_CONTEXT_SKIPPED_NOTE}`,
+      'Dokument doc-3: Model nevrátil kompletní kontext (refusal) – kontext zůstal beze změny',
+      'Nedostatečný kredit … – oprava kontextů zastavena, opraveno 1 z 5 dokumentů',
+    ];
+    const message = fixContextsCreditMessage(
+      'error',
+      'insufficient_credit',
+      { completed: 1, total: 5 },
+      errors,
+    );
+    expect(message).toEqual({
+      key: 'fixContextsInsufficientCredit',
+      values: { fixed: 1, total: 5, skipped: 2 },
+    });
+
+    const tCs = createTranslator({ locale: 'cs', messages: cs, namespace: 'workspace' });
+    const tEn = createTranslator({ locale: 'en', messages: en, namespace: 'workspace' });
+    expect(tCs(message!.key, message!.values)).toContain(
+      'Opraveno 1 z 5 dokumentů. 2 dokumenty přeskočeny – zpracoval je už přerušený běh',
+    );
+    expect(tEn(message!.key, message!.values)).toContain(
+      '1 of 5 documents fixed. 2 documents skipped – an interrupted run already processed them',
+    );
+    // Bez přeskočených věta o přeskočení chybí; jednotné číslo
+    expect(tCs('fixContextsCreditBusy', { fixed: 0, total: 4, skipped: 0 })).toContain(
+      'Opraveno 0 z 4 dokumentů. Nové spuštění',
+    );
+    expect(tCs('fixContextsCreditBusy', { fixed: 0, total: 4, skipped: 1 })).toContain(
+      '1 dokument přeskočen',
+    );
+    expect(tEn('fixContextsInsufficientCredit', { fixed: 2, total: 4, skipped: 0 })).toContain(
+      '2 of 4 documents fixed. Top up',
+    );
   });
 
   it('jiný výsledek nebo kód → null (obecná hláška)', () => {

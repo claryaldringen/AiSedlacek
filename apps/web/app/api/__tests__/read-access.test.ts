@@ -279,7 +279,25 @@ describe('GET /api/documents/[id]/versions – read access', () => {
     expect((await readVersions('owner', 'page-shared')).status).toBe(200);
     const res = await readVersions('member', 'page-shared');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([{ id: 'v-1', version: 1, content: 'stará verze' }]);
+    expect(await res.json()).toEqual([
+      { id: 'v-1', version: 1, model: null, content: 'stará verze' },
+    ]);
+  });
+
+  it('model of AI versions only for the owner, not for a shared-workspace member', async () => {
+    mockVersionFindMany.mockResolvedValue([
+      { id: 'v-2', version: 2, source: 'ai_regenerate', model: 'claude-opus-5-5', content: 'b' },
+      { id: 'v-1', version: 1, source: 'manual_edit', model: null, content: 'a' },
+    ]);
+
+    const owner = await (await readVersions('owner', 'page-shared')).json();
+    expect(owner.map((v: { model: string | null }) => v.model)).toEqual(['claude-opus-5-5', null]);
+
+    const member = await (await readVersions('member', 'page-shared')).json();
+    expect(member).toEqual([
+      { id: 'v-2', version: 2, source: 'ai_regenerate', model: null, content: 'b' },
+      { id: 'v-1', version: 1, source: 'manual_edit', model: null, content: 'a' },
+    ]);
   });
 
   it('stranger gets 404 for a private document', async () => {

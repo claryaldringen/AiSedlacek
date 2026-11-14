@@ -126,8 +126,8 @@
     "jobInsufficientCredit": "Insufficient credit – processing stopped. Top up your tokens (Top up tokens in the account menu) and start it again.",
     "jobCreditBusy": "Your credit is temporarily reserved by another running job – the action stopped and unfinished pages are waiting to be started again. Start it again once the running job finishes (no top-up needed).",
     "jobCreditBusyText": "Your credit is temporarily reserved by another running job – the action stopped. Start it again once the running job finishes (no top-up needed).",
-    "fixContextsInsufficientCredit": "Insufficient credit – fixing contexts stopped. {fixed} of {total} documents fixed. Top up your tokens (Top up tokens in the account menu); running it again fixes all documents of the volume again.",
-    "fixContextsCreditBusy": "Your credit is temporarily reserved by another running job – fixing contexts stopped. {fixed} of {total} documents fixed. Running it again once the running job finishes fixes all documents of the volume again.",
+    "fixContextsInsufficientCredit": "Insufficient credit – fixing contexts stopped. {fixed} of {total} documents fixed.{skipped, plural, =0 {} one { 1 document skipped – an interrupted run already processed it and the fix may not have been saved.} other { # documents skipped – an interrupted run already processed them and the fixes may not have been saved.}} Top up your tokens (Top up tokens in the account menu); running it again fixes all documents of the volume again.",
+    "fixContextsCreditBusy": "Your credit is temporarily reserved by another running job – fixing contexts stopped. {fixed} of {total} documents fixed.{skipped, plural, =0 {} one { 1 document skipped – an interrupted run already processed it and the fix may not have been saved.} other { # documents skipped – an interrupted run already processed them and the fixes may not have been saved.}} Running it again once the running job finishes fixes all documents of the volume again.",
     "jobPartialInsufficientCredit": "Some pages were not processed because of insufficient credit. Top up your tokens (Top up tokens in the account menu) and process those pages again.",
     "renameCollectionPrompt": "New volume name:",
     "readOnlyCollection": "Read-only – this volume belongs to another user"
@@ -360,6 +360,7 @@
     "insufficientCreditDetail": "Insufficient credit – this action needs at least {required} free tokens, {available} available. The maximum possible price is reserved; the unused part is returned when the action finishes.",
     "creditBusy": "Your credit is temporarily reserved by another running job – start this action again once it finishes.",
     "actionAlreadyRunning": "The same action is already running – wait for it to finish.",
+    "actionRunningWithOtherParams": "The same action with different settings (other pages or language) is already running for this volume – wait for it to finish, then start it again.",
     "processingAlreadyRunning": "Processing is already running for this collection",
     "noActiveProcessing": "No active processing",
     "jobNotFound": "Job not found",

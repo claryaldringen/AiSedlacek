@@ -32,3 +32,19 @@ export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 export function isJobErrorCode(value: unknown): value is JobErrorCode {
   return typeof value === 'string' && (JOB_ERROR_CODES as readonly string[]).includes(value);
 }
+
+/**
+ * Poznámka v `errors` jobu oprav kontextů u dokumentu, který opakovaný běh
+ * (reclaim po pádu workeru) přeskočil: oprava proběhla a byla zaplacena už
+ * v přerušeném běhu, ale nemusela se uložit. Worker ji zapisuje jako
+ * `Dokument <id>: <poznámka>`; UI podle ní počítá přeskočené dokumenty
+ * (`countFixContextSkipped`) – schéma pro ně nemá sloupec.
+ */
+export const FIX_CONTEXT_SKIPPED_NOTE =
+  'přeskočen – oprava kontextu proběhla (a byla zaplacena) už v přerušeném běhu tohoto jobu; ' +
+  'pokud tehdy selhala, kontext zůstal beze změny – opravte ho novým spuštěním';
+
+/** Počet dokumentů, které oprava kontextů přeskočila (poznámky v `errors` jobu). */
+export function countFixContextSkipped(errors: readonly unknown[]): number {
+  return errors.filter((e) => typeof e === 'string' && e.endsWith(FIX_CONTEXT_SKIPPED_NOTE)).length;
+}
