@@ -12,16 +12,14 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   createMessage: vi.fn(),
-  deductTokensIfSufficient: vi.fn(),
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
-vi.mock('@ai-sedlacek/db/billing', () => ({
-  deductTokensIfSufficient: mocks.deductTokensIfSufficient,
-}));
+vi.mock('@ai-sedlacek/db/billing', async () => (await import('./billing-mock')).billingModule());
 vi.mock('../lib/llm', () => ({ createMessage: mocks.createMessage, isCliMode: () => false }));
 
 import { handleRetranslate, TRANSLATION_CHANGED_MESSAGE } from '../handlers/retranslate';
+import { billing, charges, refuseReservations, resetBillingMock } from './billing-mock';
 
 const JOB = { documentId: 'doc-1', language: 'cs', userId: 'user-1' };
 
@@ -50,7 +48,7 @@ beforeEach(() => {
   mocks.prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
     fn(mocks.prisma),
   );
-  mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });
+  resetBillingMock();
   mocks.createMessage.mockResolvedValue({
     text: 'nový překlad',
     model: 'claude-sonnet-4-6',
@@ -71,14 +69,14 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
     expect(mocks.prisma.translation.upsert).not.toHaveBeenCalled();
     expect(mocks.prisma.documentVersion.create).not.toHaveBeenCalled();
     expect(mocks.prisma.document.update).not.toHaveBeenCalled();
-    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledWith(
-      'user-1',
-      100,
-      50,
-      expect.any(String),
-      'retranslate:job-r:doc-1:cs',
-      'claude-sonnet-4-6',
-    );
+    expect(charges()).toEqual([
+      expect.objectContaining({
+        referenceId: 'retranslate:job-r:doc-1:cs',
+        model: 'claude-sonnet-4-6',
+        inputTokens: 100,
+        outputTokens: 50,
+      }),
+    ]);
     // Job se neoznačí jako dokončený
     expect(mocks.prisma.processingJob.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'completed' }) }),
@@ -150,7 +148,7 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
     mocks.prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn(mocks.prisma),
     );
-    mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });
+    resetBillingMock();
     setup({ atStart: null, atSave: 'překlad uložený uživatelem' });
     await expect(handleRetranslate('job-r', JOB)).rejects.toThrow(TRANSLATION_CHANGED_MESSAGE);
     expect(mocks.prisma.translation.create).not.toHaveBeenCalled();
@@ -186,7 +184,39 @@ describe('retranslate – neúplný výstup modelu', () => {
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
       expect(mocks.prisma.translation.updateMany).not.toHaveBeenCalled();
-      expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+      expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('retranslate – rezervace kreditu (BIL-1)', () => {
+  it('rezervuje před voláním modelu s limitem max_tokens retranslace', async () => {
+    setup({ atStart: 'starý překlad', atSave: 'starý překlad' });
+
+    await handleRetranslate('job-r', JOB);
+
+    expect(billing.reserveCredits).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        jobId: 'job-r',
+        referenceId: 'retranslate:job-r:doc-1:cs',
+      }),
+    );
+    const reserveOrder = billing.reserveCredits.mock.invocationCallOrder[0]!;
+    const callOrder = mocks.createMessage.mock.invocationCallOrder[0]!;
+    expect(reserveOrder).toBeLessThan(callOrder);
+    expect(mocks.createMessage.mock.calls[0]![0].maxTokens).toBe(8192);
+  });
+
+  it('bez volného kreditu model nezavolá a překlad nechá beze změny', async () => {
+    setup({ atStart: 'starý překlad', atSave: 'starý překlad' });
+    refuseReservations(10);
+
+    await expect(handleRetranslate('job-r', JOB)).rejects.toMatchObject({
+      code: 'insufficient_credit',
+    });
+
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
 });

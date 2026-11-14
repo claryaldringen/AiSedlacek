@@ -7,11 +7,20 @@
 
 import crypto from 'crypto';
 import { LANGUAGE_NAMES } from '../lib/languages';
-import { createMessage, isCliMode } from '../lib/llm';
+import { isCliMode } from '../lib/llm';
+import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
-import { checkBalance, deductTokens, deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
+import {
+  consumeCredits,
+  getCreditState,
+  releaseCreditHold,
+  reserveCredits,
+  settleCreditHold,
+  type CreditCharge,
+} from '@ai-sedlacek/db/billing';
 import {
   OcrRefusalError,
+  ocrBatchReservationCredits,
   prepareImage,
   processWithClaudeBatch,
   processWithClaudeBatchCli,
@@ -29,13 +38,21 @@ import {
 import { resetUnfinishedPages, setPageStatus } from '../lib/page-status';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 import { createBatches } from '../lib/batch-utils';
-import { OCR_MODEL, TEXT_MODEL, isRefusalBilled } from '@ai-sedlacek/shared';
+import { LLM_MAX_TOKENS, OCR_MODEL, TEXT_MODEL, isRefusalBilled } from '@ai-sedlacek/shared';
 
 /**
  * Hláška pro stránku, jejíž obrázek nejde načíst z úložiště (chybí soubor apod.).
  * Původní chyba (se serverovou cestou) jde jen do logu, ne k uživateli.
  */
 export const IMAGE_UNREADABLE_MESSAGE = 'Obrázek stránky nelze načíst';
+
+/** Volný kredit nestačí na rezervaci další dávky nebo kopie (BIL-1). */
+export function insufficientCreditMessage(required: number, available: number): string {
+  return (
+    'Nedostatečný kredit pro zpracování – další krok potřebuje rezervovat ' +
+    `${required.toLocaleString('cs')} tokenů, volných je ${Math.max(0, available).toLocaleString('cs')}`
+  );
+}
 
 interface PreparedPage {
   pageId: string;
@@ -116,6 +133,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     deduped: 0,
     notFound: 0,
     imageUnreadable: 0,
+    insufficientCredit: 0,
   };
 
   for (let i = 0; i < pageIds.length; i++) {
@@ -255,22 +273,28 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         : null;
 
     if (existingByHash !== null) {
-      // Dedup: copy existing document instead of re-processing
-      const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
-
+      // Dedup: kopie existujícího dokumentu místo nového OCR. Účtuje se cena
+      // původního zpracování podle jeho modelu – PŘED kopií a jen z volného
+      // kreditu (BIL-1: zůstatek nesmí do minusu a kopie nesmí být zadarmo).
       const origInput = existingByHash.inputTokens ?? 0;
       const origOutput = existingByHash.outputTokens ?? 0;
       if (origInput + origOutput > 0) {
-        await deductTokensIfSufficient(
-          userId,
-          origInput,
-          origOutput,
-          `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
-          `copy-${copiedDoc.id}`,
-          // Účtuje se cena původního zpracování podle jeho modelu.
-          existingByHash.model ?? OCR_MODEL,
-        );
+        const charged = await consumeCredits(userId, {
+          referenceId: dedupReferenceId(pageId, existingByHash.id),
+          description: `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
+          model: existingByHash.model ?? OCR_MODEL,
+          inputTokens: origInput,
+          outputTokens: origOutput,
+        });
+        if (!charged.ok) {
+          const message = insufficientCreditMessage(charged.required, charged.available);
+          errors.push(`Stránka ${pageId}: ${message}`);
+          await setPageStatus(pageId, 'pending', message);
+          skippedCount.insufficientCredit++;
+          continue;
+        }
       }
+      const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
 
       // Check if copied document has translation in target language
       const hasTargetTranslation = existingByHash.translations.some(
@@ -331,7 +355,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     skippedCount.alreadyRegenerated +
     skippedCount.deduped +
     skippedCount.notFound +
-    skippedCount.imageUnreadable;
+    skippedCount.imageUnreadable +
+    skippedCount.insufficientCredit;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -370,36 +395,33 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   });
 
   // ── Process each batch ───────────────────────────────
-  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-    const batch = batches[batchIdx]!;
+  // Fronta dávek: dávka, na jejíž rezervaci nestačí volný kredit, se zmenší
+  // a zbytek jejích stránek se vrátí na začátek fronty (BIL-1).
+  const queue = [...batches];
+  let batchNo = 0;
 
-    // Check balance before each batch
-    const { sufficient } = await checkBalance(userId);
-    if (!sufficient) {
-      const remainingPageIds = batches
-        .slice(batchIdx)
-        .flat()
-        .map((p) => p.pageId);
-      await resetUnfinishedPages(remainingPageIds);
-      errors.push('Nedostatečný kredit pro zpracování');
-      await prisma.processingJob.update({
-        where: { id: jobId },
-        data: {
-          status: 'error',
-          completedPages: completed,
-          errors: await errorsKeepingReclaimMarkers(jobId, errors),
-          currentStep: 'Nedostatečný kredit',
-        },
-      });
-      return;
-    }
-
+  /** Zastaví job pro nedostatek kreditu – nezpracované stránky vrátí do fronty. */
+  const stopForCredit = async (
+    pending: { pageId: string }[],
+    required: number,
+    available: number,
+  ): Promise<void> => {
+    await resetUnfinishedPages(pending.map((p) => p.pageId));
+    errors.push(insufficientCreditMessage(required, available));
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
-        currentStep: `Zpracovávám dávku ${batchIdx + 1}/${batches.length} (${batch.length} stránek)…`,
+        status: 'error',
+        completedPages: completed,
+        errors: await errorsKeepingReclaimMarkers(jobId, errors),
+        currentStep: 'Nedostatečný kredit',
       },
     });
+  };
+
+  while (queue.length > 0) {
+    let batch = queue.shift()!;
+    batchNo++;
 
     // Get previous context from the first page's collection
     const firstPage = batch[0]!;
@@ -419,6 +441,30 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     if (batchCollectionContext) {
       userPrompt = `${contextPrefix}\n${batchCollectionContext}\n\n---\n\n${transcribePrompt}`;
     }
+    const promptText = `${previousContext ?? ''}\n${userPrompt}`;
+    const holdFor = (pageCount: number): number =>
+      ocrBatchReservationCredits(pageCount, promptText, mode);
+
+    // Dávka jen tak velká, na kolik stránek stačí volný kredit – rezervuje se
+    // maximální cena (celý max_tokens), takže při nízkém zůstatku menší dávky.
+    const { available } = await getCreditState(userId);
+    const affordable = affordablePageCount(batch.length, available, holdFor);
+    if (affordable === 0) {
+      await stopForCredit([...batch, ...queue.flat()], holdFor(1), available);
+      return;
+    }
+    if (affordable < batch.length) {
+      queue.unshift(batch.slice(affordable));
+      batch = batch.slice(0, affordable);
+    }
+    const totalBatches = batchNo + queue.length;
+
+    await prisma.processingJob.update({
+      where: { id: jobId },
+      data: {
+        currentStep: `Zpracovávám dávku ${batchNo}/${totalBatches} (${batch.length} stránek)…`,
+      },
+    });
 
     // Obrázky dávky se načítají a připravují až teď, postupně a jen pro tuto dávku;
     // po skončení iterace je uvolní GC (PERF-1). Stránka, jejíž obrázek nejde načíst
@@ -460,6 +506,36 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       continue;
     }
 
+    // Klíč odečtu je deterministický a odvozený od jobu a stránek dávky (BIL-3):
+    // dřívější `batch-${jobId}-${batchIdx}` po reclaimu kolidoval – dávky se číslují
+    // znovu od 0, nová dávka 0 (jiné stránky) tak „idempotentně" prošla bez
+    // zaplacení. Opakované zpracování stejných stránek po restartu se naopak
+    // neúčtuje dvakrát.
+    const batchDescription = `OCR dávka ${batchNo} (${sentPages.length} stránek)${collectionLabel}`;
+    const batchReferenceId = ocrBatchReferenceId(
+      jobId,
+      sentPages.map((p) => p.pageId),
+    );
+
+    // Rezervace maximální ceny dávky těsně před voláním API (BIL-1). Mezi odhadem
+    // výše a rezervací mohl volný kredit spotřebovat souběžný job – pak stop.
+    const reservation = await reserveCredits({
+      userId,
+      jobId,
+      referenceId: batchReferenceId,
+      description: batchDescription,
+      amount: holdFor(sentPages.length),
+    });
+    if (!reservation.ok) {
+      await stopForCredit(
+        [...sentPages, ...queue.flat()],
+        reservation.required,
+        reservation.available,
+      );
+      return;
+    }
+    const hold = reservation.hold;
+
     // Call Claude with all images in the batch at once
     const estimatedTotal = avgOutputPerPage * sentPages.length;
     let lastProgressUpdate = 0;
@@ -482,7 +558,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
             .update({
               where: { id: jobId },
               data: {
-                currentStep: `Dávka ${batchIdx + 1}/${batches.length} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
+                currentStep: `Dávka ${batchNo}/${totalBatches} — ${currentTokens.toLocaleString('cs')} / ~${estimated.toLocaleString('cs')} tokenů (${pct}%)`,
               },
             })
             .catch(() => {});
@@ -491,9 +567,15 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     } catch (err) {
       // Odmítnutí bezpečnostním filtrem (i po fallbacku) se týká jen této dávky –
       // stránky dostanou chybu, job pokračuje dalšími dávkami.
-      if (!(err instanceof OcrRefusalError)) throw err;
+      if (!(err instanceof OcrRefusalError)) {
+        // Volání selhalo bez známé spotřeby (síť, chyba API) – rezervaci uvolnit
+        await releaseCreditHold(hold).catch((releaseErr: unknown) => {
+          console.error(`[Worker] Release of hold ${hold.id} failed:`, releaseErr);
+        });
+        throw err;
+      }
       console.warn(
-        `[Worker] Batch ${batchIdx + 1} refused (${err.category ?? 'unknown'}):`,
+        `[Worker] Batch ${batchNo} refused (${err.category ?? 'unknown'}):`,
         err.message,
       );
       // Vlastní klíč odmítnutí: po reclaimu může tatáž sada stránek projít –
@@ -502,19 +584,14 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         jobId,
         sentPages.map((p) => p.pageId),
       );
-      const refusedDescription = `OCR dávka ${batchIdx + 1} – odmítnuto modelem${collectionLabel}`;
-      await billRefusedAttempt(userId, err.usage, refusedDescription, refusedReferenceId).catch(
-        (billingErr: unknown) => {
-          console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
-        },
-      );
-      await billDeclinedAttempts(
-        jobId,
-        userId,
-        err.declinedAttempts,
-        refusedDescription,
-        refusedReferenceId,
-      );
+      const refusedDescription = `OCR dávka ${batchNo} – odmítnuto modelem${collectionLabel}`;
+      await settleCreditHold(hold, [
+        ...refusalCharges(err.usage, refusedReferenceId, refusedDescription),
+        ...declinedAttemptCharges(err.declinedAttempts, refusedDescription, refusedReferenceId),
+      ]).catch(async (billingErr: unknown) => {
+        console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
+        await releaseCreditHold(hold).catch(() => false);
+      });
       for (const p of sentPages) {
         errors.push(`Stránka ${p.pageId}: ${err.message}`);
         await markPageFailed(p.pageId, p.existingDocId, err.message);
@@ -541,40 +618,29 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       declinedAttempts,
     } = batchResult;
 
-    // Odečet hned po získání usage, ještě před ukládáním – pád workeru mezi uložením
-    // a odečtem by jinak nechal zpracování nezaplacené. Klíč je deterministický
-    // a odvozený od jobu a stránek dávky (BIL-3): dřívější `batch-${jobId}-${batchIdx}`
-    // po reclaimu kolidoval – dávky se číslují znovu od 0, nová dávka 0 (jiné
-    // stránky) tak „idempotentně" prošla bez zaplacení. Opakované zpracování
-    // stejných stránek po restartu se naopak neúčtuje dvakrát.
-    // Chyba billingu (DB, opakované P2034 u Serializable transakce) nesmí
-    // zahodit výstup dávky, který už je zaplacený Anthropicu: výsledky se
-    // uloží a další dávky se zastaví stejně jako při nedostatku kreditu.
-    let deductResult: { success: boolean };
+    // Vyúčtování hned po získání usage, ještě před ukládáním – pád workeru mezi
+    // uložením a odečtem by jinak nechal zpracování nezaplacené. Pokusy, které
+    // serverový fallback odmítl, top-level usage nepokrývá – účtují se zvlášť
+    // (každý svým modelem a s klíčem odvozeným od klíče dávky) v téže rezervaci.
+    // Chyba billingu (DB) nesmí zahodit výstup dávky, který už je zaplacený
+    // Anthropicu: výsledky se uloží a další dávky se zastaví.
     let billingFailed = false;
-    const batchDescription = `OCR dávka ${batchIdx + 1} (${sentPages.length} stránek)${collectionLabel}`;
-    const batchReferenceId = ocrBatchReferenceId(
-      jobId,
-      sentPages.map((p) => p.pageId),
-    );
     try {
-      deductResult = await deductTokensIfSufficient(
-        userId,
-        inputTokens,
-        outputTokens,
-        batchDescription,
-        batchReferenceId,
-        model,
-      );
+      await settleCreditHold(hold, [
+        {
+          referenceId: batchReferenceId,
+          description: batchDescription,
+          model,
+          inputTokens,
+          outputTokens,
+        },
+        ...declinedAttemptCharges(declinedAttempts, batchDescription, batchReferenceId),
+      ]);
     } catch (err) {
-      console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchIdx + 1}:`, err);
-      deductResult = { success: false };
+      console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchNo}:`, err);
       billingFailed = true;
+      await releaseCreditHold(hold).catch(() => false);
     }
-    // Pokusy, které serverový fallback odmítl, top-level usage nepokrývá – účtují
-    // se zvlášť (každý svým modelem a s klíčem odvozeným od klíče dávky). Jejich
-    // chyba se jen zaloguje a výsledek hlavního odečtu nemění.
-    await billDeclinedAttempts(jobId, userId, declinedAttempts, batchDescription, batchReferenceId);
 
     // Distribute tokens proportionally across pages in the batch
     const perPageInputTokens = Math.round(inputTokens / sentPages.length);
@@ -645,40 +711,31 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     }
 
     // Update completed count
-    const batchCompleted = batch.length;
-    completed += batchCompleted;
+    completed += batch.length;
 
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
         completedPages: completed,
-        currentStep: `Dávka ${batchIdx + 1}/${batches.length} hotova`,
+        currentStep: `Dávka ${batchNo}/${totalBatches} hotova`,
       },
     });
 
     console.log(
-      `[Worker] Batch ${batchIdx + 1}/${batches.length} done: ${sentPages.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
+      `[Worker] Batch ${batchNo}/${totalBatches} done: ${sentPages.length} pages in ${processingTimeMs}ms (${model}, ${inputTokens}+${outputTokens} tokens)`,
     );
 
-    // If deduction failed, stop further batches
-    if (!deductResult.success) {
-      const remainingPageIds = batches
-        .slice(batchIdx + 1)
-        .flat()
-        .map((p) => p.pageId);
-      await resetUnfinishedPages(remainingPageIds);
-      errors.push(
-        billingFailed
-          ? 'Odečet kreditu selhal – výsledky dávky uloženy, zpracování zastaveno'
-          : 'Nedostatečný kredit pro další zpracování',
-      );
+    // Vyúčtování selhalo – další dávky nespouštět
+    if (billingFailed) {
+      await resetUnfinishedPages(queue.flat().map((p) => p.pageId));
+      errors.push('Odečet kreditu selhal – výsledky dávky uloženy, zpracování zastaveno');
       await prisma.processingJob.update({
         where: { id: jobId },
         data: {
           status: 'error',
           completedPages: completed,
           errors: await errorsKeepingReclaimMarkers(jobId, errors),
-          currentStep: billingFailed ? 'Odečet kreditu selhal' : 'Nedostatečný kredit',
+          currentStep: 'Odečet kreditu selhal',
         },
       });
       return;
@@ -692,11 +749,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     const jobStatus = jobRecord?.status ?? 'running';
 
     if (jobStatus === 'cancelled') {
-      const remainingPageIds = batches
-        .slice(batchIdx + 1)
-        .flat()
-        .map((p) => p.pageId);
-      await resetUnfinishedPages(remainingPageIds);
+      await resetUnfinishedPages(queue.flat().map((p) => p.pageId));
       return;
     }
 
@@ -765,55 +818,66 @@ function pageSetDigest(pageIds: string[]): string {
 }
 
 /**
- * Naúčtuje odmítnutý pokus, pokud ho účtuje Anthropic (`isRefusalBilled`):
- * odmítnutí uprostřed výstupu vždy, odmítnutí před výstupem jen v účtovaných
- * kategoriích. Volání už proběhlo, proto bezpodmínečně (`deductTokens`, ne
- * `…IfSufficient` – ta by při zůstatku ≤ 0, typicky hned po hlavním odečtu
- * dávky, pokus potichu neúčtovala); idempotenci drží `referenceId`.
+ * Kolik prvních stránek dávky se vejde do volného kreditu, když se rezervuje
+ * maximální cena dávky (`holdFor`). 0 = nestačí ani na jednu stránku.
  */
-async function billRefusedAttempt(
-  userId: string,
-  attempt: OcrAttemptUsage,
-  description: string,
-  referenceId: string,
-): Promise<void> {
-  if (!isRefusalBilled(attempt.outputTokens, attempt.category)) return;
-  if (attempt.inputTokens + attempt.outputTokens <= 0) return;
-  await deductTokens(
-    userId,
-    attempt.inputTokens,
-    attempt.outputTokens,
-    description,
-    referenceId,
-    attempt.model,
-  );
+export function affordablePageCount(
+  pageCount: number,
+  available: number,
+  holdFor: (pageCount: number) => number,
+): number {
+  for (let n = pageCount; n >= 1; n--) {
+    if (holdFor(n) <= available) return n;
+  }
+  return 0;
+}
+
+/** `referenceId` odečtu za deduplikovanou kopii – stránka + zdrojový dokument. */
+export function dedupReferenceId(pageId: string, sourceDocumentId: string): string {
+  return `dedup:${pageId}:${sourceDocumentId}`;
 }
 
 /**
- * Naúčtuje pokusy, které v řetězci serverového fallbacku odmítl předchozí model
- * (top-level usage je nepokrývá). Každý zvlášť, sazbou svého modelu a s klíčem
- * odvozeným od klíče dávky – opakované zpracování po restartu neúčtuje dvakrát.
- * Nikdy nevyhodí: chyba odečtu pokusu se zaloguje a nesmí ovlivnit hlavní odečet.
+ * Položka vyúčtování za odmítnutý pokus, pokud ho účtuje Anthropic
+ * (`isRefusalBilled`): odmítnutí uprostřed výstupu vždy, odmítnutí před
+ * výstupem jen v účtovaných kategoriích. Idempotenci drží `referenceId`.
  */
-async function billDeclinedAttempts(
-  jobId: string,
-  userId: string,
+function refusalCharges(
+  attempt: OcrAttemptUsage,
+  referenceId: string,
+  description: string,
+): CreditCharge[] {
+  if (!isRefusalBilled(attempt.outputTokens, attempt.category)) return [];
+  if (attempt.inputTokens + attempt.outputTokens <= 0) return [];
+  return [
+    {
+      referenceId,
+      description,
+      model: attempt.model,
+      inputTokens: attempt.inputTokens,
+      outputTokens: attempt.outputTokens,
+    },
+  ];
+}
+
+/**
+ * Položky za pokusy, které v řetězci serverového fallbacku odmítl předchozí
+ * model (top-level usage je nepokrývá). Každý zvlášť, sazbou svého modelu
+ * a s klíčem odvozeným od klíče dávky – opakované zpracování po restartu
+ * neúčtuje dvakrát.
+ */
+function declinedAttemptCharges(
   attempts: OcrAttemptUsage[],
   description: string,
   batchReferenceId: string,
-): Promise<void> {
-  for (const [i, attempt] of attempts.entries()) {
-    try {
-      await billRefusedAttempt(
-        userId,
-        attempt,
-        `${description} – odmítnutý pokus (${attempt.model})`,
-        declinedAttemptReferenceId(batchReferenceId, i),
-      );
-    } catch (err) {
-      console.error(`[Worker] Billing of declined attempt ${i} failed for job ${jobId}:`, err);
-    }
-  }
+): CreditCharge[] {
+  return attempts.flatMap((attempt, i) =>
+    refusalCharges(
+      attempt,
+      declinedAttemptReferenceId(batchReferenceId, i),
+      `${description} – odmítnutý pokus (${attempt.model})`,
+    ),
+  );
 }
 
 /**
@@ -862,29 +926,24 @@ ${glossaryText || '(empty)'}
 
 Return ONLY the JSON object, no markdown fences, no extra text.`;
 
-  const response = await createMessage({
-    model: TEXT_MODEL,
-    maxTokens: 8192,
-    temperature: 0.3,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  // Odečet hned po volání (BIL-3) – spotřeba vznikla, i když se výsledek neuloží.
-  // Deterministický referenceId (bez Date.now()) – opakovaný běh neúčtuje dvakrát.
-  await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Překlad dokumentu ${doc.id}${collectionLabel}`,
-    `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
-    response.model,
-  ).catch((err) => {
-    // Chybu odečtu nepolykat potichu (BIL-3)
-    console.error(
-      `[Worker] Token deduction failed for translation of document ${doc.id}:`,
-      err instanceof Error ? err.message : err,
-    );
-  });
+  // Rezervace před voláním a vyúčtování hned po něm (BIL-1) – spotřeba vznikla,
+  // i když se výsledek neuloží. Deterministický referenceId (bez Date.now()) –
+  // opakovaný běh neúčtuje dvakrát. Bez volného kreditu se volání nespustí
+  // (InsufficientCreditError skončí jako chyba stránky).
+  const { response } = await createBilledMessage(
+    {
+      userId,
+      jobId,
+      referenceId: `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
+      description: `Překlad dokumentu ${doc.id}${collectionLabel}`,
+    },
+    {
+      model: TEXT_MODEL,
+      maxTokens: LLM_MAX_TOKENS.translateDocument,
+      temperature: 0.3,
+      messages: [{ role: 'user', content: prompt }],
+    },
+  );
 
   // Useknutý (max_tokens) nebo odmítnutý výstup se neukládá – jinak by se jako
   // překlad uložil i surový neúplný JSON (`{"translation": "…`).

@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   BILLING,
+  MESSAGE_OVERHEAD_TOKENS,
   creditsForUsage,
   czkToCredits,
+  estimateInputTokens,
   isRefusalBilled,
   modelRates,
+  reservationCredits,
   usagePriceCzk,
 } from '../pricing';
 
@@ -54,5 +57,28 @@ describe('isRefusalBilled', () => {
     expect(isRefusalBilled(0, 'cyber')).toBe(false);
     expect(isRefusalBilled(0, 'general_harms')).toBe(false);
     expect(isRefusalBilled(0, null)).toBe(false);
+  });
+});
+
+describe('rezervace kreditu (BIL-1)', () => {
+  it('odhad vstupu s rezervou: 2 bajty UTF-8 na token (čeština má víc bajtů)', () => {
+    expect(estimateInputTokens('')).toBe(0);
+    expect(estimateInputTokens('abcd')).toBe(2);
+    // „ř" a „í" mají 2 bajty → 6 bajtů → 3 tokeny
+    expect(estimateInputTokens('řík')).toBe(3);
+  });
+
+  it('rezervuje celý max_tokens nejdražší sazbou z modelů, které můžou odpovědět', () => {
+    const credits = reservationCredits(['claude-opus-5-5', 'claude-opus-5'], 1000, 24_000);
+    // Opus 5 ($5/$25) je dražší než Opus 5.5 ($4/$20) – rozhoduje jeho sazba
+    expect(credits).toBe(creditsForUsage('claude-opus-5', 1000 + MESSAGE_OVERHEAD_TOKENS, 24_000));
+    expect(credits).toBeGreaterThan(
+      creditsForUsage('claude-opus-5-5', 1000 + MESSAGE_OVERHEAD_TOKENS, 24_000),
+    );
+  });
+
+  it('rezervace pokryje jakoukoli spotřebu do max_tokens se vstupem do odhadu', () => {
+    const hold = reservationCredits(['claude-sonnet-4-6'], 5000, 8192);
+    expect(hold).toBeGreaterThanOrEqual(creditsForUsage('claude-sonnet-4-6', 5000, 8192));
   });
 });

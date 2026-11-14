@@ -30,7 +30,12 @@ vi.mock('@/lib/infrastructure/db', () => ({
 
 vi.mock('@/lib/infrastructure/billing', () => ({
   checkBalance: (...args: unknown[]) => mockCheckBalance(...args),
-  deductTokensIfSufficient: vi.fn(),
+  reserveCredits: vi.fn().mockResolvedValue({
+    ok: true,
+    hold: { id: 'h', userId: 'user-1', amount: 1, referenceId: 'r' },
+  }),
+  settleCreditHold: vi.fn(),
+  releaseCreditHold: vi.fn(),
 }));
 
 vi.mock('@/lib/infrastructure/auth-utils', () => ({
@@ -67,7 +72,13 @@ const ctx = (id: string): { params: Promise<{ id: string }> } => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockCheckBalance.mockResolvedValue({ balance: 1000, sufficient: true });
+  mockCheckBalance.mockResolvedValue({
+    balance: 1_000_000,
+    reserved: 0,
+    available: 1_000_000,
+    required: 1,
+    sufficient: true,
+  });
   mockCollectionFindUnique.mockResolvedValue({
     id: 'col-1',
     userId: 'user-1',
@@ -78,7 +89,13 @@ beforeEach(() => {
 
 describe('POST /api/collections/[id]/translate-context', () => {
   it('returns 402 when balance is insufficient', async () => {
-    mockCheckBalance.mockResolvedValue({ balance: 0, sufficient: false });
+    mockCheckBalance.mockResolvedValue({
+      balance: 0,
+      reserved: 0,
+      available: 0,
+      required: 300_000,
+      sufficient: false,
+    });
 
     const res = await translateContext(
       post('http://localhost/api/collections/col-1/translate-context', { targetLanguage: 'en' }),

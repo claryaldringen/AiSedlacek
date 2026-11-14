@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
-import { checkBalance } from '@/lib/infrastructure/billing';
+import { requireCredit } from '@/lib/infrastructure/credit';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -43,11 +49,19 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('noProcessedDocuments') }, { status: 422 });
   }
 
-  // Check token balance before enqueuing
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
-  }
+  // Předběžná kontrola volného kreditu na opravu aspoň prvního dokumentu (BIL-1);
+  // worker rezervuje před každým dokumentem a při nedostatku zbytek nezpracuje.
+  const noCredit = await requireCredit(
+    request,
+    t,
+    userId,
+    reservationCredits(
+      [TEXT_MODEL],
+      estimateInputTokens(collection.context),
+      LLM_MAX_TOKENS.fixContext,
+    ),
+  );
+  if (noCredit) return noCredit;
 
   // Create ProcessingJob for the worker to pick up
   const job = await prisma.processingJob.create({

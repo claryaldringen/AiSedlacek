@@ -1,14 +1,22 @@
 import { NextRequest } from 'next/server';
+import { randomUUID } from 'crypto';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { releaseCreditHold, reserveCredits, settleCreditHold } from '@/lib/infrastructure/billing';
+import { insufficientCreditBody } from '@/lib/infrastructure/credit';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import {
+  LLM_MAX_TOKENS,
+  MAX_IMAGE_INPUT_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -56,29 +64,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
-
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    const encoder = new TextEncoder();
-    const body = encoder.encode(
-      `data: ${JSON.stringify({ type: 'insufficient_tokens', balance })}\n\n`,
-    );
-    return new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(body);
-          controller.close();
-        },
-      }),
-      {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-        },
-      },
-    );
-  }
 
   const { id } = await params;
 
@@ -195,6 +180,28 @@ ${glossaryText}`;
     claudeMessages.push({ role: messages[i]!.role, content: messages[i]!.content });
   }
 
+  // Rezervace maximální ceny odpovědi před voláním modelu (BIL-1): odhad vstupu
+  // (systémový prompt, kontext dokumentu, konverzace, obrázek) + celý max_tokens.
+  // Bez volného kreditu se model nezavolá. Klíč je unikátní pro každý request –
+  // chat se neopakuje automaticky, každé odeslání je nová placená operace.
+  const referenceId = `chat:${id}:${randomUUID()}`;
+  const reservation = await reserveCredits({
+    userId,
+    referenceId,
+    description: `Chat s dokumentem ${id}`,
+    amount: reservationCredits(
+      [TEXT_MODEL],
+      estimateInputTokens(
+        [SYSTEM_PROMPT, contextText, ...messages.map((m) => m.content)].join('\n'),
+      ) + (imageBase64 ? MAX_IMAGE_INPUT_TOKENS : 0),
+      LLM_MAX_TOKENS.chat,
+    ),
+  });
+  if (!reservation.ok) {
+    return Response.json(insufficientCreditBody(request, t, reservation), { status: 402 });
+  }
+  const hold = reservation.hold;
+
   // Stream response
   const client = new Anthropic();
   const encoder = new TextEncoder();
@@ -220,7 +227,8 @@ ${glossaryText}`;
       };
 
       // Spotřeba se účtuje nejvýš jednou – ani selhání účtování v hlavní cestě
-      // nesmí vést k druhému (částečnému) stržení v chybové cestě.
+      // nesmí vést k druhému (částečnému) stržení v chybové cestě. Vyúčtování
+      // uzavře rezervaci; nevyužitá část se vrací (BIL-1).
       let charged = false;
       const charge = async (
         inputTokens: number,
@@ -230,16 +238,13 @@ ${glossaryText}`;
       ): Promise<void> => {
         if (charged) return;
         charged = true;
-        const deductResult = await deductTokensIfSufficient(
-          userId,
-          inputTokens,
-          outputTokens,
-          description,
-          `chat-${id}-${Date.now()}`,
-          model,
-        );
-        if (!deductResult.success) {
-          console.warn(`[Chat] Insufficient balance for user ${userId}, response already streamed`);
+        try {
+          await settleCreditHold(hold, [
+            { referenceId, description, model, inputTokens, outputTokens },
+          ]);
+        } catch (billingErr) {
+          await releaseCreditHold(hold).catch(() => false);
+          throw billingErr;
         }
       };
 
@@ -308,6 +313,13 @@ ${glossaryText}`;
         const message = err instanceof Error ? err.message : t('serverError');
         send({ type: 'error', error: message });
       } finally {
+        // Rezervace, kterou nic nevyúčtovalo (chyba před message_start, selhání
+        // účtování), se uvolní – jinak by blokovala kredit až do vypršení.
+        if (!charged) {
+          await releaseCreditHold(hold).catch((releaseErr: unknown) => {
+            console.error('[Chat] Uvolnění rezervace selhalo:', releaseErr);
+          });
+        }
         if (!closed) {
           closed = true;
           try {

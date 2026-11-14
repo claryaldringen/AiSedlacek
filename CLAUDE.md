@@ -26,7 +26,7 @@ Jazyky překladu: `cs`, `en`, `de`, `fr`, `la` (`TRANSLATION_LANGUAGES` v `packa
 - **LLM:** Claude API – modely v `packages/shared/src/models.ts` (`OCR_MODEL` = Opus 5.5 s `effort: medium` a serverovým fallbackem při odmítnutí,
   `TEXT_MODEL` = Sonnet 4.6 pro retranslaci, chat, kontexty, metadata)
 - **Obrázky:** Sharp (validace formátu z obsahu, náhledy, příprava pro API), soubory na lokálním disku (`UPLOAD_DIR`)
-- **Billing:** append-only ledger `TokenTransaction`, Stripe Checkout + webhook, Fio (převod s VS), QR platby. Ceník v `packages/shared/src/pricing.ts` – účtuje se skutečný náklad API podle modelu (vstup/výstup zvlášť) × marže; UI počítá stejnou funkcí
+- **Billing:** append-only ledger `TokenTransaction`, Stripe Checkout + webhook, Fio (převod s VS), QR platby. Ceník v `packages/shared/src/pricing.ts` – účtuje se skutečný náklad API podle modelu (vstup/výstup zvlášť) × marže; UI počítá stejnou funkcí. Zůstatek nikdy nejde do minusu: před každým voláním LLM se atomicky rezervuje maximální cena (`CreditHold`), po volání se odečte skutečná spotřeba a zbytek se vrátí
 - **E-maily:** Resend (bez `RESEND_API_KEY` jen konzolový výpis – v produkci nutné nastavit)
 - **Deployment:** Hetzner VPS (sdílený s dalšími aplikacemi), PM2 + Caddy – viz [docs/deployment.md](docs/deployment.md)
 
@@ -52,7 +52,8 @@ Worker (apps/worker) – handler podle ProcessingJob.type
   ocr              → process-pages.ts: příprava (dedup jen v rámci uživatele, přeskočení
                      prázdných/přeložených), dávky ~6 stránek → processWithClaudeBatch
                      (packages/ocr), obrázky se načítají až pro konkrétní dávku,
-                     odečet kreditu hned po volání (deterministické referenceId),
+                     rezervace kreditu před dávkou (při nízkém zůstatku menší
+                     dávky), vyúčtování hned po volání (deterministické referenceId),
                      uložení Document + Translation + GlossaryEntry + DocumentVersion.
                      jobData {"regenerate": true} = přepsat existující dokument na místě
                      (předchozí obsah jako verze ai_regenerate, nic se nemaže).
@@ -88,6 +89,7 @@ User 1──N Collection 1──N Page 1──1 Document 1──N Translation
   ├──N WorkspaceMember N──1 Workspace
   ├──N ProcessingJob
   ├──N TokenTransaction        (ledger – zůstatek = součet)
+  ├──N CreditHold              (rezervace kreditu před voláním LLM)
   ├──N ApiToken                (CLI, ukládá se jen SHA-256)
   └──  Account / Session / VerificationToken / PasswordResetToken (NextAuth)
 PublicSlug (slug → collection | page)
@@ -101,6 +103,7 @@ PublicSlug (slug → collection | page)
 | **DocumentVersion** | `version` auto-increment per dokument (retry na kolizi), `source`: ai_initial, ai_retranslate, ai_regenerate, manual_edit |
 | **ProcessingJob** | `type`: ocr, retranslate, generate-context, fix-contexts, translate-context; `jobData` (JSON) |
 | **TokenTransaction** | idempotence přes `@@unique([userId, referenceId])` |
+| **CreditHold** | `status`: active, settled, released. Volný kredit = zůstatek − aktivní rezervace. Osiřelé rezervace uvolňuje úklid přerušených jobů (`jobId`) a TTL (`expiresAt`) |
 
 ---
 

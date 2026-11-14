@@ -1,9 +1,14 @@
 export {
   getTokenBalance,
+  getCreditState,
   checkBalance,
   createTransaction,
-  deductTokens,
-  deductTokensIfSufficient,
+  reserveCredits,
+  settleCreditHold,
+  releaseCreditHold,
+  runBilledCall,
+  InsufficientCreditError,
   czkToTokens,
   generateVariableSymbol,
 } from '@ai-sedlacek/db/billing';
+export type { CreditCharge, CreditHoldHandle } from '@ai-sedlacek/db/billing';

@@ -14,7 +14,13 @@ vi.mock('@/lib/infrastructure/db', () => ({
 }));
 
 vi.mock('@/lib/infrastructure/billing', () => ({
-  checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
+  checkBalance: vi.fn().mockResolvedValue({
+    balance: 1_000_000,
+    reserved: 0,
+    available: 1_000_000,
+    required: 1,
+    sufficient: true,
+  }),
 }));
 
 vi.mock('@/lib/auth', () => ({

@@ -2,11 +2,11 @@
  * Worker handler for fixing document-level contexts against collection context.
  */
 
-import { createMessage } from '../lib/llm';
+import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { InsufficientCreditError } from '@ai-sedlacek/db/billing';
+import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 
 export interface FixContextsJobData {
@@ -60,6 +60,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
 
   let completed = 0;
   let succeeded = 0;
+  let outOfCredit = false;
   const errors: string[] = [];
 
   for (const doc of documents) {
@@ -71,13 +72,23 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
     });
 
     try {
-      const response = await createMessage({
-        model: TEXT_MODEL,
-        maxTokens: 2048,
-        messages: [
-          {
-            role: 'user',
-            content: `Máš k dispozici kontext celého díla (svazku) a kontext jednoho konkrétního dokumentu (stránky) z tohoto díla. Kontext dokumentu byl vytvořen bez znalosti kontextu díla a může obsahovat obecné informace o díle, které patří spíše do kontextu svazku.
+      // Rezervace před každým voláním a vyúčtování hned po něm (BIL-1) – spotřeba
+      // vznikla, i když se výsledek neuloží. Deterministický referenceId (bez
+      // Date.now()) – opakovaný běh jobu neúčtuje tentýž dokument dvakrát.
+      const { response } = await createBilledMessage(
+        {
+          userId,
+          jobId,
+          referenceId: `fix-context:${jobId}:${doc.id}`,
+          description: `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
+        },
+        {
+          model: TEXT_MODEL,
+          maxTokens: LLM_MAX_TOKENS.fixContext,
+          messages: [
+            {
+              role: 'user',
+              content: `Máš k dispozici kontext celého díla (svazku) a kontext jednoho konkrétního dokumentu (stránky) z tohoto díla. Kontext dokumentu byl vytvořen bez znalosti kontextu díla a může obsahovat obecné informace o díle, které patří spíše do kontextu svazku.
 
 Tvým úkolem je přepsat kontext dokumentu tak, aby:
 1. Neobsahoval informace, které už jsou v kontextu díla (neopakuj je)
@@ -97,23 +108,10 @@ ${doc.context}
 ${doc.transcription.slice(0, 2000)}
 
 Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
-          },
-        ],
-      });
-
-      // Odečet hned po volání (BIL-3) – spotřeba vznikla, i když se výsledek
-      // neuloží. Deterministický referenceId (bez Date.now()) – opakovaný běh
-      // jobu neúčtuje tentýž dokument dvakrát.
-      await deductTokensIfSufficient(
-        userId,
-        response.inputTokens,
-        response.outputTokens,
-        `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
-        `fix-context:${jobId}:${doc.id}`,
-        response.model,
-      ).catch((err) => {
-        console.warn('[Worker:fix-contexts] Token deduction failed:', err);
-      });
+            },
+          ],
+        },
+      );
 
       // Useknutý (max_tokens) nebo odmítnutý výstup kontext nepřepíše
       if (response.stopReason !== 'end_turn') {
@@ -135,6 +133,15 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       completed++;
       succeeded++;
     } catch (err) {
+      if (err instanceof InsufficientCreditError) {
+        // Došel volný kredit – zbylé dokumenty se nezpracují (další volání by
+        // stejně neprošla); hotové opravy zůstávají uložené.
+        outOfCredit = true;
+        errors.push(
+          `Nedostatečný kredit – oprava kontextu zastavena, ${documents.length - completed} dokumentů nezpracováno (potřeba ${err.required.toLocaleString('cs')} tokenů, volných ${Math.max(0, err.available).toLocaleString('cs')})`,
+        );
+        break;
+      }
       completed++;
       const message = err instanceof Error ? err.message : 'Chyba';
       errors.push(`Dokument ${doc.id}: ${message}`);
@@ -162,8 +169,8 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
   await prisma.processingJob.update({
     where: { id: jobId },
     data: {
-      status: errors.length > 0 && succeeded === 0 ? 'error' : 'completed',
-      currentStep: 'Hotovo',
+      status: outOfCredit || (errors.length > 0 && succeeded === 0) ? 'error' : 'completed',
+      currentStep: outOfCredit ? 'Nedostatečný kredit' : 'Hotovo',
       completedPages: completed,
       errors: await errorsKeepingReclaimMarkers(jobId, errors),
     },

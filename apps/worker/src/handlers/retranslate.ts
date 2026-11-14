@@ -2,11 +2,10 @@
  * Worker handler for retranslation jobs.
  */
 
-import { createMessage } from '../lib/llm';
+import { createBilledMessage } from '../lib/billed-message';
 import { LANGUAGE_NAMES, LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 
 const STEPS_CS = {
   loading: 'Načítám dokument…',
@@ -119,12 +118,25 @@ Return ONLY the updated translation in markdown, nothing else.`;
         : `Translate this historical transcription into modern ${langName}. Preserve structure, all references and citations. Use square brackets to explain archaic terms. Format as markdown.\n\n${doc.transcription}`;
   }
 
-  const response = await createMessage({
-    model: TEXT_MODEL,
-    maxTokens: 8192,
-    temperature: 0.3,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // Rezervace maximální ceny před voláním, vyúčtování skutečné spotřeby hned
+  // po něm (BIL-1) – i když se výsledek nakonec neuloží. Bez volného kreditu se
+  // model nezavolá a job skončí chybou (InsufficientCreditError).
+  const { response } = await createBilledMessage(
+    {
+      userId,
+      jobId,
+      // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož
+      // jobu po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
+      referenceId: `retranslate:${jobId}:${documentId}:${targetLang}`,
+      description: `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
+    },
+    {
+      model: TEXT_MODEL,
+      maxTokens: LLM_MAX_TOKENS.retranslate,
+      temperature: 0.3,
+      messages: [{ role: 'user', content: prompt }],
+    },
+  );
 
   const translatedText = response.text;
 
@@ -132,25 +144,6 @@ Return ONLY the updated translation in markdown, nothing else.`;
     where: { id: jobId },
     data: { currentStep: s.saving },
   });
-
-  // Atomically check balance and deduct tokens – hned po volání, spotřeba vznikla
-  // i v případě, že se výsledek nakonec neuloží.
-  const deductResult = await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
-    // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož jobu
-    // po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
-    `retranslate:${jobId}:${documentId}:${targetLang}`,
-    response.model,
-  );
-
-  if (!deductResult.success) {
-    console.warn(
-      `[Worker:retranslate] Insufficient balance for user ${userId}, saving result anyway`,
-    );
-  }
 
   // Useknutý (max_tokens) nebo odmítnutý výstup by přepsal překlad neúplným
   // textem – neukládat (spotřeba je už naúčtovaná výše).

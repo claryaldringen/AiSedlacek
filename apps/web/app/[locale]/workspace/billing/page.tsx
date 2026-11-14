@@ -22,6 +22,8 @@ interface TokenTransaction {
 
 interface BalanceResponse {
   balance: number;
+  /** Kredit rezervovaný pro právě běžící placené akce (BIL-1). */
+  reserved?: number;
   variableSymbol: number;
   tokensPer100Czk: number;
   fioEnabled: boolean;
@@ -63,6 +65,7 @@ function BillingContent(): React.JSX.Element {
 
   // Data state
   const [balance, setBalance] = useState<number | null>(null);
+  const [reserved, setReserved] = useState(0);
   const [variableSymbol, setVariableSymbol] = useState<number | null>(null);
   const [tokensPer100Czk, setTokensPer100Czk] = useState<number>(0);
   const [fioEnabled, setFioEnabled] = useState(false);
@@ -96,6 +99,7 @@ function BillingContent(): React.JSX.Element {
       if (!res.ok) return;
       const data = (await res.json()) as BalanceResponse;
       setBalance(data.balance);
+      setReserved(data.reserved ?? 0);
       setVariableSymbol(data.variableSymbol);
       setTokensPer100Czk(data.tokensPer100Czk);
       setFioEnabled(data.fioEnabled);
@@ -365,6 +369,11 @@ function BillingContent(): React.JSX.Element {
                   {formatTokens(balance ?? 0)}{' '}
                   <span className="text-lg font-normal text-slate-400">{t('tokens')}</span>
                 </p>
+                {reserved > 0 && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    {t('reservedForRunning', { tokens: formatTokens(reserved) })}
+                  </p>
+                )}
                 {tokensPer100Czk > 0 && (
                   <p className="mt-1 text-xs text-slate-400">
                     {t('tokensPerPrice', { tokens: formatTokensCompact(tokensPer100Czk) })}

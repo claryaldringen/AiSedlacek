@@ -6,6 +6,19 @@ import { NextRequest } from 'next/server';
 const mockCollectionFindUnique = vi.fn();
 const mockCollectionUpdate = vi.fn();
 const mockCreate = vi.fn();
+const mockCharges = vi.fn();
+const mockRunBilledCall = vi.fn();
+
+const { FakeInsufficientCreditError } = vi.hoisted(() => ({
+  FakeInsufficientCreditError: class extends Error {
+    constructor(
+      readonly required: number,
+      readonly available: number,
+    ) {
+      super('insufficient');
+    }
+  },
+}));
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
@@ -21,8 +34,15 @@ vi.mock('@/lib/infrastructure/auth-utils', () => ({
 }));
 
 vi.mock('@/lib/infrastructure/billing', () => ({
-  checkBalance: vi.fn().mockResolvedValue({ balance: 1000, sufficient: true }),
-  deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true }),
+  checkBalance: vi.fn().mockResolvedValue({
+    balance: 1_000_000,
+    reserved: 0,
+    available: 1_000_000,
+    required: 1,
+    sufficient: true,
+  }),
+  InsufficientCreditError: FakeInsufficientCreditError,
+  runBilledCall: (...args: unknown[]) => mockRunBilledCall(...args),
 }));
 
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -63,6 +83,14 @@ describe('POST /api/collections/[id]/fetch-context', () => {
       contextUrls: [],
     });
     mockCollectionUpdate.mockResolvedValue({});
+    // Průchozí rezervace: zavolá model a předá vyúčtované položky
+    mockRunBilledCall.mockImplementation(
+      async (reserve: unknown, call: () => Promise<unknown>, usage: (r: unknown) => unknown[]) => {
+        const result = await call();
+        mockCharges(reserve, usage(result));
+        return { result, billing: { ok: true } };
+      },
+    );
   });
 
   it('keeps the existing context when the model output was truncated', async () => {
@@ -71,6 +99,22 @@ describe('POST /api/collections/[id]/fetch-context', () => {
     const res = await POST(makeRequest({ text: 'Text z katalogu knihovny' }), ctx);
 
     expect(res.status).toBe(422);
+    expect(mockCollectionUpdate).not.toHaveBeenCalled();
+    // Useknutý výstup se i tak vyúčtuje – spotřeba vznikla
+    expect(mockCharges).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', amount: expect.any(Number) }),
+      [expect.objectContaining({ inputTokens: 100, outputTokens: 50 })],
+    );
+  });
+
+  it('returns 402 and keeps the context when free credit cannot cover the reservation', async () => {
+    mockRunBilledCall.mockRejectedValue(new FakeInsufficientCreditError(400_000, 1_000));
+
+    const res = await POST(makeRequest({ text: 'Text z katalogu knihovny' }), ctx);
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ code: 'insufficient_credit', required: 400_000 });
+    expect(mockCreate).not.toHaveBeenCalled();
     expect(mockCollectionUpdate).not.toHaveBeenCalled();
   });
 

@@ -16,7 +16,14 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 vi.mock('../prepare-image', () => ({ prepareImage: mocks.prepareImage }));
 
-import { processWithClaude, processWithClaudeBatch, OcrRefusalError } from '../process';
+import {
+  processWithClaude,
+  processWithClaudeBatch,
+  OcrRefusalError,
+  batchMaxTokens,
+  ocrBatchReservationCredits,
+} from '../process';
+import { MAX_IMAGE_INPUT_TOKENS, creditsForUsage } from '@ai-sedlacek/shared';
 
 const OCR_JSON = JSON.stringify({
   transcription: 'Text',
@@ -290,5 +297,27 @@ describe('server-side fallback – usage of declined attempts', () => {
     expect(refusal.declinedAttempts).toEqual([
       { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: 'cyber' },
     ]);
+  });
+});
+
+describe('rezervace kreditu před OCR dávkou (BIL-1)', () => {
+  it('pokryje celý max_tokens dávky a obrázky sazbou nejdražšího modelu řetězce fallbacku', () => {
+    for (const pages of [1, 3, 6]) {
+      const hold = ocrBatchReservationCredits(pages, 'Přepiš text z tohoto rukopisu.');
+      // Opus 5 / 4.8 ($5/$25) jsou dražší než Opus 5.5 – rezervace s nimi počítá
+      const worstCase = creditsForUsage(
+        'claude-opus-5',
+        pages * MAX_IMAGE_INPUT_TOKENS,
+        batchMaxTokens(pages),
+      );
+      expect(hold).toBeGreaterThanOrEqual(worstCase);
+    }
+  });
+
+  it('roste s počtem stránek a s délkou kontextu', () => {
+    expect(ocrBatchReservationCredits(2, '')).toBeGreaterThan(ocrBatchReservationCredits(1, ''));
+    expect(ocrBatchReservationCredits(1, 'x'.repeat(20_000))).toBeGreaterThan(
+      ocrBatchReservationCredits(1, ''),
+    );
   });
 });

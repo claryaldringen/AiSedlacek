@@ -26,6 +26,7 @@ model User {
   collections   Collection[]
   pages         Page[]
   tokenTransactions TokenTransaction[]
+  creditHolds    CreditHold[]
   processingJobs ProcessingJob[]
   workspaces           Workspace[]
   workspaceMemberships WorkspaceMember[]
@@ -264,6 +265,30 @@ model TokenTransaction {
 
   @@unique([userId, referenceId])
   @@index([userId, createdAt])
+}
+
+// Rezervace kreditu před placeným voláním LLM (BIL-1). Zůstatek v ledgeru
+// (součet TokenTransaction) se rezervací nemění – volný kredit = zůstatek
+// minus aktivní rezervace. Po volání se rezervace uzavře (`settled`) a do
+// ledgeru se zapíše jen skutečná spotřeba s `referenceId` rezervace; zbytek
+// rezervace se tím vrací. Rezervace osiřelé po pádu workeru/webu se uvolní
+// (`released`) při úklidu přerušených jobů nebo po vypršení `expiresAt`.
+model CreditHold {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int       // rezervované kredity (kladné)
+  referenceId String    // klíč operace = referenceId budoucího odečtu
+  description String
+  jobId       String?   // ProcessingJob, v rámci kterého rezervace vznikla
+  status      String    @default("active") // active | settled | released
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  closedAt    DateTime?
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@index([jobId])
 }
 
 // ---- Workspaces ----

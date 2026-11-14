@@ -31,7 +31,13 @@ vi.mock('@/lib/infrastructure/authz', () => ({
 }));
 
 vi.mock('@/lib/infrastructure/billing', () => ({
-  checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
+  checkBalance: vi.fn().mockResolvedValue({
+    balance: 1_000_000,
+    reserved: 0,
+    available: 1_000_000,
+    required: 1,
+    sufficient: true,
+  }),
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
@@ -226,12 +232,23 @@ describe('POST /api/pages/process', () => {
 
   it('returns 402 when balance is insufficient', async () => {
     const { checkBalance } = await import('@/lib/infrastructure/billing');
-    vi.mocked(checkBalance).mockResolvedValueOnce({ balance: 0, sufficient: false });
+    vi.mocked(checkBalance).mockResolvedValueOnce({
+      balance: 0,
+      reserved: 0,
+      available: 0,
+      required: 600_000,
+      sufficient: false,
+    });
 
     const res = await POST(makeRequest({ pageIds: ['page-1'] }));
 
     expect(res.status).toBe(402);
     const json = await res.json();
-    expect(json.error).toBe('Nedostatečný kredit');
+    expect(json.code).toBe('insufficient_credit');
+    expect(json.error).toMatch(
+      /^Nedostatečný kredit – akce potřebuje volných alespoň 600\s000 tokenů/,
+    );
+    // Předběžná kontrola počítá s rezervací maximální ceny aspoň jedné stránky
+    expect(vi.mocked(checkBalance).mock.calls[0]![1]).toBeGreaterThan(500_000);
   });
 });

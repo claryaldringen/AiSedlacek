@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
-import type { ProcessingMode } from '@ai-sedlacek/ocr';
+import { ocrBatchReservationCredits, type ProcessingMode } from '@ai-sedlacek/ocr';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
-import { checkBalance } from '@/lib/infrastructure/billing';
+import { requireCredit } from '@/lib/infrastructure/credit';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
@@ -66,18 +66,23 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
-  // Check token balance before starting
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return Response.json({ error: t('insufficientCredit'), balance }, { status: 402 });
-  }
-
   if (language !== undefined && language !== '' && !isTranslationLanguage(language)) {
     return Response.json({ error: t('unsupportedLanguage') }, { status: 400 });
   }
   const targetLang = isTranslationLanguage(language) ? language : 'cs';
   const processingMode: ProcessingMode =
     rawMode === 'translate' ? 'translate' : 'transcribe+translate';
+
+  // Předběžná kontrola (BIL-1): volný kredit musí stačit aspoň na rezervaci
+  // maximální ceny jedné stránky. Worker rezervuje před každou dávkou a při
+  // nízkém zůstatku dávky zmenší, případně zpracování zastaví.
+  const noCredit = await requireCredit(
+    request,
+    t,
+    userId,
+    ocrBatchReservationCredits(1, '', processingMode),
+  );
+  if (noCredit) return noCredit;
   const collectionId =
     typeof rawCollectionId === 'string'
       ? rawCollectionId

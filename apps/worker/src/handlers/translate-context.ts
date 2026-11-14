@@ -2,11 +2,10 @@
  * Worker handler for translating collection context to another language.
  */
 
-import { createMessage } from '../lib/llm';
+import { createBilledMessage } from '../lib/billed-message';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface TranslateContextJobData {
   collectionId: string;
@@ -38,33 +37,30 @@ export async function handleTranslateContext(
     LANGUAGE_NAMES[collection.contextLanguage ?? 'cs'] ?? collection.contextLanguage ?? 'Czech';
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
 
-  const response = await createMessage({
-    model: TEXT_MODEL,
-    // Dlouhý kontext se do 4096 tokenů nevešel a useknutý překlad nahradil originál.
-    maxTokens: 16_000,
-    messages: [
-      {
-        role: 'user',
-        content: `Translate the following historical manuscript context from ${sourceLang} to ${targetLang}. Keep the markdown formatting intact. Translate naturally — this is scholarly/academic text about a historical manuscript.
+  // Rezervace před voláním, vyúčtování hned po něm (BIL-1) – i když se výsledek
+  // neuloží, tokeny se spotřebovaly. Bez volného kreditu se model nezavolá.
+  const { response } = await createBilledMessage(
+    {
+      userId,
+      jobId,
+      // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+      referenceId: `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
+      description: `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
+    },
+    {
+      model: TEXT_MODEL,
+      // Dlouhý kontext se do 4096 tokenů nevešel a useknutý překlad nahradil originál.
+      maxTokens: LLM_MAX_TOKENS.translateContext,
+      messages: [
+        {
+          role: 'user',
+          content: `Translate the following historical manuscript context from ${sourceLang} to ${targetLang}. Keep the markdown formatting intact. Translate naturally — this is scholarly/academic text about a historical manuscript.
 
 ${collection.context}`,
-      },
-    ],
-  });
-
-  // Odečíst hned po volání (BIL-3) – i když se výsledek neuloží, tokeny
-  // se spotřebovaly.
-  await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
-    // Deterministický klíč z jobu (BIL-3, dřív Date.now())
-    `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
-    response.model,
-  ).catch((err) => {
-    console.warn('[Worker:translate-context] Token deduction failed:', err);
-  });
+        },
+      ],
+    },
+  );
 
   // Kontext svazku nemá historii a překlad nahrazuje originál – přepsat ho smí
   // jen kompletní, neprázdný výstup (DAT-2).

@@ -10,18 +10,16 @@ const mocks = vi.hoisted(() => ({
     document: { update: vi.fn() },
   },
   createMessage: vi.fn(),
-  deductTokensIfSufficient: vi.fn(),
   createVersion: vi.fn(),
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
-vi.mock('@ai-sedlacek/db/billing', () => ({
-  deductTokensIfSufficient: mocks.deductTokensIfSufficient,
-}));
+vi.mock('@ai-sedlacek/db/billing', async () => (await import('./billing-mock')).billingModule());
 vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersion }));
 vi.mock('../lib/llm', () => ({ createMessage: mocks.createMessage, isCliMode: () => false }));
 
 import { handleFixContexts } from '../handlers/fix-contexts';
+import { billing, charges, refuseReservations, resetBillingMock } from './billing-mock';
 import { RECLAIM_MARKER } from '../lib/reclaim';
 
 function response(text: string, stopReason: string): Record<string, unknown> {
@@ -43,7 +41,7 @@ beforeEach(() => {
       { document: { id: 'doc-2', context: 'starý kontext 2', transcription: 't2' } },
     ],
   });
-  mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });
+  resetBillingMock();
   mocks.createVersion.mockResolvedValue(undefined);
 });
 
@@ -64,7 +62,7 @@ describe('fix-contexts – neúplný výstup modelu', () => {
     expect(mocks.createVersion).toHaveBeenCalledTimes(1);
     expect(mocks.createVersion.mock.calls[0]![0]).toBe('doc-2');
     // Obě volání se naúčtují
-    expect(mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4])).toEqual([
+    expect(charges().map((c) => c.referenceId)).toEqual([
       'fix-context:job-f:doc-1',
       'fix-context:job-f:doc-2',
     ]);
@@ -90,5 +88,39 @@ describe('fix-contexts – neúplný výstup modelu', () => {
     expect(lastJobUpdate.data.status).toBe('error');
     expect(lastJobUpdate.data.errors[0]).toBe(marker);
     expect(lastJobUpdate.data.errors).toHaveLength(3);
+  });
+});
+
+describe('fix-contexts – rezervace kreditu (BIL-1)', () => {
+  it('rezervuje před každým voláním; když kredit dojde, zbylé dokumenty nezpracuje', async () => {
+    mocks.createMessage.mockResolvedValue(response('Nový kontext', 'end_turn'));
+    billing.reserveCredits
+      .mockImplementationOnce(
+        async (p: { userId: string; amount: number; referenceId: string }) => ({
+          ok: true,
+          hold: { id: 'h1', userId: p.userId, amount: p.amount, referenceId: p.referenceId },
+        }),
+      )
+      .mockResolvedValueOnce({ ok: false, required: 50_000, available: 100 });
+
+    await handleFixContexts('job-f', { collectionId: 'col-1', userId: 'user-1' });
+
+    // Druhý dokument se k modelu vůbec nedostal
+    expect(mocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.update).toHaveBeenCalledTimes(1);
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'error',
+      currentStep: 'Nedostatečný kredit',
+      errors: [expect.stringContaining('1 dokumentů nezpracováno')],
+    });
+  });
+
+  it('bez kreditu na první dokument model nezavolá', async () => {
+    refuseReservations(0);
+
+    await handleFixContexts('job-f', { collectionId: 'col-1', userId: 'user-1' });
+
+    expect(mocks.createMessage).not.toHaveBeenCalled();
   });
 });

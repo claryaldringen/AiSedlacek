@@ -51,6 +51,8 @@ let fake: FakeMessageStream;
 
 const mockDocumentFindUnique = vi.fn();
 const mockDeduct = vi.fn();
+const mockReserve = vi.fn();
+const mockRelease = vi.fn();
 const mockPrepareImage = vi.fn();
 const mockWithSharpLimit = vi.fn();
 
@@ -60,9 +62,33 @@ vi.mock('@/lib/infrastructure/db', () => ({
   },
 }));
 
+// Vyúčtování rezervace se v testu rozloží na položky ve tvaru dřívějšího odečtu
+// (uživatel, vstup, výstup, popis, referenceId, model).
 vi.mock('@/lib/infrastructure/billing', () => ({
-  checkBalance: vi.fn().mockResolvedValue({ balance: 1000, sufficient: true }),
-  deductTokensIfSufficient: (...args: unknown[]) => mockDeduct(...args),
+  reserveCredits: (...args: unknown[]) => mockReserve(...args),
+  releaseCreditHold: (...args: unknown[]) => mockRelease(...args),
+  settleCreditHold: async (
+    hold: { userId: string },
+    charges: {
+      inputTokens: number;
+      outputTokens: number;
+      description: string;
+      referenceId: string;
+      model: string;
+    }[],
+  ) => {
+    for (const c of charges) {
+      await mockDeduct(
+        hold.userId,
+        c.inputTokens,
+        c.outputTokens,
+        c.description,
+        c.referenceId,
+        c.model,
+      );
+    }
+    return { charged: 0, uncovered: 0, transactions: [] };
+  },
 }));
 
 vi.mock('@/lib/infrastructure/auth-utils', () => ({
@@ -134,7 +160,14 @@ beforeEach(() => {
     glossary: [],
     page: { imageUrl: '/uploads/scan.jpg', mimeType: 'image/jpeg', userId: 'user-1' },
   });
-  mockDeduct.mockResolvedValue({ success: true, balance: 900 });
+  mockDeduct.mockResolvedValue(undefined);
+  mockReserve.mockImplementation(
+    async (p: { userId: string; amount: number; referenceId: string }) => ({
+      ok: true,
+      hold: { id: 'hold-1', userId: p.userId, amount: p.amount, referenceId: p.referenceId },
+    }),
+  );
+  mockRelease.mockResolvedValue(true);
   mockPrepareImage.mockResolvedValue({ buffer: Buffer.from('prepared'), mediaType: 'image/jpeg' });
   mockWithSharpLimit.mockImplementation((fn: () => Promise<unknown>) => fn());
 });
@@ -172,7 +205,7 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
       1200,
       80,
       'Chat s dokumentem doc-1',
-      expect.stringMatching(/^chat-doc-1-/),
+      expect.stringMatching(/^chat:doc-1:/),
       'claude-sonnet-4-6',
     );
   });
@@ -202,7 +235,7 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
       1500,
       100,
       'Chat s dokumentem doc-1 (přerušeno)',
-      expect.stringMatching(/^chat-doc-1-/),
+      expect.stringMatching(/^chat:doc-1:/),
       'claude-sonnet-4-6',
     );
   });
@@ -239,6 +272,8 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
 
     expect(events).toEqual([{ type: 'error', error: 'invalid_request_error' }]);
     expect(mockDeduct).not.toHaveBeenCalled();
+    // Rezervace bez spotřeby se uvolní (neblokuje kredit do vypršení)
+    expect(mockRelease).toHaveBeenCalledWith(expect.objectContaining({ id: 'hold-1' }));
   });
 
   it('does not charge twice when billing of the final message fails', async () => {
@@ -255,5 +290,36 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
 
     expect(events.at(-1)).toEqual({ type: 'error', error: 'DB down' });
     expect(mockDeduct).toHaveBeenCalledTimes(1);
+    expect(mockRelease).toHaveBeenCalled();
+  });
+
+  it('reserves the maximum price before calling the model (BIL-1)', async () => {
+    const res = await chat(post(), ctx);
+    fake.finish({ model: 'claude-sonnet-4-6', usage: { input_tokens: 10, output_tokens: 5 } });
+    await readEvents(res.body!.getReader());
+
+    expect(mockReserve).toHaveBeenCalledTimes(1);
+    const reserve = mockReserve.mock.calls[0]![0];
+    expect(reserve).toMatchObject({
+      userId: 'user-1',
+      referenceId: expect.stringMatching(/^chat:doc-1:/),
+    });
+    // 8192 výstupních tokenů Sonnetu 4.6 × $15 za 1M × 23 × 2 / 50 Kč za 1M kreditů ≈ 113 050
+    expect(reserve.amount).toBeGreaterThan(113_000);
+    // Vyúčtování proběhne s klíčem rezervace
+    expect(mockDeduct.mock.calls[0]![4]).toBe(reserve.referenceId);
+  });
+
+  it('returns 402 without calling the model when the reservation is refused', async () => {
+    mockReserve.mockResolvedValue({ ok: false, required: 120_000, available: 500 });
+    fake = undefined as unknown as FakeMessageStream;
+
+    const res = await chat(post(), ctx);
+
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as { code: string; required: number; error: string };
+    expect(body).toMatchObject({ code: 'insufficient_credit', required: 120_000 });
+    expect(body.error).toContain('120');
+    expect(fake).toBeUndefined();
   });
 });

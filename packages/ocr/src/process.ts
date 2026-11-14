@@ -10,7 +10,11 @@ import {
   BATCH_OCR_INSTRUCTION,
   TRANSLATE_ONLY_SYSTEM_PROMPT,
   OCR_EFFORT,
+  OCR_FALLBACK_MODELS,
   OCR_MODEL,
+  MAX_IMAGE_INPUT_TOKENS,
+  estimateInputTokens,
+  reservationCredits,
 } from '@ai-sedlacek/shared';
 import { parseOcrJson, parseOcrJsonBatchChecked } from './parse';
 import { prepareImage } from './prepare-image';
@@ -58,6 +62,43 @@ export function batchMaxTokens(pageCount: number): number {
   return Math.min(
     BATCH_MAX_OUTPUT_TOKENS,
     THINKING_TOKENS_RESERVE + BATCH_OUTPUT_TOKENS_PER_PAGE * Math.max(1, pageCount),
+  );
+}
+
+/** Systémový prompt OCR dávky podle režimu. */
+function batchSystemPrompt(mode: ProcessingMode | undefined): string {
+  return (
+    (mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) +
+    '\n\n' +
+    BATCH_OCR_INSTRUCTION
+  );
+}
+
+/**
+ * Kredity, které se rezervují před OCR dávkou (BIL-1) – horní odhad ceny volání:
+ *
+ * - vstup: strop tokenů na obrázek × počet stránek + systémový prompt + text
+ *   požadavku (kontext svazku a předchozích stránek), dvakrát – odmítnutý pokus
+ *   serverového fallbacku se účtuje zvlášť a může zaplatit vstup ještě jednou;
+ * - výstup: celý `max_tokens` dávky (včetně rezervy na thinking);
+ * - sazba nejdražšího z modelů, které můžou odpovědět (OCR_MODEL + fallbacky).
+ *
+ * Po volání se účtuje skutečná spotřeba a zbytek rezervace se vrací.
+ */
+export function ocrBatchReservationCredits(
+  pageCount: number,
+  promptText: string,
+  mode?: ProcessingMode,
+): number {
+  const pages = Math.max(1, pageCount);
+  const inputTokens =
+    pages * (MAX_IMAGE_INPUT_TOKENS + estimateInputTokens('imageIndex 00:')) +
+    estimateInputTokens(batchSystemPrompt(mode)) +
+    estimateInputTokens(promptText);
+  return reservationCredits(
+    [OCR_MODEL, ...OCR_FALLBACK_MODELS],
+    2 * inputTokens,
+    batchMaxTokens(pages),
   );
 }
 
@@ -373,10 +414,7 @@ export async function processWithClaudeBatch(
     declinedAttempts: declined,
   } = await streamOcrRequest({
     maxTokens,
-    system:
-      (options?.mode === 'translate' ? TRANSLATE_ONLY_SYSTEM_PROMPT : SYSTEM_PROMPT) +
-      '\n\n' +
-      BATCH_OCR_INSTRUCTION,
+    system: batchSystemPrompt(options?.mode),
     messages: [{ role: 'user', content }],
     onText: (delta) => {
       streamedLength += delta.length;

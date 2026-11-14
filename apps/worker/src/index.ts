@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
+import { releaseJobHolds } from '@ai-sedlacek/db/billing';
 import { processPages } from './handlers/process-pages';
 import { handleRetranslate } from './handlers/retranslate';
 import { handleGenerateContext } from './handlers/generate-context';
@@ -108,6 +109,14 @@ async function executeJob(job: {
       }
     }
   } finally {
+    // Pojistka (BIL-1): rezervace, kterou job nevyúčtoval ani neuvolnil (chyba
+    // mezi rezervací a voláním), nesmí blokovat kredit až do úklidu po TTL.
+    await releaseJobHolds([job.id]).catch((err: unknown) => {
+      console.error(
+        `[Worker] Release of holds for job ${job.id} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
     activeJobCount--;
     if (jobType === 'ocr') {
       activeOcrCollections.delete(collectionKey);
