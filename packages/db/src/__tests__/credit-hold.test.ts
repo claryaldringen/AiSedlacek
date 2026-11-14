@@ -34,9 +34,11 @@ function matchesHold(h: Hold, where: Record<string, unknown>): boolean {
   for (const [key, cond] of Object.entries(where)) {
     const value = (h as unknown as Record<string, unknown>)[key];
     if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
-      const c = cond as { in?: unknown[]; lt?: Date };
+      const c = cond as { in?: unknown[]; lt?: Date; gt?: Date; not?: unknown };
       if (c.in && !c.in.includes(value)) return false;
       if (c.lt && !((value as Date) < c.lt)) return false;
+      if (c.gt && !((value as Date) > c.gt)) return false;
+      if ('not' in c && value === c.not) return false;
     } else if (value !== cond) {
       return false;
     }
@@ -112,6 +114,8 @@ vi.mock('../client', () => {
 
 import {
   InsufficientCreditError,
+  isBlockedByOtherHolds,
+  releaseAllJobHolds,
   checkBalance,
   consumeCredits,
   getCreditState,
@@ -177,7 +181,7 @@ describe('rezervace kreditu', () => {
       referenceId: 'b',
       description: 't',
     });
-    expect(res).toEqual({ ok: false, required: 200, available: 100 });
+    expect(res).toEqual({ ok: false, required: 200, available: 100, balance: 300, reserved: 200 });
     expect(db.holds).toHaveLength(1);
     await expect(
       reserveCreditsOrThrow({ userId: 'u1', amount: 200, referenceId: 'c', description: 't' }),
@@ -191,7 +195,7 @@ describe('rezervace kreditu', () => {
       referenceId: 'a',
       description: 't',
     });
-    expect(res).toEqual({ ok: false, required: 1, available: 0 });
+    expect(res).toEqual({ ok: false, required: 1, available: 0, balance: 0, reserved: 0 });
   });
 
   it('aktivní rezervaci se stejným klíčem nezakládá podruhé', async () => {
@@ -368,12 +372,111 @@ describe('rezervace kreditu', () => {
     expect(await checkBalance('u1')).toMatchObject({ sufficient: true });
   });
 
+  it('rezervace po vypršení kredit neblokuje, ani když ji úklid ještě neuvolnil', async () => {
+    topUp('u1', 1000);
+    await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 800,
+      referenceId: 'old',
+      description: 't',
+    });
+    db.holds[0]!.expiresAt = new Date(Date.now() - 1000);
+    expect(await getCreditState('u1')).toEqual({ balance: 1000, reserved: 0, available: 1000 });
+    expect(db.holds[0]!.status).toBe('active');
+  });
+
+  it('vyúčtování prošlé vlastní rezervace ji nezapočítá dvakrát – zůstatek nejde pod nulu', async () => {
+    topUp('u1', 1000);
+    const hold = await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 800,
+      referenceId: 'op',
+      description: 't',
+    });
+    // Rezervace vypršela (dlouhé volání), mezitím jiná akce zabrala volný kredit
+    db.holds[0]!.expiresAt = new Date(Date.now() - 1000);
+    await reserveCreditsOrThrow({ userId: 'u1', amount: 900, referenceId: 'b', description: 't' });
+    // Volných je 1000 − 900 = 100; prošlá vlastní rezervace se nesmí přičíst
+    const settle = await settleCreditHold(hold, [fixed('op', 700)]);
+    expect(settle).toMatchObject({ charged: 100, uncovered: 600 });
+    expect(await getCreditState('u1')).toEqual({ balance: 900, reserved: 900, available: 0 });
+  });
+
+  it('odmítnutá rezervace hlásí zůstatek a cizí rezervace (čekání místo chyby)', async () => {
+    topUp('u1', 1000);
+    await reserveCreditsOrThrow({ userId: 'u1', amount: 700, referenceId: 'a', description: 't' });
+    const res = await reserveCredits({
+      userId: 'u1',
+      amount: 600,
+      referenceId: 'b',
+      description: 't',
+    });
+    expect(res).toEqual({ ok: false, required: 600, available: 300, balance: 1000, reserved: 700 });
+    expect(!res.ok && isBlockedByOtherHolds(res)).toBe(true);
+    const err = await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 600,
+      referenceId: 'c',
+      description: 't',
+    }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ required: 600, available: 300, balance: 1000, reserved: 700 });
+  });
+
+  it('skutečný nedostatek (bez cizích rezervací nebo nad zůstatek) není čekání', () => {
+    expect(isBlockedByOtherHolds({ required: 600, balance: 500, reserved: 0 })).toBe(false);
+    expect(isBlockedByOtherHolds({ required: 600, balance: 500, reserved: 400 })).toBe(false);
+    expect(isBlockedByOtherHolds({ required: 600, balance: 900, reserved: 400 })).toBe(true);
+  });
+
+  it('při startu workeru uvolní rezervace všech jobů, rezervace webu nechá', async () => {
+    topUp('u1', 1000);
+    await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 100,
+      referenceId: 'j1',
+      description: 't',
+      jobId: 'job-cancelled',
+    });
+    await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 100,
+      referenceId: 'j2',
+      description: 't',
+      jobId: 'job-error',
+    });
+    await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 100,
+      referenceId: 'chat',
+      description: 't',
+    });
+    expect(await releaseAllJobHolds()).toBe(2);
+    expect((await getCreditState('u1')).reserved).toBe(100);
+  });
+
+  it('consumeCredits provede efekt pod stejným zámkem a předá mu odečet', async () => {
+    topUp('u1', 100);
+    const effect = vi.fn(async () => 'kopie');
+    const res = await consumeCredits('u1', fixed('dedup', 60), effect);
+    expect(res).toMatchObject({ ok: true, value: 'kopie' });
+    expect(effect).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ charged: 60 }),
+    );
+    // Bez kreditu se efekt neprovede
+    const refused = await consumeCredits('u1', fixed('dedup-2', 60), effect);
+    expect(refused.ok).toBe(false);
+    expect(effect).toHaveBeenCalledTimes(1);
+  });
+
   it('consumeCredits odečte jen při dostatku volného kreditu a je idempotentní', async () => {
     topUp('u1', 100);
     expect(await consumeCredits('u1', fixed('dedup', 150))).toEqual({
       ok: false,
       required: 150,
       available: 100,
+      balance: 100,
+      reserved: 0,
     });
     expect((await consumeCredits('u1', fixed('dedup', 60))).ok).toBe(true);
     expect((await consumeCredits('u1', fixed('dedup', 60))).ok).toBe(true);

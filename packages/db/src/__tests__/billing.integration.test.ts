@@ -166,9 +166,54 @@ describe.skipIf(!url)('billing – rezervace proti PostgreSQL', () => {
   it('consumeCredits odečte jen při dostatku volného kreditu', async () => {
     const userId = await userWithBalance(100);
     const refused = await billing.consumeCredits(userId, fixed('dedup', 150));
-    expect(refused).toEqual({ ok: false, required: 150, available: 100 });
+    expect(refused).toEqual({
+      ok: false,
+      required: 150,
+      available: 100,
+      balance: 100,
+      reserved: 0,
+    });
     const ok = await billing.consumeCredits(userId, fixed('dedup', 60));
     expect(ok.ok).toBe(true);
     expect(await billing.getTokenBalance(userId)).toBe(40);
+  });
+
+  it('když efekt consumeCredits selže, odečet se vrátí (jedna transakce)', async () => {
+    const userId = await userWithBalance(100);
+    await expect(
+      billing.consumeCredits(userId, fixed('dedup-fail', 60), async (tx) => {
+        await tx.tokenTransaction.count({ where: { userId } });
+        throw new Error('kopie selhala');
+      }),
+    ).rejects.toThrow('kopie selhala');
+    expect(await billing.getTokenBalance(userId)).toBe(100);
+    // Opakování po opravě projde a zaplatí se jen jednou
+    const ok = await billing.consumeCredits(userId, fixed('dedup-fail', 60), async () => 'ok');
+    expect(ok).toMatchObject({ ok: true, value: 'ok' });
+    expect(await billing.getTokenBalance(userId)).toBe(40);
+  });
+
+  it('prošlá rezervace neblokuje a její vyúčtování nejde pod nulu', async () => {
+    const userId = await userWithBalance(1000);
+    const hold = await billing.reserveCreditsOrThrow({
+      userId,
+      amount: 800,
+      referenceId: 'op',
+      description: 't',
+    });
+    await prisma.creditHold.update({
+      where: { id: hold.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    expect((await billing.getCreditState(userId)).available).toBe(1000);
+    await billing.reserveCreditsOrThrow({
+      userId,
+      amount: 900,
+      referenceId: 'b',
+      description: 't',
+    });
+    const settle = await billing.settleCreditHold(hold, [fixed('op', 700)]);
+    expect(settle).toMatchObject({ charged: 100, uncovered: 600 });
+    expect(await billing.getTokenBalance(userId)).toBe(900);
   });
 });

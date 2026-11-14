@@ -31,6 +31,9 @@ const CREDIT_LOCK_CLASS = 727_001;
 
 type Tx = Prisma.TransactionClient;
 
+/** Transakční klient, ve kterém běží odečet (`consumeCredits` s efektem). */
+export type CreditTx = Tx;
+
 export async function getTokenBalance(userId: string): Promise<number> {
   const result = await prisma.tokenTransaction.aggregate({
     where: { userId },
@@ -42,17 +45,29 @@ export async function getTokenBalance(userId: string): Promise<number> {
 export interface CreditState {
   /** Zůstatek v ledgeru (součet transakcí). */
   balance: number;
-  /** Součet aktivních rezervací. */
+  /** Součet aktivních (nevypršených) rezervací. */
   reserved: number;
   /** Volný kredit = zůstatek − rezervace. */
   available: number;
 }
 
-async function readCreditState(client: Tx | typeof prisma, userId: string): Promise<CreditState> {
+/**
+ * Rezervace, která blokuje kredit: aktivní a nevypršená. Prošlá rezervace
+ * (pád webu, osiřelý job) kredit neblokuje, ani když ji úklid ještě neuvolnil.
+ */
+function liveHoldWhere(now: Date): { status: 'active'; expiresAt: { gt: Date } } {
+  return { status: 'active', expiresAt: { gt: now } };
+}
+
+async function readCreditState(
+  client: Tx | typeof prisma,
+  userId: string,
+  now = new Date(),
+): Promise<CreditState> {
   const [ledger, holds] = [
     await client.tokenTransaction.aggregate({ where: { userId }, _sum: { amount: true } }),
     await client.creditHold.aggregate({
-      where: { userId, status: 'active' },
+      where: { userId, ...liveHoldWhere(now) },
       _sum: { amount: true },
     }),
   ];
@@ -124,10 +139,27 @@ export class InsufficientCreditError extends Error {
   constructor(
     readonly required: number,
     readonly available: number,
+    /** Zůstatek v ledgeru (bez odečtu rezervací). */
+    readonly balance: number = available,
+    /** Kredit blokovaný jinými aktivními rezervacemi uživatele. */
+    readonly reserved: number = 0,
   ) {
     super(`Nedostatečný kredit: akce potřebuje ${required} kreditů, volných je ${available}`);
     this.name = 'InsufficientCreditError';
   }
+}
+
+/**
+ * Kredit chybí jen kvůli jiným běžícím akcím uživatele: bez jejich rezervací by
+ * zůstatek stačil. Job se v takovém případě nemá vzdát, ale počkat, až se
+ * rezervace uvolní (po vyúčtování se nevyužitá část vrací).
+ */
+export function isBlockedByOtherHolds(shortage: {
+  required: number;
+  balance?: number;
+  reserved?: number;
+}): boolean {
+  return (shortage.reserved ?? 0) > 0 && (shortage.balance ?? 0) >= shortage.required;
 }
 
 export interface CreditHoldHandle {
@@ -152,9 +184,14 @@ export interface ReserveParams {
   ttlMs?: number;
 }
 
-export type ReserveResult =
-  | { ok: true; hold: CreditHoldHandle }
-  | { ok: false; required: number; available: number };
+export interface CreditShortage {
+  required: number;
+  available: number;
+  balance: number;
+  reserved: number;
+}
+
+export type ReserveResult = { ok: true; hold: CreditHoldHandle } | ({ ok: false } & CreditShortage);
 
 /** Interaktivní transakce pod per-user zámkem (serializuje operace jednoho uživatele). */
 async function withUserLock<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -197,8 +234,8 @@ export async function reserveCredits(params: ReserveParams): Promise<ReserveResu
       return { ok: true, hold: { id: existing.id, userId, amount: existing.amount, referenceId } };
     }
 
-    const { available } = await readCreditState(tx, userId);
-    if (available < amount) return { ok: false, required: amount, available };
+    const state = await readCreditState(tx, userId, now);
+    if (state.available < amount) return { ok: false, required: amount, ...state };
 
     const hold = await tx.creditHold.create({
       data: {
@@ -229,7 +266,14 @@ export async function reserveCredits(params: ReserveParams): Promise<ReserveResu
 /** Jako `reserveCredits`, ale při nedostatku vyhodí `InsufficientCreditError`. */
 export async function reserveCreditsOrThrow(params: ReserveParams): Promise<CreditHoldHandle> {
   const result = await reserveCredits(params);
-  if (!result.ok) throw new InsufficientCreditError(result.required, result.available);
+  if (!result.ok) {
+    throw new InsufficientCreditError(
+      result.required,
+      result.available,
+      result.balance,
+      result.reserved,
+    );
+  }
   return result.hold;
 }
 
@@ -351,17 +395,21 @@ export async function settleCreditHold(
   charges: CreditCharge[],
 ): Promise<SettleResult> {
   const result = await withUserLock(hold.userId, async (tx) => {
+    const now = new Date();
     const current = await tx.creditHold.findUnique({
       where: { id: hold.id },
-      select: { status: true, amount: true },
+      select: { status: true, amount: true, expiresAt: true },
     });
-    const ownActive = current?.status === 'active' ? current.amount : 0;
-    const { available } = await readCreditState(tx, hold.userId);
-    const settled = await writeCharges(tx, hold.userId, charges, available + ownActive);
+    // Vlastní rezervaci lze přičíst jen tehdy, když ji `readCreditState` odečetl –
+    // tedy aktivní a nevypršenou. Prošlá rezervace se do `available` nepočítá;
+    // přičíst ji by kapacitu započetlo dvakrát a zůstatek by šel do minusu.
+    const ownLive = current?.status === 'active' && current.expiresAt > now ? current.amount : 0;
+    const { available } = await readCreditState(tx, hold.userId, now);
+    const settled = await writeCharges(tx, hold.userId, charges, available + ownLive);
     if (current?.status === 'active') {
       await tx.creditHold.update({
         where: { id: hold.id },
-        data: { status: 'settled', closedAt: new Date() },
+        data: { status: 'settled', closedAt: now },
       });
     }
     return settled;
@@ -394,6 +442,20 @@ export async function releaseJobHolds(jobIds: string[]): Promise<number> {
   return count;
 }
 
+/**
+ * Uvolní všechny aktivní rezervace jobů – volá se při startu workeru, kdy
+ * žádný job legitimně neběží (jediná instance). Pokryje i zrušené a chybové
+ * joby, které by jinak držely kredit až do vypršení TTL.
+ */
+export async function releaseAllJobHolds(): Promise<number> {
+  const { count } = await prisma.creditHold.updateMany({
+    where: { jobId: { not: null }, status: 'active' },
+    data: { status: 'released', closedAt: new Date() },
+  });
+  if (count > 0) console.log(`[Billing] Released ${count} hold(s) of jobs at worker startup`);
+  return count;
+}
+
 /** Uvolní rezervace po vypršení TTL (pád webu uprostřed volání). */
 export async function releaseExpiredHolds(now = new Date()): Promise<number> {
   const { count } = await prisma.creditHold.updateMany({
@@ -407,12 +469,17 @@ export async function releaseExpiredHolds(now = new Date()): Promise<number> {
 /**
  * Odečte pevnou částku jen tehdy, když na ni stačí volný kredit (bez volání LLM,
  * např. deduplikovaná kopie OCR). Idempotentní podle `referenceId`.
+ *
+ * `effect` (např. zápis kopie dokumentu) běží v TÉŽE transakci jako odečet:
+ * když selže, odečet se vrátí – uživatel nezaplatí za nic. U už zapsaného
+ * odečtu (opakovaný běh) se `effect` provede bez nového odečtu.
  */
-export async function consumeCredits(
+export async function consumeCredits<T = undefined>(
   userId: string,
   charge: CreditCharge,
+  effect?: (tx: Tx, charged: SettleResult) => Promise<T>,
 ): Promise<
-  { ok: true; result: SettleResult } | { ok: false; required: number; available: number }
+  { ok: true; result: SettleResult; value: T | undefined } | ({ ok: false } & CreditShortage)
 > {
   const required = chargeCredits(charge);
   return withUserLock(userId, async (tx) => {
@@ -420,26 +487,27 @@ export async function consumeCredits(
       where: { userId, referenceId: charge.referenceId },
       select: { id: true, amount: true },
     });
+    let result: SettleResult;
     if (existing) {
-      return {
-        ok: true as const,
-        result: {
-          charged: 0,
-          uncovered: 0,
-          transactions: [
-            {
-              referenceId: charge.referenceId,
-              id: existing.id,
-              amount: existing.amount,
-              existing: true,
-            },
-          ],
-        },
+      result = {
+        charged: 0,
+        uncovered: 0,
+        transactions: [
+          {
+            referenceId: charge.referenceId,
+            id: existing.id,
+            amount: existing.amount,
+            existing: true,
+          },
+        ],
       };
+    } else {
+      const state = await readCreditState(tx, userId);
+      if (state.available < required) return { ok: false as const, required, ...state };
+      result = await writeCharges(tx, userId, [charge], state.available);
     }
-    const { available } = await readCreditState(tx, userId);
-    if (available < required) return { ok: false as const, required, available };
-    return { ok: true as const, result: await writeCharges(tx, userId, [charge], available) };
+    const value = effect ? await effect(tx, result) : undefined;
+    return { ok: true as const, result, value };
   });
 }
 
