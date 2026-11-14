@@ -79,37 +79,63 @@ pg_env=(PGHOST="${db_host:-localhost}" PGPORT="${db_port:-5432}")
 if [ -n "$db_user" ]; then pg_env+=(PGUSER="$(urldecode "$db_user")"); fi
 if [ -n "$db_name" ]; then pg_env+=(PGDATABASE="$(urldecode "$db_name")"); fi
 
-pgpass_dir="$(mktemp -d)"
-trap 'rm -rf "$pgpass_dir"' EXIT
-chmod 700 "$pgpass_dir"
+work_dir="$(mktemp -d)"
+partial=""
+# Úklid při jakémkoli konci: dočasný .pgpass a rozepsaný (nepovedený) dump.
+cleanup() {
+  rm -rf "$work_dir"
+  if [ -n "$partial" ] && [ -e "$partial" ]; then rm -f "$partial"; fi
+}
+trap cleanup EXIT
+chmod 700 "$work_dir"
 if [ -n "$db_pass" ]; then
   (
     umask 077
     printf '*:*:*:%s:%s\n' \
       "$(pgpass_escape "$(urldecode "$db_user")")" \
-      "$(pgpass_escape "$(urldecode "$db_pass")")" >"$pgpass_dir/pgpass"
+      "$(pgpass_escape "$(urldecode "$db_pass")")" >"$work_dir/pgpass"
   )
-  pg_env+=(PGPASSFILE="$pgpass_dir/pgpass")
+  pg_env+=(PGPASSFILE="$work_dir/pgpass")
 fi
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
+# Dump se píše do .partial a na .dump se přejmenuje až po ověření – nepovedený
+# dump (přerušený zápis, plný disk) tak nikdy neleží jako *.dump a neodejde
+# off-site (tam by ho --ignore-existing už nikdy nenahradil).
+# `env -u PGPASSWORD`: zděděná PGPASSWORD z prostředí roota má v libpq přednost
+# před PGPASSFILE – záloha by pak padala na „password authentication failed".
 dump="$BACKUP_DIR/aisedlacek-$(date +%Y%m%d-%H%M%S).dump"
-env "${pg_env[@]}" pg_dump --format=custom --file="$dump"
-# Poškozený dump (přerušený zápis, plný disk) nesmí odejít jako záloha.
-pg_restore --list "$dump" >/dev/null
+partial="$dump.partial"
+env -u PGPASSWORD "${pg_env[@]}" pg_dump --format=custom --file="$partial"
+pg_restore --list "$partial" >/dev/null
+mv "$partial" "$dump"
+partial=""
 echo "DB dump: $dump ($(du -h "$dump" | cut -f1))"
 
-# Rotace lokálních dumpů (pre-deploy dumpy z deploy.sh včetně).
-find "$BACKUP_DIR" -name '*.dump' -mtime +"$RETENTION_DAYS" -delete
+# Rotace lokálních dumpů (pre-deploy dumpy z deploy.sh včetně) a starých
+# rozepsaných dumpů, které po sobě nechal přerušený běh (SIGKILL, pád serveru).
+find "$BACKUP_DIR" \( -name '*.dump' -o -name '*.dump.partial' \) -mtime +"$RETENTION_DAYS" -delete
 
 if [ -n "$BACKUP_REMOTE" ]; then
+  # Off-site jdou jen ověřené *.dump (i pre-deploy dumpy z deploy.sh, které se
+  # zapisují přímo): poškozený soubor by tam s --ignore-existing zůstal navždy.
+  ship_list="$work_dir/ship.list"
+  : >"$ship_list"
+  for f in "$BACKUP_DIR"/*.dump; do
+    [ -e "$f" ] || continue
+    if pg_restore --list "$f" >/dev/null 2>&1; then
+      printf '%s\n' "$(basename "$f")" >>"$ship_list"
+    else
+      echo "VAROVÁNÍ: $f není platný dump – off-site se neposílá" >&2
+    fi
+  done
   # Jen doplnit nové soubory: bez --delete (lokální rotace ani smazání se na cíl
   # nepropíše) a s --ignore-existing (už odeslaný dump ani upload se nepřepíše
   # lokálně poškozenou verzí). Názvy dumpů i uploadů jsou unikátní a soubory se
   # po zápisu nemění.
-  rsync -a --ignore-existing "$BACKUP_DIR/" "$BACKUP_REMOTE/db/"
+  rsync -a --ignore-existing --files-from="$ship_list" "$BACKUP_DIR/" "$BACKUP_REMOTE/db/"
   # Uploady jsou originály skenů (<uuid>.<přípona>, nikdy se nepřepisují).
   rsync -a --ignore-existing "$UPLOAD_DIR/" "$BACKUP_REMOTE/uploads/"
   echo "Off-site kopie: $BACKUP_REMOTE"
