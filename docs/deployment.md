@@ -286,7 +286,7 @@ systemctl reload caddy
 | `AUTH_SECRET`, `AUTH_TRUST_HOST`, `NEXTAUTH_URL` | ano | NextAuth v5 (`https://aisedlacek.com`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | ano | Google OAuth |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | ne | GitHub OAuth (v produkci zatím nenastaveno) |
-| `RESEND_API_KEY`, `EMAIL_FROM` | **ano** | Odesílání e-mailů. **Bez nich nefunguje registrace e-mailem** (ověřovací odkaz skončí jen v logu) ani reset hesla. V produkci k 2026-10-14 chybí. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | **ano** | Odesílání e-mailů přes Resend. **Bez nich nefunguje registrace e-mailem** (ověřovací odkaz skončí jen v logu) ani reset hesla. V produkci od 2026-11-14: `EMAIL_FROM="AI Sedláček <noreply@aisedlacek.com>"`, doména `aisedlacek.com` ověřená v Resendu (region EU, DNS v Cloudflare: CNAME `send` a `rsend`, TXT `resend._domainkey` a `_dmarc`), klíč jen pro odesílání z této domény. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ano | Platby kartou |
 | `FIO_API_TOKEN` | ne | Dobíjení převodem (bez něj se Fio v UI skryje) |
 | ~~`TOKEN_MULTIPLIER`, `TOKEN_PRICE_PER_MILLION`~~ | – | Od 2026-10 se nepoužívají. Ceník je v kódu (`packages/shared/src/pricing.ts`): uživatel platí skutečný náklad API daného modelu × marže 2 (kurz 23 Kč/USD), 1M kreditů = 50 Kč. |
