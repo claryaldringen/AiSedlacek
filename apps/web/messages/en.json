@@ -163,6 +163,7 @@
     "totalGrandPrice": "Grand total",
     "chargeValue": "{czk} CZK ({credits} tokens)",
     "chargeValueEstimated": "≈ {czk} CZK ({credits} tokens) – estimate by the current price list, processed before actual charges were recorded",
+    "chargeValueIncomplete": "at least {czk} CZK ({credits} tokens) – an interrupted chat reply is charged by its actual usage, which is not included here",
     "chargeValuePartlyEstimated": "{czk} CZK ({credits} tokens) – {estimated} tokens of it estimated for documents processed before actual charges were recorded",
     "imageSection": "Image",
     "format": "Format",

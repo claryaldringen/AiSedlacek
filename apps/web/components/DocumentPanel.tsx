@@ -6,6 +6,7 @@ import { ResultViewer, type DocumentResult } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import { addChatUsage } from '@/lib/chat-usage';
 
 interface DocumentPanelProps {
   page: PageItem | null;
@@ -401,12 +402,8 @@ export function DocumentPanel({
                       }}
                       onApplyUpdate={handleChatApplyUpdate}
                       onTokenUsage={(usage) => {
-                        onResultUpdate?.({
-                          ...result,
-                          chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
-                          chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
-                          chatModel: usage.model,
-                        });
+                        // Skutečně odečtené kredity (a tokeny) odpovědi k souhrnu chatu
+                        onResultUpdate?.(addChatUsage(result, usage));
                       }}
                     />
                   </div>

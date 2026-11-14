@@ -5,6 +5,12 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import {
+  INCOMPLETE_CHAT_USAGE,
+  chatUsageFromEvent,
+  type ChatStreamEvent,
+  type ChatTokenUsage,
+} from '@/lib/chat-usage';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -15,12 +21,6 @@ interface ProposedUpdate {
   field: 'transcription' | 'translation' | 'context';
   content: string;
   applied: boolean;
-}
-
-export interface ChatTokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  model: string;
 }
 
 interface DocumentChatProps {
@@ -166,6 +166,14 @@ export function DocumentChat({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Spotřebu hlásit přes poslední verzi callbacku (rodič v ní má aktuální
+  // výsledek – ne ten z doby odeslání) a jen pro dokument, ke kterému patří.
+  const onTokenUsageRef = useRef(onTokenUsage);
+  const documentIdRef = useRef(documentId);
+  useEffect(() => {
+    onTokenUsageRef.current = onTokenUsage;
+    documentIdRef.current = documentId;
+  });
 
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -193,6 +201,15 @@ export function DocumentChat({
 
     const abortController = new AbortController();
     abortRef.current = abortController;
+    const sentForDocument = documentId;
+    const reportUsage = (usage: ChatTokenUsage): void => {
+      if (documentIdRef.current === sentForDocument) onTokenUsageRef.current?.(usage);
+    };
+    // Dorazila koncová událost (`done`, `error` – s vyúčtováním, nebo bez spotřeby)?
+    // Když odpověď skončí bez ní (spojení spadlo, přerušení), skutečný odečet
+    // neznáme a cena chatu se označí jako neúplná.
+    let streamStarted = false;
+    let finalEventSeen = false;
 
     try {
       // apiFetch posílá x-locale – hláška 402 (nedostatek kreditu) i chyby přijdou
@@ -211,6 +228,7 @@ export function DocumentChat({
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error(t('missingStream'));
+      streamStarted = true;
 
       const decoder = new TextDecoder();
       let assistantText = '';
@@ -228,12 +246,11 @@ export function DocumentChat({
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6)) as {
-            type: string;
-            text?: string;
-            error?: string;
-            usage?: { inputTokens: number; outputTokens: number; model: string };
-          };
+          const data = JSON.parse(line.slice(6)) as ChatStreamEvent;
+          if (data.type === 'done' || data.type === 'error') finalEventSeen = true;
+          // Skutečně odečtené kredity – u `done` i u `error` po přerušení
+          const usage = chatUsageFromEvent(data);
+          if (usage) reportUsage(usage);
 
           if (data.type === 'text' && data.text) {
             assistantText += data.text;
@@ -242,8 +259,6 @@ export function DocumentChat({
               updated[updated.length - 1] = { role: 'assistant', content: assistantText };
               return updated;
             });
-          } else if (data.type === 'done' && data.usage) {
-            onTokenUsage?.(data.usage);
           } else if (data.type === 'error') {
             throw new Error(data.error ?? t('unknownError'));
           }
@@ -257,10 +272,12 @@ export function DocumentChat({
         { role: 'assistant', content: t('errorMessage', { message: errorMessage }) },
       ]);
     } finally {
+      // Server spotřebu přerušené odpovědi naúčtoval, ale její výši neznáme
+      if (streamStarted && !finalEventSeen) reportUsage(INCOMPLETE_CHAT_USAGE);
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, messages, documentId, streaming, onTokenUsage]);
+  }, [input, messages, documentId, streaming]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {

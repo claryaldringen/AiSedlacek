@@ -55,10 +55,12 @@ export interface DocumentResult {
   translationInputTokens?: number | null;
   translationOutputTokens?: number | null;
   translationChargedCredits?: number | null;
-  // Chat accumulated cost
+  // Chat v této relaci: tokeny a skutečně odečtené kredity (lib/chat-usage.ts)
   chatInputTokens?: number;
   chatOutputTokens?: number;
   chatModel?: string;
+  chatChargedCredits?: number;
+  chatChargeIncomplete?: boolean;
 }
 
 interface ResultViewerProps {
@@ -237,10 +239,17 @@ export function ResultViewer({
   const charges = resultCharges(result, readOnly);
   const chargeLabel = (charge: DisplayedCharge): string | null =>
     charge
-      ? t(charge.estimated ? 'chargeValueEstimated' : 'chargeValue', {
-          czk: formatCzk(charge.czk, locale),
-          credits: charge.credits.toLocaleString(locale),
-        })
+      ? t(
+          charge.incomplete
+            ? 'chargeValueIncomplete'
+            : charge.estimated
+              ? 'chargeValueEstimated'
+              : 'chargeValue',
+          {
+            czk: formatCzk(charge.czk, locale),
+            credits: charge.credits.toLocaleString(locale),
+          },
+        )
       : null;
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
@@ -613,7 +622,7 @@ export function ResultViewer({
                 </MetadataGroup>
               )}
 
-              {(result.chatInputTokens ?? 0) > 0 && (
+              {((result.chatInputTokens ?? 0) > 0 || charges.chat) && (
                 <MetadataGroup title={t('chat')}>
                   <MetadataRow label="Model" value={result.chatModel} />
                   <MetadataRow

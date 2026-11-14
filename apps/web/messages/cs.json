@@ -163,6 +163,7 @@
     "totalGrandPrice": "Celková cena",
     "chargeValue": "{czk} Kč ({credits} tokenů)",
     "chargeValueEstimated": "≈ {czk} Kč ({credits} tokenů) – odhad podle aktuálního ceníku, zpracováno před záznamem skutečného odečtu",
+    "chargeValueIncomplete": "alespoň {czk} Kč ({credits} tokenů) – přerušená odpověď chatu se účtuje podle skutečné spotřeby, její částka tu chybí",
     "chargeValuePartlyEstimated": "{czk} Kč ({credits} tokenů) – z toho {estimated} tokenů odhadem u dokumentů zpracovaných před záznamem skutečného odečtu",
     "imageSection": "Obrázek",
     "format": "Formát",

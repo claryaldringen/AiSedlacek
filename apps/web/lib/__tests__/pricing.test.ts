@@ -58,19 +58,42 @@ describe('resultCharges – ceny v panelu metadat', () => {
     chatModel: 'claude-sonnet-4-6',
     chatInputTokens: 100,
     chatOutputTokens: 50,
+    // Skutečně odečteno (server v SSE) – méně než 966 podle tokenů, kredit nestačil
+    chatChargedCredits: 900,
   };
 
-  it('chat se účtuje přesně – jeho cena se neoznačuje jako odhad', () => {
+  it('chat ukazuje skutečně odečtené kredity ze serveru, ne cenu podle tokenů', () => {
     const charges = resultCharges(result, false);
-    expect(charges.chat).toMatchObject({ credits: 966, estimated: false });
+    expect(charges.chat).toEqual({ czk: 0.045, credits: 900, estimated: false });
     // Starý dokument bez záznamu odečtu je odhad, a tím i celkem
     expect(charges.ocr).toMatchObject({ credits: 12_880, estimated: true });
-    expect(charges.total).toMatchObject({ credits: 12_880 + 966, estimated: true });
+    expect(charges.total).toMatchObject({ credits: 12_880 + 900, estimated: true });
   });
 
   it('se skutečným odečtem dokumentu není odhad ani celkem', () => {
     const charges = resultCharges({ ...result, chargedCredits: 12_000 }, false);
-    expect(charges.total).toMatchObject({ credits: 12_966, estimated: false });
+    expect(charges.total).toMatchObject({ credits: 12_900, estimated: false });
+  });
+
+  it('odpověď bez známého odečtu (spadlé spojení): cena chatu i celkem je neúplná', () => {
+    const charges = resultCharges(
+      { ...result, chargedCredits: 12_000, chatChargeIncomplete: true },
+      false,
+    );
+    expect(charges.chat).toMatchObject({ credits: 900, incomplete: true, estimated: false });
+    expect(charges.total).toMatchObject({ credits: 12_900, incomplete: true });
+    // I bez jakéhokoli známého odečtu se chat ukáže – jako neúplný
+    expect(resultCharges({ chatChargeIncomplete: true, chatInputTokens: 0 }, false).chat).toEqual({
+      czk: 0,
+      credits: 0,
+      estimated: false,
+      incomplete: true,
+    });
+  });
+
+  it('starší server bez odečtu v SSE: cena chatu odhadem z tokenů (označená)', () => {
+    const charges = resultCharges({ ...result, chatChargedCredits: undefined }, false);
+    expect(charges.chat).toMatchObject({ credits: 966, estimated: true });
   });
 
   it('cizí dokument (jen pro čtení) ceny nezobrazuje', () => {

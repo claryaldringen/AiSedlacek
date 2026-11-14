@@ -229,18 +229,20 @@ ${glossaryText}`;
 
       // Spotřeba se účtuje nejvýš jednou – ani selhání účtování v hlavní cestě
       // nesmí vést k druhému (částečnému) stržení v chybové cestě. Vyúčtování
-      // uzavře rezervaci; nevyužitá část se vrací (BIL-1).
+      // uzavře rezervaci; nevyužitá část se vrací (BIL-1). Vrací skutečně
+      // odečtené kredity – UI je ukáže jako cenu chatu (může být méně než cena
+      // podle tokenů, když volný kredit nestačil – přesah nese provozovatel).
       let charged = false;
       const charge = async (
         inputTokens: number,
         outputTokens: number,
         model: string,
         description: string,
-      ): Promise<void> => {
-        if (charged) return;
+      ): Promise<number> => {
+        if (charged) return 0;
         charged = true;
         try {
-          await settleCreditHold(hold, [
+          const settled = await settleCreditHold(hold, [
             {
               referenceId,
               description,
@@ -250,6 +252,7 @@ ${glossaryText}`;
               collectionId: doc.page.collectionId,
             },
           ]);
+          return settled.charged;
         } catch (billingErr) {
           await releaseCreditHold(hold).catch(() => false);
           throw billingErr;
@@ -280,15 +283,14 @@ ${glossaryText}`;
           model: finalMsg.model,
         };
 
-        // Atomically check balance and deduct tokens
-        await charge(
+        const chargedCredits = await charge(
           finalMsg.usage.input_tokens,
           finalMsg.usage.output_tokens,
           finalMsg.model,
           `Chat s dokumentem ${id}`,
         );
 
-        send({ type: 'done', usage });
+        send({ type: 'done', usage, chargedCredits });
       } catch (err) {
         // Přerušená odpověď (klient zavřel spojení, chyba API uprostřed streamu) už
         // stála peníze – naúčtujeme spotřebu, která vznikla. Vstup a model známe
@@ -297,6 +299,8 @@ ${glossaryText}`;
         // na token – spíš podhodnocuje, uživatel nezaplatí víc, než spotřeboval).
         // Bez snapshotu (chyba před message_start) žádná spotřeba nevznikla.
         const partial = anthropicStream?.currentMessage;
+        // Částečná spotřeba, kterou se podařilo vyúčtovat – klient ji přičte k ceně
+        let partialCharge: Record<string, unknown> = {};
         if (partial && !charged) {
           const outputTokens = Math.max(
             partial.usage.output_tokens,
@@ -308,19 +312,27 @@ ${glossaryText}`;
               `in=${partial.usage.input_tokens} out=${outputTokens}`,
           );
           try {
-            await charge(
+            const chargedCredits = await charge(
               partial.usage.input_tokens,
               outputTokens,
               partial.model,
               `Chat s dokumentem ${id} (přerušeno)`,
             );
+            partialCharge = {
+              usage: {
+                inputTokens: partial.usage.input_tokens,
+                outputTokens,
+                model: partial.model,
+              },
+              chargedCredits,
+            };
           } catch (billingErr) {
             console.error('[Chat] Částečnou spotřebu se nepodařilo naúčtovat:', billingErr);
           }
         }
 
         // Surová chyba SDK/Prismy jen do logu, klientovi obecná lokalizovaná hláška
-        send({ type: 'error', error: publicLlmError(err, t, 'Chat') });
+        send({ type: 'error', error: publicLlmError(err, t, 'Chat'), ...partialCharge });
       } finally {
         // Rezervace, kterou nic nevyúčtovalo (chyba před message_start, selhání
         // účtování), se uvolní – jinak by blokovala kredit až do vypršení.

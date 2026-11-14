@@ -81,17 +81,22 @@ vi.mock('@/lib/infrastructure/billing', () => ({
     }[],
   ) => {
     mockChargeCollections(charges.map((c) => c.collectionId));
+    // mockDeduct vrací skutečně odečtené kredity položky (výchozí 0)
+    let charged = 0;
     for (const c of charges) {
-      await mockDeduct(
-        hold.userId,
-        c.inputTokens,
-        c.outputTokens,
-        c.description,
-        c.referenceId,
-        c.model,
-      );
+      charged +=
+        Number(
+          await mockDeduct(
+            hold.userId,
+            c.inputTokens,
+            c.outputTokens,
+            c.description,
+            c.referenceId,
+            c.model,
+          ),
+        ) || 0;
     }
-    return { charged: 0, uncovered: 0, transactions: [] };
+    return { charged, uncovered: 0, transactions: [] };
   },
 }));
 
@@ -200,6 +205,8 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
   });
 
   it('streams text, charges the final usage with the responding model and closes', async () => {
+    // Skutečný odečet (může být nižší než cena podle tokenů, když kredit nestačil)
+    mockDeduct.mockResolvedValue(4321);
     const res = await chat(post(), ctx);
     const reader = res.body!.getReader();
 
@@ -212,6 +219,7 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
       {
         type: 'done',
         usage: { inputTokens: 1200, outputTokens: 80, model: 'claude-sonnet-4-6' },
+        chargedCredits: 4321,
       },
     ]);
     expect(mockDeduct).toHaveBeenCalledTimes(1);
@@ -264,11 +272,18 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
       usage: { input_tokens: 1500, output_tokens: 300 },
     };
     fake.emitText('krátké');
+    mockDeduct.mockResolvedValue(2500);
     fake.fail(new Error('Overloaded'));
     const events = await readEvents(reader);
 
-    // Surová zpráva chyby ke klientovi nejde – jen obecná hláška v jazyce UI
-    expect(events.at(-1)).toEqual({ type: 'error', error: 'Interní chyba serveru' });
+    // Surová zpráva chyby ke klientovi nejde – jen obecná hláška v jazyce UI;
+    // naúčtovaná částečná spotřeba přijde i se skutečně odečtenými kredity
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: 'Interní chyba serveru',
+      usage: { inputTokens: 1500, outputTokens: 300, model: 'claude-sonnet-4-6' },
+      chargedCredits: 2500,
+    });
     expect(mockDeduct).toHaveBeenCalledWith(
       'user-1',
       1500,
