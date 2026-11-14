@@ -66,7 +66,11 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   // Retranslace téhož dokumentu už čeká nebo běží → 409 s jejím jobId (před
   // kontrolou kreditu); druhý job by překlad zaplatil podruhé a přepsal první.
-  const running = await runningJobConflict(t, userId, { type: 'retranslate', documentId: id });
+  const running = await runningJobConflict(t, userId, {
+    type: 'retranslate',
+    documentId: id,
+    language: targetLang,
+  });
   if (running) return running;
 
   // Předběžná kontrola volného kreditu na rezervaci volání (BIL-1) – závazně se

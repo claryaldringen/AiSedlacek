@@ -10,11 +10,12 @@ type Translator = (key: string, values?: Record<string, string | number>) => str
 
 type TextJobTarget =
   | { type: 'generate-context' | 'translate-context' | 'fix-contexts'; collectionId: string }
-  | { type: 'retranslate'; documentId: string };
+  | { type: 'retranslate'; documentId: string; language: string };
 
 /**
  * Najde čekající/běžící job uživatele stejného typu nad stejným cílem
- * (svazek podle `collectionId`, retranslace podle `documentId` v `jobData`).
+ * (svazek podle `collectionId`, retranslace podle `documentId` a jazyka
+ * v `jobData` – retranslace do jiného jazyka nekoliduje).
  *
  * @returns 409 s `jobId` běžícího jobu, nebo null, když žádný neběží
  */
@@ -30,9 +31,14 @@ export async function runningJobConflict(
       status: { in: ['queued', 'running'] },
       ...('collectionId' in target
         ? { collectionId: target.collectionId }
-        : // jobData retranslace je JSON.stringify({ documentId, … }) – ID dokumentu
-          // je ověřené (existuje a patří uživateli), uvozovky v něm nejsou
-          { jobData: { contains: `"documentId":${JSON.stringify(target.documentId)}` } }),
+        : // jobData retranslace je JSON.stringify({ documentId, language, … }) – ID
+          // dokumentu je ověřené (existuje a patří uživateli) a jazyk z whitelistu
+          {
+            AND: [
+              { jobData: { contains: `"documentId":${JSON.stringify(target.documentId)}` } },
+              { jobData: { contains: `"language":${JSON.stringify(target.language)}` } },
+            ],
+          }),
     },
     select: { id: true },
   });

@@ -99,7 +99,11 @@ describe('POST /api/documents/[id]/retranslate', () => {
         userId: 'test-user-id',
         type: 'retranslate',
         status: { in: ['queued', 'running'] },
-        jobData: { contains: '"documentId":"doc-1"' },
+        // Jen retranslace téhož dokumentu do téhož jazyka (cs neblokuje en)
+        AND: [
+          { jobData: { contains: '"documentId":"doc-1"' } },
+          { jobData: { contains: '"language":"cs"' } },
+        ],
       },
       select: { id: true },
     });

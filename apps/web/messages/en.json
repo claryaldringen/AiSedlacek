@@ -125,6 +125,9 @@
     "generationFailed": "Context generation failed",
     "jobInsufficientCredit": "Insufficient credit – processing stopped. Top up your tokens (Top up tokens in the account menu) and start it again.",
     "jobCreditBusy": "Your credit is temporarily reserved by another running job – the action stopped and unfinished pages are waiting to be started again. Start it again once the running job finishes (no top-up needed).",
+    "jobCreditBusyText": "Your credit is temporarily reserved by another running job – the action stopped. Start it again once the running job finishes (no top-up needed).",
+    "fixContextsInsufficientCredit": "Insufficient credit – fixing contexts stopped. {fixed} of {total} documents fixed. Top up your tokens (Top up tokens in the account menu); running it again fixes all documents of the volume again.",
+    "fixContextsCreditBusy": "Your credit is temporarily reserved by another running job – fixing contexts stopped. {fixed} of {total} documents fixed. Running it again once the running job finishes fixes all documents of the volume again.",
     "jobPartialInsufficientCredit": "Some pages were not processed because of insufficient credit. Top up your tokens (Top up tokens in the account menu) and process those pages again.",
     "renameCollectionPrompt": "New volume name:",
     "readOnlyCollection": "Read-only – this volume belongs to another user"
@@ -177,6 +180,8 @@
     "retranslationFailed": "Retranslation failed – the translation was left unchanged.",
     "retranslationInsufficientCredit": "Insufficient credit – the translation was not updated (the transcription is saved).",
     "retranslationCreditBusy": "Your credit is temporarily reserved by another running job – the translation was not updated (the transcription is saved). Start it again once the running job finishes.",
+    "retranslationStillRunning": "The translation of this document is still being recalculated by another action – your latest transcription edit is not reflected in it yet (the transcription is saved). Save the transcription again once it finishes.",
+    "translationWaitingForPreviousRetranslation": "Waiting for the previous translation update to finish – then the translation will be updated from your latest transcription edit…",
     "retranslationErrorChanged": "The translation was edited manually in the meantime – the retranslation result was not saved.",
     "retranslationErrorTruncated": "The model did not return a complete translation (output was cut off) – the translation was left unchanged.",
     "retranslationErrorRefused": "The model declined the translation (safety filter) – the translation was left unchanged.",

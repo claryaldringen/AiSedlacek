@@ -125,6 +125,9 @@
     "generationFailed": "Generování kontextu selhalo",
     "jobInsufficientCredit": "Nedostatek kreditu – zpracování se zastavilo. Dobijte tokeny (Dobít tokeny v nabídce účtu) a spusťte ho znovu.",
     "jobCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – akce se zastavila a nedokončené stránky čekají na nové spuštění. Spusťte ji znovu po dokončení běžícího zpracování (dobíjet netřeba).",
+    "jobCreditBusyText": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – akce se zastavila. Spusťte ji znovu po dokončení běžícího zpracování (dobíjet netřeba).",
+    "fixContextsInsufficientCredit": "Nedostatek kreditu – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů. Dobijte tokeny (Dobít tokeny v nabídce účtu); nové spuštění opraví znovu všechny dokumenty svazku.",
+    "fixContextsCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – oprava kontextů se zastavila. Opraveno {fixed} z {total} dokumentů. Nové spuštění po dokončení běžícího zpracování opraví znovu všechny dokumenty svazku.",
     "jobPartialInsufficientCredit": "Část stránek se kvůli nedostatku kreditu nezpracovala. Dobijte tokeny (Dobít tokeny v nabídce účtu) a spusťte zpracování těchto stránek znovu.",
     "renameCollectionPrompt": "Nový název svazku:",
     "readOnlyCollection": "Jen pro čtení – svazek patří jinému uživateli"
@@ -177,6 +180,8 @@
     "retranslationFailed": "Retranslace se nepovedla – překlad zůstal beze změny.",
     "retranslationInsufficientCredit": "Nedostatek kreditu – překlad se neaktualizoval (transkripce je uložená).",
     "retranslationCreditBusy": "Kredit je dočasně rezervovaný jiným běžícím zpracováním – překlad se neaktualizoval (transkripce je uložená). Spusťte ho znovu po dokončení běžícího zpracování.",
+    "retranslationStillRunning": "Překlad tohoto dokumentu se pořád přepočítává jinou akcí – poslední úprava transkripce se do překladu zatím nepromítla (transkripce je uložená). Až přepočet doběhne, uložte transkripci znovu.",
+    "translationWaitingForPreviousRetranslation": "Čekám na dokončení předchozí aktualizace překladu – potom se překlad přepočítá podle poslední úpravy transkripce…",
     "retranslationErrorChanged": "Překlad byl mezitím ručně upraven – výsledek retranslace se neuložil.",
     "retranslationErrorTruncated": "Model nevrátil kompletní překlad (výstup byl useknut) – překlad zůstal beze změny.",
     "retranslationErrorRefused": "Model překlad odmítl (bezpečnostní filtr) – překlad zůstal beze změny.",

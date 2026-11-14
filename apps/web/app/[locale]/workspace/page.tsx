@@ -21,7 +21,8 @@ import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
-import { jobOutcomeMessageKey } from '@/lib/job-errors';
+import { fixContextsCreditMessage, jobOutcomeMessageKey } from '@/lib/job-errors';
+import { jobToFollow } from '@/lib/job-follow';
 import { JoinWorkspaceDialog } from '@/components/JoinWorkspaceDialog';
 import { ManageWorkspaceDialog } from '@/components/ManageWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
@@ -437,24 +438,30 @@ function WorkspaceContent(): React.JSX.Element {
         const res = await apiFetch(`/api/collections/${collectionId}/fix-document-contexts`, {
           method: 'POST',
         });
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errData.error ?? t('contextFixFailed'));
+        const body = (await res.json().catch(() => ({}))) as { error?: string; jobId?: string };
+        // Nový job, nebo (409 job_running) už běžící oprava téhož svazku – sledovat ji
+        const jobId = jobToFollow({ status: res.status, body });
+        if (!jobId) {
+          setError(body.error ?? t('contextFixFailed'));
           setFixingContexts(false);
           setFixingContextsProgress(null);
           return;
         }
-        const { jobId } = (await res.json()) as { jobId: string };
 
         let errorCode: string | null = null;
+        let progress: { completed: number; total: number } | null = null;
         const result = await pollJob(jobId, {
           onStep: (step) => setFixingContextsProgress(step),
+          onProgress: (completed, total) => (progress = { completed, total }),
           onErrorCode: (code) => (errorCode = code),
         });
         setFixingContexts(false);
         setFixingContextsProgress(null);
-        const fixMessageKey = jobOutcomeMessageKey(result, errorCode);
-        if (fixMessageKey) setError(t(fixMessageKey));
+        // Zastavení kvůli kreditu: kolik je opraveno a že nové spuštění opraví vše
+        const creditMessage = fixContextsCreditMessage(result, errorCode, progress);
+        const fixMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
+        if (creditMessage) setError(t(creditMessage.key, creditMessage.values));
+        else if (fixMessageKey) setError(t(fixMessageKey));
         else if (result === 'error') setError(t('contextFixesFailed'));
         // Reload pages to get updated contexts
         void loadPages(selectedCollectionId);
@@ -476,18 +483,19 @@ function WorkspaceContent(): React.JSX.Element {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ targetLanguage: locale }),
         });
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errData.error ?? 'Translation failed');
+        const body = (await res.json().catch(() => ({}))) as { error?: string; jobId?: string };
+        // Nový job, nebo (409 job_running) už běžící překlad kontextu – sledovat ho
+        const jobId = jobToFollow({ status: res.status, body });
+        if (!jobId) {
+          setError(body.error ?? 'Translation failed');
           setTranslatingContext(false);
           return;
         }
-        const { jobId } = (await res.json()) as { jobId: string };
 
         let errorCode: string | null = null;
         const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
         setTranslatingContext(false);
-        const translateMessageKey = jobOutcomeMessageKey(result, errorCode);
+        const translateMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
         if (translateMessageKey) setError(t(translateMessageKey));
         else if (result === 'error') setError('Context translation failed');
         void loadCollections();
@@ -632,10 +640,9 @@ function WorkspaceContent(): React.JSX.Element {
       } catch {
         throw new Error(`Server returned ${res.status}`);
       }
-      if (!res.ok) throw new Error(data.error ?? t('generationFailed'));
-
-      const { jobId } = data;
-      if (!jobId) throw new Error('Server nevrátil jobId');
+      // Nový job, nebo (409 job_running) už běžící generování kontextu – sledovat ho
+      const jobId = jobToFollow({ status: res.status, body: data });
+      if (!jobId) throw new Error(data.error ?? t('generationFailed'));
 
       let errorCode: string | null = null;
       const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
@@ -644,7 +651,7 @@ function WorkspaceContent(): React.JSX.Element {
         // Reload collection to get updated context and metadata
         void loadCollections();
       }
-      const generateMessageKey = jobOutcomeMessageKey(result, errorCode);
+      const generateMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
       if (generateMessageKey) setError(t(generateMessageKey));
       else if (result === 'error') setError(t('generationFailed'));
     } catch (err) {
@@ -951,7 +958,7 @@ function WorkspaceContent(): React.JSX.Element {
               await reloadPanel();
               // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
               // musí vidět, že překlad nevznikl.
-              const retranslateMessageKey = jobOutcomeMessageKey(outcome, errorCode);
+              const retranslateMessageKey = jobOutcomeMessageKey(outcome, errorCode, 'text');
               if (retranslateMessageKey) setError(t(retranslateMessageKey));
               else if (outcome !== 'completed') setError(t('regenerationFailed'));
               return;
@@ -1008,7 +1015,7 @@ function WorkspaceContent(): React.JSX.Element {
         // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
         // uživatel musí vidět, že se nic nezměnilo. Nedostatek kreditu (i kredit
         // blokovaný jiným zpracováním) má vlastní lokalizovanou hlášku.
-        const creditKey = jobOutcomeMessageKey(outcome, errorCode);
+        const creditKey = jobOutcomeMessageKey(outcome, errorCode, 'ocr');
         if (creditKey) {
           setError(t(creditKey));
         } else if (outcome !== 'completed' || updatedPage?.errorMessage) {

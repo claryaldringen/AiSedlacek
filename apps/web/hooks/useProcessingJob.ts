@@ -154,7 +154,7 @@ export function useProcessingJob({
             setProcessingProgress(100);
             // Job doběhl, ale část stránek přeskočil kvůli kreditu → upozornit
             // s výzvou k dobití (jinak by přeskočené stránky zůstaly bez vysvětlení)
-            const partialKey = jobOutcomeMessageKey('completed', data.errorCode);
+            const partialKey = jobOutcomeMessageKey('completed', data.errorCode, 'ocr');
             if (partialKey) setError(tWorkspace(partialKey));
           } else if (data.status === 'cancelled') {
             setProcessingStep('Zrušeno');
@@ -170,7 +170,7 @@ export function useProcessingJob({
           } else if (data.status === 'error') {
             // Známý kód (nedostatek kreditu, kredit blokovaný jiným zpracováním)
             // → hláška v jazyce UI (výzva k dobití, resp. ke spuštění později)
-            const key = jobOutcomeMessageKey('error', data.errorCode);
+            const key = jobOutcomeMessageKey('error', data.errorCode, 'ocr');
             const errorMsg = key
               ? tWorkspace(key)
               : data.errors.length > 0
