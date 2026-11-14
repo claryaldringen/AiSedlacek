@@ -41,10 +41,12 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   }
 
   // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu,
-  // jinak by běžící job svou rezervací vyvolal zavádějící credit_busy)
+  // jinak by běžící job svou rezervací vyvolal zavádějící credit_busy); běží-li
+  // generování z jiných stránek, 409 bez jobId s hláškou „počkejte“
   const running = await runningJobConflict(t, userId, {
     type: 'generate-context',
     collectionId: id,
+    pageIds,
   });
   if (running) return running;
 

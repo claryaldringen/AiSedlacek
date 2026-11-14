@@ -57,6 +57,14 @@ import { LLM_MAX_TOKENS, OCR_MODEL, TEXT_MODEL, isRefusalBilled } from '@ai-sedl
 export const IMAGE_UNREADABLE_MESSAGE = 'Obrázek stránky nelze načíst';
 
 /**
+ * Hláška pro stránku, jejíž obrázek nejde připravit pro OCR (Sharp: poškozený
+ * soubor, nepodporovaný formát, limit pixelů). Hlášku stránky vidí i členové
+ * workspace – surová chyba Sharpu jde jen do logu.
+ */
+export const IMAGE_PREPARE_FAILED_MESSAGE =
+  'Obrázek nelze připravit pro OCR – soubor je poškozený, v nepodporovaném formátu nebo příliš velký';
+
+/**
  * Hláška u stránky při nedostatku kreditu – bez částek: chybu stránky vidí
  * i členové sdíleného a veřejného workspace, kterým kredit vlastníka nepatří.
  * Čísla jdou jen do `errors` jobu (vidí ho jen vlastník).
@@ -69,6 +77,27 @@ export const COPY_FAILED_MESSAGE = 'Kopii dokumentu se nepodařilo uložit – z
 /** Hláška stránky, jejíž překlad do dalšího jazyka selhal z jiného než známého důvodu. */
 export const TRANSLATION_FAILED_MESSAGE =
   'Překlad do dalšího jazyka se nepodařil – zkuste to znovu';
+
+/**
+ * Hláška stránky, kterou nestihl dokončit stream přerušený chybou uprostřed
+ * generování (přetížení API, reset spojení). Surová chyba jen do logu.
+ */
+export const BATCH_INTERRUPTED_MESSAGE =
+  'Zpracování přerušila chyba služby Claude – stránka nebyla zpracována, spusťte zpracování znovu';
+
+/**
+ * Text do `errors` jobu, když se zpracování zastaví kvůli přerušeným dávkám
+ * (výpadek nebo přetížení API) – zbylé stránky se vrátí ke zpracování.
+ */
+export const JOB_STOPPED_INTERRUPTED_MESSAGE =
+  'Zpracování opakovaně přerušila chyba služby Claude – zbylé stránky se vrátily ke zpracování, ' +
+  'spusťte ho znovu později';
+
+/**
+ * Kolik přerušených dávek po sobě job snese, než zbytek fronty nespustí.
+ * Dávka přerušená bez jediné uložené stránky zastaví job hned.
+ */
+export const MAX_CONSECUTIVE_INTERRUPTED_BATCHES = 2;
 
 /** Hláška stránky, jejíž výsledek se nepodařilo uložit (surová chyba DB jen do logu). */
 export const RESULT_SAVE_FAILED_MESSAGE =
@@ -499,6 +528,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   // a zbytek jejích stránek se vrátí na začátek fronty (BIL-1).
   const queue = [...batches];
   let batchNo = 0;
+  // Přerušené dávky po sobě (výpadek API) – viz MAX_CONSECUTIVE_INTERRUPTED_BATCHES
+  let consecutiveInterrupted = 0;
 
   /**
    * Volný kredit nestačí na další dávku: job se zastaví s chybou a nezpracované
@@ -597,10 +628,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         images.push({ buffer, pageId: p.pageId, index: sentPages.length });
         sentPages.push(p);
       } catch (err) {
-        const message = `Obrázek nelze připravit pro OCR: ${err instanceof Error ? err.message : 'neznámá chyba'}`;
-        console.error(`[Worker] Image preparation failed for page ${p.pageId}:`, message);
-        errors.push(`Stránka ${p.pageId}: ${message}`);
-        await markPageFailed(p.pageId, p.existingDocId, message);
+        // Surová chyba Sharpu jen do logu, stránka i job dostanou pevný text
+        console.error(
+          `[Worker] Image preparation failed for page ${p.pageId}:`,
+          err instanceof Error ? err.message : err,
+        );
+        errors.push(`Stránka ${p.pageId}: ${IMAGE_PREPARE_FAILED_MESSAGE}`);
+        await markPageFailed(p.pageId, p.existingDocId, IMAGE_PREPARE_FAILED_MESSAGE);
       }
     }
 
@@ -671,7 +705,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       // Odmítnutí bezpečnostním filtrem (i po fallbacku) se týká jen této dávky –
       // stránky dostanou chybu, job pokračuje dalšími dávkami.
       if (!(err instanceof OcrRefusalError)) {
-        // Volání selhalo bez známé spotřeby (síť, chyba API) – rezervaci uvolnit
+        // Volání selhalo dřív, než vznikla spotřeba (chyba sítě nebo API před prvním
+        // eventem streamu) – rezervaci uvolnit. Přerušení uprostřed generování
+        // processWithClaudeBatch nevyhazuje, vrací ho jako výsledek s `interrupted`.
         await releaseCreditHold(hold).catch((releaseErr: unknown) => {
           console.error(`[Worker] Release of hold ${hold.id} failed:`, releaseErr);
         });
@@ -720,9 +756,32 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       inputTokens,
       outputTokens,
       truncated,
+      interrupted,
       parseProblem,
       declinedAttempts,
     } = batchResult;
+
+    // Stream přerušený uprostřed generování (overloaded_error v SSE, reset
+    // spojení) se zpracuje jako useknutý výstup: kompletní stránky se uloží,
+    // zbytek dávky skončí chybou a job pokračuje – jen když dávka něco uložila
+    // a nejde o opakované přerušení (viz níže). Spotřeba ze snapshotu se účtuje
+    // s vlastním klíčem – po reclaimu úspěšné OCR téže sady stránek nesmí
+    // narazit na klíč přerušeného volání.
+    const chargeReferenceId = interrupted
+      ? ocrBatchInterruptedReferenceId(
+          jobId,
+          sentPages.map((p) => p.pageId),
+        )
+      : batchReferenceId;
+    const chargeDescription = interrupted
+      ? `OCR dávka ${batchNo} – přerušeno${collectionLabel}`
+      : batchDescription;
+    if (interrupted) {
+      console.warn(
+        `[Worker] Batch ${batchNo} interrupted mid-stream: ${results.length}/${sentPages.length} ` +
+          `complete pages (${model}, ${inputTokens}+${outputTokens} tokens)`,
+      );
+    }
 
     // Vyúčtování hned po získání usage, ještě před ukládáním – pád workeru mezi
     // uložením a odečtem by jinak nechal zpracování nezaplacené. Pokusy, které
@@ -739,13 +798,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         hold,
         withCollection(firstPage.collectionId, [
           {
-            referenceId: batchReferenceId,
-            description: batchDescription,
+            referenceId: chargeReferenceId,
+            description: chargeDescription,
             model,
             inputTokens,
             outputTokens,
           },
-          ...declinedAttemptCharges(declinedAttempts, batchDescription, batchReferenceId),
+          ...declinedAttemptCharges(declinedAttempts, chargeDescription, chargeReferenceId),
         ]),
       );
       perPageCharged = Math.round(settledCredits(settle) / sentPages.length);
@@ -809,19 +868,22 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     }
 
     // Handle pages that didn't get a result. Při useknutí výstupu (stop_reason
-    // max_tokens) se kompletní stránky uloží výše a zbytek skončí jasnou chybou –
-    // neúplný výsledek se nikdy neukládá (LLM-2). Účtuje se skutečná spotřeba volání.
+    // max_tokens) nebo přerušení streamu se kompletní stránky uloží výše a zbytek
+    // skončí jasnou chybou – neúplný výsledek se nikdy neukládá (LLM-2). Účtuje se
+    // skutečná spotřeba volání.
     const processedIndices = new Set(results.map((r) => r.index));
     for (let idx = 0; idx < sentPages.length; idx++) {
       if (!processedIndices.has(idx)) {
         const pageInfo = sentPages[idx]!;
         // parseProblem: výstup nešel jednoznačně přiřadit ke stránkám, takže se
         // raději neuložilo nic, než aby se přepis uložil k jiné stránce (LLM-3).
-        const message =
-          parseProblem ??
-          (truncated
-            ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
-            : 'Model nevrátil výsledek pro tuto stránku');
+        // U přerušeného streamu je příčinou přerušení (neúplné číslování z něj plyne).
+        const message = interrupted
+          ? BATCH_INTERRUPTED_MESSAGE
+          : (parseProblem ??
+            (truncated
+              ? 'Výstup modelu byl useknut (limit max_tokens) – stránka nebyla zpracována, spusťte zpracování znovu'
+              : 'Model nevrátil výsledek pro tuto stránku'));
         errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
         await markPageFailed(pageInfo.pageId, pageInfo.existingDocId, message);
       }
@@ -853,6 +915,36 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           completedPages: completed,
           errors: await errorsKeepingReclaimMarkers(jobId, errors),
           currentStep: 'Odečet kreditu selhal',
+        },
+      });
+      return;
+    }
+
+    // Přerušená dávka bez jediné uložené stránky nebo opakované přerušení =
+    // výpadek API: další dávky by platily vstup (obrázky) znovu za nic. Zbytek
+    // fronty se vrátí ke zpracování a job skončí chybou API. (Po poslední dávce
+    // není co zastavovat – job doběhne běžně.)
+    consecutiveInterrupted = interrupted ? consecutiveInterrupted + 1 : 0;
+    if (
+      interrupted &&
+      queue.length > 0 &&
+      (savedDocs.length === 0 || consecutiveInterrupted >= MAX_CONSECUTIVE_INTERRUPTED_BATCHES)
+    ) {
+      const pending = queue.flat().map((p) => p.pageId);
+      console.warn(
+        `[Worker] Job ${jobId} stopped after interrupted batch ${batchNo} ` +
+          `(${savedDocs.length} saved, ${consecutiveInterrupted} in a row) – ${pending.length} pages reset`,
+      );
+      await resetUnfinishedPages(pending);
+      errors.push(JOB_STOPPED_INTERRUPTED_MESSAGE);
+      await prisma.processingJob.update({
+        where: { id: jobId },
+        data: {
+          status: 'error',
+          completedPages: completed,
+          errors: await errorsKeepingReclaimMarkers(jobId, errors),
+          currentStep: 'Zpracování přerušila chyba služby Claude',
+          errorCode: 'api_error',
         },
       });
       return;
@@ -920,6 +1012,16 @@ export function ocrBatchReferenceId(jobId: string, pageIds: string[]): string {
  */
 export function ocrBatchRefusedReferenceId(jobId: string, pageIds: string[]): string {
   return `ocr-batch-refused:${jobId}:${pageSetDigest(pageIds)}`;
+}
+
+/**
+ * `referenceId` odečtu za dávku, jejíž stream spadl uprostřed generování (uložené
+ * jsou jen kompletní stránky). Liší se od `ocrBatchReferenceId` i od klíče
+ * odmítnutí – po reclaimu úspěšné OCR téže sady stránek nesmí projít
+ * „idempotentně" za cenu přerušeného volání.
+ */
+export function ocrBatchInterruptedReferenceId(jobId: string, pageIds: string[]): string {
+  return `ocr-batch-interrupted:${jobId}:${pageSetDigest(pageIds)}`;
 }
 
 /** `referenceId` i-tého odmítnutého pokusu serverového fallbacku dávky. */

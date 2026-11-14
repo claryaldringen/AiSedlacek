@@ -27,6 +27,7 @@ import {
   resetBillingMock,
 } from './billing-mock';
 import { RECLAIM_MARKER } from '../lib/reclaim';
+import { countFixContextSkipped } from '@ai-sedlacek/shared';
 
 function response(text: string, stopReason: string): Record<string, unknown> {
   return { text, model: 'claude-sonnet-4-6', inputTokens: 300, outputTokens: 2048, stopReason };
@@ -184,6 +185,49 @@ describe('fix-contexts – opakovaný běh po reclaimu', () => {
       // Poznámka, ať se z prvního běhu neztratí případná chyba
       errors: [`Dokument doc-1: ${FIX_CONTEXT_SKIPPED_NOTE}`],
     });
+  });
+
+  it('zastavení kvůli kreditu po reclaimu: přeskočené nepočítá jako opravené', async () => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      id: 'col-1',
+      userId: 'user-1',
+      name: 'Svazek',
+      context: 'Kontext svazku',
+      pages: [
+        { document: { id: 'doc-1', context: 'k1', transcription: 't1' } },
+        { document: { id: 'doc-2', context: 'k2', transcription: 't2' } },
+        { document: { id: 'doc-3', context: 'k3', transcription: 't3' } },
+      ],
+    });
+    // doc-1 zaplacený v přerušeném běhu, doc-2 se opraví, na doc-3 dojde kredit
+    billing.chargedReferenceIds.mockResolvedValue(new Set(['fix-context:job-f:doc-1']));
+    mocks.createMessage.mockResolvedValue(response('Nový kontext', 'end_turn'));
+    billing.reserveCredits
+      .mockImplementationOnce(
+        async (p: { userId: string; amount: number; referenceId: string }) => ({
+          ok: true,
+          hold: { id: 'h1', userId: p.userId, amount: p.amount, referenceId: p.referenceId },
+        }),
+      )
+      .mockResolvedValueOnce({ ok: false, required: 50_000, available: 100 });
+
+    await handleFixContexts('job-f', { collectionId: 'col-1', userId: 'user-1' });
+
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'error',
+      errorCode: 'insufficient_credit',
+      // Jen skutečně opravené v tomto běhu (dřív 2 = opravené + přeskočené)
+      completedPages: 1,
+      errors: [
+        `Dokument doc-1: ${FIX_CONTEXT_SKIPPED_NOTE}`,
+        expect.stringMatching(
+          /opraveno 1 z 3 dokumentů, přeskočeno \(zpracované už v přerušeném běhu.*\): 1; nové spuštění/,
+        ),
+      ],
+    });
+    // UI spočítá přeskočené z poznámek v errors
+    expect(countFixContextSkipped(lastJobUpdate.data.errors)).toBe(1);
   });
 
   it('vše zaplacené už dřív: model nevolá, job neskončí chybou', async () => {

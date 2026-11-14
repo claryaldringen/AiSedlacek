@@ -7,16 +7,18 @@ import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import { chargedReferenceIds } from '@ai-sedlacek/db/billing';
 import { describeJobError } from '../lib/job-error';
-import { LLM_MAX_TOKENS, TEXT_MODEL, type JobErrorCode } from '@ai-sedlacek/shared';
+import {
+  FIX_CONTEXT_SKIPPED_NOTE,
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  type JobErrorCode,
+} from '@ai-sedlacek/shared';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 
-/**
- * Poznámka k dokumentu, který opakovaný běh přeskočil – výsledek předchozího
- * běhu (i případná chyba, např. useknutý výstup po vyúčtování) se tak neztratí.
- */
-export const FIX_CONTEXT_SKIPPED_NOTE =
-  'přeskočen – oprava kontextu proběhla (a byla zaplacena) už v přerušeném běhu tohoto jobu; ' +
-  'pokud tehdy selhala, kontext zůstal beze změny – opravte ho novým spuštěním';
+// Poznámka k dokumentu, který opakovaný běh přeskočil (FIX_CONTEXT_SKIPPED_NOTE) –
+// výsledek předchozího běhu (i případná chyba, např. useknutý výstup po
+// vyúčtování) se tak neztratí a UI podle ní spočítá přeskočené dokumenty.
+export { FIX_CONTEXT_SKIPPED_NOTE };
 
 export interface FixContextsJobData {
   collectionId: string;
@@ -165,10 +167,16 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
         // Volný kredit nestačí (nebo ho blokuje jiná běžící akce) – zbylé
         // dokumenty se nezpracují. Hotové opravy zůstávají uložené; job se
         // neobnovuje, nové spuštění opraví všechny dokumenty svazku znovu.
+        // Opravené jen v tomto běhu – přeskočené (zaplacené v přerušeném běhu)
+        // se opravit nemusely, proto se vykazují zvlášť.
         creditStop = described.code;
         errors.push(
-          `${described.message} – oprava kontextů zastavena, opraveno ${succeeded + skipped} ` +
-            `z ${documents.length} dokumentů; nové spuštění opraví všechny dokumenty svazku znovu`,
+          `${described.message} – oprava kontextů zastavena, opraveno ${succeeded} ` +
+            `z ${documents.length} dokumentů` +
+            (skipped > 0
+              ? `, přeskočeno (zpracované už v přerušeném běhu, oprava se tehdy nemusela uložit): ${skipped}`
+              : '') +
+            '; nové spuštění opraví všechny dokumenty svazku znovu',
         );
         break;
       }
@@ -210,9 +218,10 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
           : creditStop
             ? 'Nedostatečný kredit'
             : 'Hotovo',
-      // Při zastavení kvůli kreditu počet opravených dokumentů (UI ho ukáže
-      // v hlášce), jinak průběh včetně chybných a přeskočených
-      completedPages: creditStop ? succeeded + skipped : completed,
+      // Při zastavení kvůli kreditu počet dokumentů opravených v tomto běhu (UI ho
+      // ukáže v hlášce, přeskočené spočítá z poznámek v errors), jinak průběh
+      // včetně chybných a přeskočených
+      completedPages: creditStop ? succeeded : completed,
       errors: await errorsKeepingReclaimMarkers(jobId, errors),
       // Kód pro lokalizovanou hlášku v UI (dobít kredit / spustit znovu později)
       ...(creditStop ? { errorCode: creditStop } : {}),

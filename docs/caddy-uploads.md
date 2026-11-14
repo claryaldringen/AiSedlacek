@@ -13,7 +13,9 @@ X-Frame-Options) se na tyto odpovědi **nevztahují** – platí jen pro odpově
 Next.js.
 
 Aplikace od opravy SEC-1 ukládá jen ověřené obrázky pod jménem
-`<uuid>.<jpg|png|webp|tif|gif>`. Na disku ale zůstávají soubory nahrané dřív
+`<uuid>.<jpg|png|webp|tif|gif>`. Zapisuje je atomicky přes dočasný
+`<uuid>.<přípona>.partial` a `rename` – rozepsaný soubor má neobrázkovou
+příponu, takže ho matcher níže nevydá (404). Na disku ale zůstávají soubory nahrané dřív
 pod původním jménem klienta (`<uuid>-<jméno>.<přípona>`), mezi nimiž může být
 HTML nebo SVG se skriptem. Konfigurace níže je druhá vrstva obrany: i kdyby se
 na disk dostal neobrázkový soubor, prohlížeč ho nespustí jako aktivní obsah

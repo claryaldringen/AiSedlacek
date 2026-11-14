@@ -254,6 +254,8 @@ export async function processWithClaudeBatchCli(
   outputTokens: number;
   stopReason: string | null;
   truncated: boolean;
+  /** Přerušený stream – u CLI nenastává (viz `processWithClaudeBatch`). */
+  interrupted: boolean;
   parseProblem: string | null;
   declinedAttempts: OcrAttemptUsage[];
 }> {
@@ -303,6 +305,7 @@ export async function processWithClaudeBatchCli(
     // CLI zpracovává stránky po jedné se structured output – useknutí nehrozí
     stopReason: 'end_turn',
     truncated: false,
+    interrupted: false,
     // Index stránky určuje volající (stránky jdou po jedné), ne model
     parseProblem: null,
     // CLI nemá serverový fallback

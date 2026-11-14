@@ -43,7 +43,11 @@ import {
   processPages,
   ocrBatchReferenceId,
   ocrBatchRefusedReferenceId,
+  ocrBatchInterruptedReferenceId,
   IMAGE_UNREADABLE_MESSAGE,
+  IMAGE_PREPARE_FAILED_MESSAGE,
+  BATCH_INTERRUPTED_MESSAGE,
+  JOB_STOPPED_INTERRUPTED_MESSAGE,
   INSUFFICIENT_CREDIT_PAGE_MESSAGE,
   COPY_FAILED_MESSAGE,
   RESULT_SAVE_FAILED_MESSAGE,
@@ -360,14 +364,18 @@ describe('processPages – obrázky až pro konkrétní dávku (PERF-1)', () => 
       ['p1', 0],
       ['p3', 1],
     ]);
-    // p2 → chyba s jasnou hláškou
+    // p2 → chyba s pevnou hláškou; surová chyba Sharpu jen do logu (hlášku
+    // stránky vidí i členové workspace)
     expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
       where: { id: 'p2', status: { not: 'archived' } },
-      data: {
-        status: 'error',
-        errorMessage: expect.stringContaining('Obrázek nelze připravit pro OCR'),
-      },
+      data: { status: 'error', errorMessage: IMAGE_PREPARE_FAILED_MESSAGE },
     });
+    const pageMessages = mocks.prisma.page.updateMany.mock.calls.map(
+      (c) => (c[0] as { data: { errorMessage?: string | null } }).data.errorMessage ?? '',
+    );
+    expect(pageMessages.join('\n')).not.toContain('pixel limit');
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.errors).toEqual([`Stránka p2: ${IMAGE_PREPARE_FAILED_MESSAGE}`]);
     // Výsledek indexu 1 patří p3, ne p2
     const created = mocks.prisma.document.create.mock.calls.map(
       (c) => [c[0].data.pageId, c[0].data.transcription] as const,
@@ -1271,6 +1279,223 @@ describe('processPages – rezervace kreditu (BIL-1)', () => {
 
     expect(billing.releaseCreditHold).toHaveBeenCalledTimes(1);
     expect(billing.settleCreditHold).not.toHaveBeenCalled();
+  });
+});
+
+// ── Přerušený stream (známé omezení PR #7, review) ──────────
+// Stream spadl uprostřed generování: processWithClaudeBatch vrátí kompletní
+// stránky s příznakem `interrupted` a spotřebou ze snapshotu – zaplacený výstup
+// se nezahazuje, zbytek dávky skončí chybou a job pokračuje jako u useknutí.
+describe('processPages – stream přerušený uprostřed generování', () => {
+  function interruptedResult(
+    completeIndices: number[],
+    usage = { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 1100 },
+  ) {
+    return {
+      results: completeIndices.map((index) => ({ index, result: ocrResult(index) })),
+      rawResponse: '{"imageIndex": 0 …',
+      processingTimeMs: 1000,
+      ...usage,
+      stopReason: null,
+      truncated: false,
+      interrupted: true,
+      parseProblem: null,
+      declinedAttempts: [],
+    };
+  }
+
+  it('kompletní stránky uloží, zbytek označí pevnou hláškou a vyúčtuje s klíčem přerušení', async () => {
+    addPage('p1', { collection: { id: 'col-1', context: '' } });
+    addPage('p2', { collection: { id: 'col-1', context: '' } });
+    mocks.processWithClaudeBatch.mockResolvedValue(interruptedResult([0]));
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1', 'p2'] })).resolves.toBeUndefined();
+
+    // p1 kompletní → uložena (zaplacený výstup se nezahazuje)
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.create.mock.calls[0]![0].data.pageId).toBe('p1');
+    // p2 → pevná hláška bez surové chyby
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p2', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: BATCH_INTERRUPTED_MESSAGE },
+    });
+    // Spotřeba ze snapshotu s vlastním deterministickým klíčem a svazkem,
+    // z rezervace dávky (žádný odečet mimo rezervaci), nic se neuvolňuje
+    const interruptedRef = ocrBatchInterruptedReferenceId('job-1', ['p1', 'p2']);
+    expect(chargeRows()).toEqual([[3000, 1100, interruptedRef, 'claude-opus-5-5']]);
+    expect(charges()[0]!.description).toContain('přerušeno');
+    expect(charges()[0]!.collectionId).toBe('col-1');
+    expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
+    expect(billing.settleCreditHold.mock.calls[0]![0]).toMatchObject({
+      referenceId: ocrBatchReferenceId('job-1', ['p1', 'p2']),
+    });
+    expect(billing.releaseCreditHold).not.toHaveBeenCalled();
+    // Job doběhne (ne všechny stránky chybou) – errors s pevnou hláškou
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'completed',
+      errors: [`Stránka p2: ${BATCH_INTERRUPTED_MESSAGE}`],
+    });
+  });
+
+  it('přerušená dávka, která něco uložila, nezastaví job – pokračuje dalšími dávkami', async () => {
+    // Průměr 8000 tokenů/stránku → max. 2 stránky na dávku: [p1, p2], [p3]
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    addPage('p1');
+    addPage('p2');
+    addPage('p3');
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch
+      .mockResolvedValueOnce(interruptedResult([0]))
+      .mockImplementation(ocrDefault);
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3'] });
+
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(2);
+    expect(mocks.prisma.document.create.mock.calls.map((c) => c[0].data.pageId)).toEqual([
+      'p1',
+      'p3',
+    ]);
+    expect(chargeRows().map((r) => r[2])).toEqual([
+      ocrBatchInterruptedReferenceId('job-1', ['p1', 'p2']),
+      ocrBatchReferenceId('job-1', ['p3']),
+    ]);
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p2', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: BATCH_INTERRUPTED_MESSAGE },
+    });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.status).toBe('completed');
+  });
+
+  // Výpadek API: další dávky by platily vstup (obrázky) znovu za nic
+  it('přerušená dávka bez uložené stránky: zbytek fronty nespustí, vrátí ho a job skončí api_error', async () => {
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    for (const id of ['p1', 'p2', 'p3', 'p4', 'p5']) addPage(id);
+    mocks.processWithClaudeBatch.mockResolvedValueOnce(interruptedResult([]));
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3', 'p4', 'p5'] });
+
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(1);
+    // Přerušená dávka se vyúčtuje, další se nerezervují
+    expect(chargeRows().map((r) => r[2])).toEqual([
+      ocrBatchInterruptedReferenceId('job-1', ['p1', 'p2']),
+    ]);
+    expect(billing.reserveCredits).toHaveBeenCalledTimes(1);
+    // Stránky přerušené dávky chybou, zbytek fronty zpět ke zpracování
+    for (const id of ['p1', 'p2']) {
+      expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+        where: { id, status: { not: 'archived' } },
+        data: { status: 'error', errorMessage: BATCH_INTERRUPTED_MESSAGE },
+      });
+    }
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p3', 'p4', 'p5'] }, status: 'processing' },
+      data: { status: 'pending', errorMessage: null },
+    });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({
+      status: 'error',
+      errorCode: 'api_error',
+      errors: expect.arrayContaining([JOB_STOPPED_INTERRUPTED_MESSAGE]),
+    });
+  });
+
+  it('dvě přerušené dávky po sobě (i s uloženými stránkami): třetí nespustí', async () => {
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    for (const id of ['p1', 'p2', 'p3', 'p4', 'p5']) addPage(id);
+    mocks.processWithClaudeBatch
+      .mockResolvedValueOnce(interruptedResult([0]))
+      .mockResolvedValueOnce(interruptedResult([0]));
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2', 'p3', 'p4', 'p5'] });
+
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(2);
+    // Hotové stránky obou dávek uložené (zaplacený výstup se nezahazuje)
+    expect(mocks.prisma.document.create.mock.calls.map((c) => c[0].data.pageId)).toEqual([
+      'p1',
+      'p3',
+    ]);
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p5'] }, status: 'processing' },
+      data: { status: 'pending', errorMessage: null },
+    });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({ status: 'error', errorCode: 'api_error' });
+  });
+
+  it('úspěšná dávka mezi přerušeními počítadlo přerušení vynuluje', async () => {
+    mocks.prisma.document.aggregate.mockResolvedValue({ _avg: { outputTokens: 8000 } });
+    for (const id of ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7']) addPage(id);
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch
+      .mockResolvedValueOnce(interruptedResult([0]))
+      .mockImplementationOnce(ocrDefault)
+      .mockResolvedValueOnce(interruptedResult([0]))
+      .mockImplementation(ocrDefault);
+
+    await processPages({
+      ...baseJob,
+      pageIds: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'],
+    });
+
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(4);
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.status).toBe('completed');
+  });
+
+  it('přerušení má přednost před problémem s přiřazením (neúplné číslování)', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      ...interruptedResult([]),
+      parseProblem: 'Model vrátil imageIndex mimo očekávané číslování (1) pro 1 obrázků',
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: BATCH_INTERRUPTED_MESSAGE },
+    });
+  });
+
+  it('odmítnuté pokusy fallbacku se účtují s klíčem odvozeným od klíče přerušení', async () => {
+    addPage('p1');
+    mocks.processWithClaudeBatch.mockResolvedValue({
+      ...interruptedResult([], { model: 'claude-opus-5', inputTokens: 3100, outputTokens: 500 }),
+      declinedAttempts: [
+        { model: 'claude-opus-5-5', inputTokens: 3000, outputTokens: 0, category: 'bio' },
+      ],
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const ref = ocrBatchInterruptedReferenceId('job-1', ['p1']);
+    expect(chargeRows()).toEqual([
+      [3100, 500, ref, 'claude-opus-5'],
+      [3000, 0, `${ref}:declined:0`, 'claude-opus-5-5'],
+    ]);
+  });
+
+  it('klíč přerušení se liší od klíče úspěšného OCR i odmítnutí téže sady stránek', () => {
+    const key = ocrBatchInterruptedReferenceId('job-1', ['p2', 'p1']);
+    expect(key).toBe(ocrBatchInterruptedReferenceId('job-1', ['p1', 'p2']));
+    expect(key).toMatch(/^ocr-batch-interrupted:job-1:[0-9a-f]{32}$/);
+    expect(key).not.toBe(ocrBatchReferenceId('job-1', ['p1', 'p2']));
+    expect(key).not.toBe(ocrBatchRefusedReferenceId('job-1', ['p1', 'p2']));
+  });
+
+  it('selhání vyúčtování: hotové stránky uloží a další dávky zastaví (jako R-9)', async () => {
+    addPage('p1');
+    billing.settleCreditHold.mockRejectedValue(new Error('DB connection lost'));
+    mocks.processWithClaudeBatch.mockResolvedValue(interruptedResult([0]));
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(billing.releaseCreditHold).toHaveBeenCalledTimes(1);
+    expect(mocks.prisma.document.create).toHaveBeenCalledTimes(1);
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.currentStep).toBe('Odečet kreditu selhal');
   });
 });
 

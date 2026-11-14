@@ -11,6 +11,8 @@ interface JobStatus {
   completedPages?: number;
   totalPages?: number;
   progress?: number;
+  /** Chyby a poznámky jobu (česky, jen pro výpočty v UI – např. přeskočené dokumenty). */
+  errors?: string[];
 }
 
 /**
@@ -32,6 +34,8 @@ export function useJobPolling(): {
        * důvod, např. nedostatek kreditu). Hlášku vybere `jobOutcomeMessageKey`.
        */
       onErrorCode?: (errorCode: string | null) => void;
+      /** `errors` ukončeného jobu (u `error` i `completed`). */
+      onErrors?: (errors: string[]) => void;
     },
   ) => Promise<JobOutcome>;
   stopPolling: () => void;
@@ -66,6 +70,7 @@ export function useJobPolling(): {
         onStep?: (step: string) => void;
         onProgress?: (completed: number, total: number) => void;
         onErrorCode?: (errorCode: string | null) => void;
+        onErrors?: (errors: string[]) => void;
       },
     ): Promise<'completed' | 'error' | 'cancelled'> => {
       const ms = options?.intervalMs ?? 2000;
@@ -106,6 +111,7 @@ export function useJobPolling(): {
               // Kód i u `completed` – doběhlý job mohl část stránek přeskočit (kredit)
               if (data.status === 'error' || data.status === 'completed') {
                 options?.onErrorCode?.(data.errorCode ?? null);
+                options?.onErrors?.(Array.isArray(data.errors) ? data.errors : []);
               }
               settle(data.status as 'completed' | 'error' | 'cancelled');
             }

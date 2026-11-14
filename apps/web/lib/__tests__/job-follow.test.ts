@@ -32,6 +32,15 @@ describe('followableJobId / jobToFollow', () => {
     expect(jobToFollow({ status: 200, body: {} })).toBeNull();
     expect(followableJobId(409, null)).toBeNull();
   });
+
+  it('409 job_running_other (stejná akce s jinými stránkami/jazykem) se nesleduje', () => {
+    expect(
+      jobToFollow({
+        status: 409,
+        body: { code: 'job_running_other', error: 'Pro tento svazek už běží…' },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('runRetranslation – úprava transkripce, když už retranslace běží', () => {

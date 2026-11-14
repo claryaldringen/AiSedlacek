@@ -147,13 +147,16 @@ export function parseOcrJsonBatchChecked(raw: string, expectedCount?: number): O
 
   const entries: BatchEntry[] = [];
   const lines = text.split('\n').filter((line) => line.trim().length > 0);
-  for (const line of lines) {
+  for (const [lineNo, line] of lines.entries()) {
     try {
       const obj = parseJsonObjectLenient(line);
       entries.push({ declaredIndex: readImageIndex(obj), result: normalizeOcrResult(obj) });
     } catch {
-      // Skip unparseable lines (e.g. extra text from model, truncated last line)
-      console.warn('[Claude Batch] Skipping unparseable JSONL line:', line.slice(0, 80));
+      // Skip unparseable lines (e.g. extra text from model, truncated last line).
+      // Do logu jen pořadí a délka řádku – obsah je přepis dokumentu.
+      console.warn(
+        `[Claude Batch] Skipping unparseable JSONL line ${lineNo + 1}/${lines.length} (${line.length} chars)`,
+      );
     }
   }
 

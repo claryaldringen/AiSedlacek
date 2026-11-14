@@ -44,5 +44,9 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     },
   });
 
-  return NextResponse.json(versions);
+  // Model AI verzí je údaj o útratě vlastníka (z modelu a délky textu se dá cena
+  // odhadnout) – členům workspace se nevrací, stejně jako v GET dokumentu
+  // (hideChargesFromReader). UI model bez hodnoty nezobrazí.
+  const isOwner = doc.page.userId === userId;
+  return NextResponse.json(isOwner ? versions : versions.map((v) => ({ ...v, model: null })));
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   detectMediaType,
   sniffMediaType,
@@ -179,6 +179,26 @@ describe('parseOcrJsonBatch', () => {
   it('returns empty array for completely invalid input', () => {
     const results = parseOcrJsonBatch('totally broken');
     expect(results).toHaveLength(0);
+  });
+
+  // Useknutý řádek (přerušený stream, max_tokens) nese přepis dokumentu – do logu
+  // jen pořadí a délka řádku, žádný obsah
+  it('logs a skipped (truncated) line without its content', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const truncated = '{"imageIndex": 1, "transcription": "Tajný přepis rukop';
+      const { results } = parseOcrJsonBatchChecked(
+        `${JSON.stringify(makeResult(0))}\n${truncated}`,
+        2,
+      );
+      expect(results.map((r) => r.index)).toEqual([0]);
+      const logged = warn.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+      expect(logged).toContain(`line 2/2 (${truncated.length} chars)`);
+      expect(logged).not.toContain('Tajný');
+      expect(logged).not.toContain('imageIndex');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   // LLM-3: víc výsledků než obrázků (index mimo rozsah) je podezřelé – dřív se

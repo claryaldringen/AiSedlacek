@@ -3,7 +3,7 @@
  * Texty chyb v `errors` jsou česky (a obsahují interní detaily), UI proto pro
  * známé kódy ukáže vlastní hlášku v jazyce uživatele.
  */
-import { isJobErrorCode } from '@ai-sedlacek/shared';
+import { countFixContextSkipped, isJobErrorCode } from '@ai-sedlacek/shared';
 
 /**
  * Druh jobu pro text hlášky: `ocr` zpracovává stránky (nedokončené se vrací
@@ -52,21 +52,29 @@ export function jobOutcomeMessageKey(
 
 /**
  * Hláška k opravě kontextů zastavené kvůli kreditu: kolik dokumentů je
- * opravených (`completedPages` jobu při zastavení) a že nové spuštění opraví
- * všechny dokumenty svazku znovu – job nepokračuje tam, kde skončil.
+ * opravených (`completedPages` jobu při zastavení – jen opravené v posledním
+ * běhu), kolik opakovaný běh po pádu workeru přeskočil (zaplacené v přerušeném
+ * běhu, oprava se tehdy nemusela uložit – počítá se z poznámek v `errors`)
+ * a že nové spuštění opraví všechny dokumenty svazku znovu – job nepokračuje
+ * tam, kde skončil.
  */
 export function fixContextsCreditMessage(
   outcome: string,
   errorCode: unknown,
   progress: { completed: number; total: number } | null,
+  errors: readonly unknown[] = [],
 ): {
   key: 'fixContextsInsufficientCredit' | 'fixContextsCreditBusy';
-  values: { fixed: number; total: number };
+  values: { fixed: number; total: number; skipped: number };
 } | null {
   if (outcome !== 'error') return null;
   if (errorCode !== 'insufficient_credit' && errorCode !== 'credit_busy') return null;
   return {
     key: errorCode === 'credit_busy' ? 'fixContextsCreditBusy' : 'fixContextsInsufficientCredit',
-    values: { fixed: progress?.completed ?? 0, total: progress?.total ?? 0 },
+    values: {
+      fixed: progress?.completed ?? 0,
+      total: progress?.total ?? 0,
+      skipped: countFixContextSkipped(errors),
+    },
   };
 }

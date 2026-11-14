@@ -455,15 +455,18 @@ function WorkspaceContent(): React.JSX.Element {
 
         let errorCode: string | null = null;
         let progress: { completed: number; total: number } | null = null;
+        let jobErrors: string[] = [];
         const result = await pollJob(jobId, {
           onStep: (step) => setFixingContextsProgress(step),
           onProgress: (completed, total) => (progress = { completed, total }),
           onErrorCode: (code) => (errorCode = code),
+          onErrors: (errors) => (jobErrors = errors),
         });
         setFixingContexts(false);
         setFixingContextsProgress(null);
-        // Zastavení kvůli kreditu: kolik je opraveno a že nové spuštění opraví vše
-        const creditMessage = fixContextsCreditMessage(result, errorCode, progress);
+        // Zastavení kvůli kreditu: kolik je opraveno, kolik přeskočeno po pádu
+        // workeru a že nové spuštění opraví vše
+        const creditMessage = fixContextsCreditMessage(result, errorCode, progress, jobErrors);
         const fixMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
         if (creditMessage) setError(t(creditMessage.key, creditMessage.values));
         else if (fixMessageKey) setError(t(fixMessageKey));

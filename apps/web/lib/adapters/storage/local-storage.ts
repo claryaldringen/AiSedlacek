@@ -4,6 +4,35 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 
+/**
+ * Přípona rozepsaného souboru. Caddy na `/uploads/*` servíruje jen obrázkové
+ * přípony (docs/caddy-uploads.md), takže rozepsaný soubor vrací 404.
+ */
+export const PARTIAL_UPLOAD_SUFFIX = '.partial';
+
+/**
+ * Zapíše soubor atomicky: data do dočasného souboru ve stejném adresáři,
+ * `fsync` a teprve pak `rename` na finální jméno. Pod finálním jménem tak nikdy
+ * neleží useknutý soubor – noční rsync s `--ignore-existing` by ho jinak
+ * zkopíroval a už nikdy nenahradil. Po chybě se dočasný soubor smaže.
+ */
+async function writeAtomically(filePath: string, data: Buffer): Promise<void> {
+  const tmpPath = `${filePath}${PARTIAL_UPLOAD_SUFFIX}`;
+  try {
+    const handle = await fs.open(tmpPath, 'wx');
+    try {
+      await handle.writeFile(data);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmpPath, filePath);
+  } catch (err) {
+    await fs.rm(tmpPath, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
 export class LocalStorageProvider implements IStorageProvider {
   private readonly uploadDir: string;
 
@@ -39,7 +68,7 @@ export class LocalStorageProvider implements IStorageProvider {
     await fs.mkdir(this.uploadDir, { recursive: true });
     const uniqueName = `${crypto.randomUUID()}.${extension}`;
     const filePath = path.join(this.uploadDir, uniqueName);
-    await fs.writeFile(filePath, file);
+    await writeAtomically(filePath, file);
     return { url: `/uploads/${uniqueName}`, path: uniqueName };
   }
 
