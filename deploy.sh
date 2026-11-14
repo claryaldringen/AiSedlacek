@@ -47,10 +47,79 @@ fi
 PREV_HEAD="${PREV_HEAD:-$(git rev-parse HEAD)}"
 
 DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"
-# Prisma URL může mít ?schema=…, kterému psql/pg_dump nerozumí.
-PG_URL="${DATABASE_URL%%\?*}"
 DB_SCHEMA="$(sed -n 's/.*[?&]schema=\([^&]*\).*/\1/p' <<<"$DATABASE_URL")"
 DB_SCHEMA="${DB_SCHEMA:-public}"
+
+# >>> pg-env
+# Přihlašovací údaje pro psql/pg_dump NE v argumentech: na sdíleném VPS by heslo
+# z URL viděl každý uživatel v `ps`. Z DATABASE_URL se rozloží do PGHOST/PGPORT/
+# PGUSER/PGDATABASE a heslo jde do dočasného .pgpass (práva 600, PGPASSFILE),
+# který se po skončení smaže. Stejná logika jako ops/backup/aisedlacek-backup.sh –
+# sdílená knihovna záměrně není: deploy.sh se spouští i z kopie (rollback na
+# commit bez knihovny) a záloha je nainstalovaná mimo repo.
+
+# Percent-dekódování části URL (heslo s @, :, / apod. je v DATABASE_URL zakódované).
+urldecode() {
+  local s="${1//\\/\\\\}"
+  printf '%b' "${s//%/\\x}"
+}
+
+# Hodnota pro .pgpass – dvojtečka a zpětné lomítko se escapují zpětným lomítkem.
+pgpass_escape() {
+  local s="${1//\\/\\\\}"
+  printf '%s' "${s//:/\\:}"
+}
+
+# Naplní pole PG_ENV (proměnné pro `env … psql`) a zapíše heslo do "$2/pgpass".
+pg_env_from_url() {
+  local url="${1#postgresql://}" dir="$2"
+  url="${url#postgres://}"
+  url="${url%%\?*}" # Prisma přidává ?schema=…, kterému psql/pg_dump nerozumí
+  local creds="" hostpart="$url" db_user db_pass="" hostport db_name="" db_host db_port=""
+  if [[ "$url" == *@* ]]; then
+    creds="${url%@*}"
+    hostpart="${url##*@}"
+  fi
+  db_user="${creds%%:*}"
+  if [[ "$creds" == *:* ]]; then db_pass="${creds#*:}"; fi
+  hostport="${hostpart%%/*}"
+  if [[ "$hostpart" == */* ]]; then db_name="${hostpart#*/}"; fi
+  if [[ "$hostport" == \[* ]]; then
+    # IPv6: [::1]:5432
+    db_host="${hostport%%]*}"
+    db_host="${db_host#\[}"
+    db_port="${hostport##*]}"
+    db_port="${db_port#:}"
+  else
+    db_host="${hostport%%:*}"
+    if [[ "$hostport" == *:* ]]; then db_port="${hostport##*:}"; fi
+  fi
+
+  PG_ENV=(PGHOST="${db_host:-localhost}" PGPORT="${db_port:-5432}")
+  if [ -n "$db_user" ]; then PG_ENV+=(PGUSER="$(urldecode "$db_user")"); fi
+  if [ -n "$db_name" ]; then PG_ENV+=(PGDATABASE="$(urldecode "$db_name")"); fi
+  if [ -n "$db_pass" ]; then
+    (
+      umask 077
+      printf '*:*:*:%s:%s\n' \
+        "$(pgpass_escape "$(urldecode "$db_user")")" \
+        "$(pgpass_escape "$(urldecode "$db_pass")")" >"$dir/pgpass"
+    )
+    PG_ENV+=(PGPASSFILE="$dir/pgpass")
+  fi
+}
+# <<< pg-env
+
+PGPASS_DIR="$(mktemp -d)"
+DUMP_PARTIAL=""
+# Úklid i při chybě: dočasný .pgpass a nedokončený dump (neověřený dump nesmí zůstat
+# pod jménem *.dump – denní záloha ho jinak pošle off-site jako platný).
+trap 'rm -rf "$PGPASS_DIR" ${DUMP_PARTIAL:+"$DUMP_PARTIAL"}' EXIT
+chmod 700 "$PGPASS_DIR"
+pg_env_from_url "$DATABASE_URL" "$PGPASS_DIR"
+# Zděděná PGPASSWORD (např. z prostředí jiné aplikace na sdíleném VPS) by v libpq
+# měla přednost před PGPASSFILE – příkazy ji proto výslovně ruší (`env -u`).
+pg_run() { env -u PGPASSWORD "${PG_ENV[@]}" "$@"; }
 
 echo "=== Checking migration history ==="
 # Pojistka ještě před npm ci a buildem (ty přepisují běžící aplikaci): historie
@@ -60,7 +129,7 @@ echo "=== Checking migration history ==="
 # „already exists"), nebo znovu spustil starou datovou migraci.
 # Jednorázový baseline: docs/deployment.md – Kontrola historie migrací.
 # -X: bez ~/.psqlrc (např. \timing by změnil výstup a kontrolu tiše přeskočil).
-psql_q() { psql -X "$PG_URL" -v ON_ERROR_STOP=1 -tAc "$1"; }
+psql_q() { pg_run psql -X -v ON_ERROR_STOP=1 -tAc "$1"; }
 db_has_tables="$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")"
 case "$db_has_tables" in
   t | f) ;;
@@ -111,7 +180,15 @@ echo "=== Backing up database ==="
 # z pre-deploy dumpu se ztratí jen ty.
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
-pg_dump --format=custom --file="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump" "$PG_URL"
+dump="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
+DUMP_PARTIAL="$dump.partial"
+pg_run pg_dump --format=custom --file="$DUMP_PARTIAL"
+# Useknutý dump (plný disk) neprojde – deploy skončí dřív, než sáhne na aplikaci.
+# Plné čtení, ne `--list`: TOC je na začátku souboru, `--list` useknutí nepozná.
+pg_restore --file=/dev/null "$DUMP_PARTIAL"
+mv "$DUMP_PARTIAL" "$dump"
+DUMP_PARTIAL=""
+echo "Pre-deploy dump: $dump ($(du -h "$dump" | cut -f1))"
 # Ponechat 10 nejnovějších pre-deploy dumpů – disk serveru je sdílený a plný
 # disk shodí Postgres (denní zálohy rotuje ops/backup/aisedlacek-backup.sh).
 ls -1t "$BACKUP_DIR"/pre-deploy-*.dump 2>/dev/null | tail -n +11 | xargs -r rm --
