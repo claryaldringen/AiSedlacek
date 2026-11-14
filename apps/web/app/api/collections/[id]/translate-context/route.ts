@@ -3,6 +3,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
 import {
   LLM_MAX_TOKENS,
   TEXT_MODEL,
@@ -47,6 +48,13 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (!collection.context || collection.context.trim().length === 0) {
     return NextResponse.json({ error: 'No context to translate' }, { status: 400 });
   }
+
+  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu)
+  const running = await runningJobConflict(t, userId, {
+    type: 'translate-context',
+    collectionId: id,
+  });
+  if (running) return running;
 
   // Předběžná kontrola volného kreditu na rezervaci překladu (BIL-1); dřív tento
   // endpoint zůstatek nekontroloval vůbec.

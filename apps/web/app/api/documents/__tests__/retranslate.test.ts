@@ -5,11 +5,15 @@ import { NextRequest } from 'next/server';
 
 const mockDocFindUnique = vi.fn();
 const mockJobCreate = vi.fn();
+const mockJobFindFirst = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
     document: { findUnique: (...args: unknown[]) => mockDocFindUnique(...args) },
-    processingJob: { create: (...args: unknown[]) => mockJobCreate(...args) },
+    processingJob: {
+      create: (...args: unknown[]) => mockJobCreate(...args),
+      findFirst: (...args: unknown[]) => mockJobFindFirst(...args),
+    },
   },
 }));
 
@@ -74,6 +78,33 @@ describe('POST /api/documents/[id]/retranslate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockJobCreate.mockResolvedValue({ id: 'job-123' });
+    mockJobFindFirst.mockResolvedValue(null);
+  });
+
+  it('retranslace téhož dokumentu už běží: 409 s jobId, nový job ani kontrola kreditu', async () => {
+    mockDocFindUnique.mockResolvedValue(FAKE_DOC);
+    mockJobFindFirst.mockResolvedValue({ id: 'job-running' });
+    const { checkBalance } = await import('@/lib/infrastructure/billing');
+
+    const res = await POST(makeRequest({ language: 'cs' }), routeContext);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: 'Stejná akce už běží – počkejte na její dokončení.',
+      code: 'job_running',
+      jobId: 'job-running',
+    });
+    expect(mockJobFindFirst).toHaveBeenCalledWith({
+      where: {
+        userId: 'test-user-id',
+        type: 'retranslate',
+        status: { in: ['queued', 'running'] },
+        jobData: { contains: '"documentId":"doc-1"' },
+      },
+      select: { id: true },
+    });
+    expect(checkBalance).not.toHaveBeenCalled();
+    expect(mockJobCreate).not.toHaveBeenCalled();
   });
 
   it('returns 404 when document not found', async () => {

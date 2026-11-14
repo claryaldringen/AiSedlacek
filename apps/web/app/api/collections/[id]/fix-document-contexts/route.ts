@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
 import {
   LLM_MAX_TOKENS,
   TEXT_MODEL,
@@ -48,6 +49,10 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (collection.pages.length === 0) {
     return NextResponse.json({ error: t('noProcessedDocuments') }, { status: 422 });
   }
+
+  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu)
+  const running = await runningJobConflict(t, userId, { type: 'fix-contexts', collectionId: id });
+  if (running) return running;
 
   // Předběžná kontrola volného kreditu na opravu aspoň prvního dokumentu (BIL-1);
   // worker rezervuje před každým dokumentem a při nedostatku zbytek nezpracuje.

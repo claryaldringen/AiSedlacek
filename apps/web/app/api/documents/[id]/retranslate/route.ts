@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
 import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
 import {
   LLM_MAX_TOKENS,
   TEXT_MODEL,
@@ -62,6 +63,11 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
+
+  // Retranslace téhož dokumentu už čeká nebo běží → 409 s jejím jobId (před
+  // kontrolou kreditu); druhý job by překlad zaplatil podruhé a přepsal první.
+  const running = await runningJobConflict(t, userId, { type: 'retranslate', documentId: id });
+  if (running) return running;
 
   // Předběžná kontrola volného kreditu na rezervaci volání (BIL-1) – závazně se
   // rezervuje ve workeru těsně před voláním modelu.

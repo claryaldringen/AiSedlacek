@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
 import { LLM_MAX_TOKENS, TEXT_MODEL, reservationCredits } from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -38,6 +39,14 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (!collection || collection.userId !== userId) {
     return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
+
+  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu,
+  // jinak by běžící job svou rezervací vyvolal zavádějící credit_busy)
+  const running = await runningJobConflict(t, userId, {
+    type: 'generate-context',
+    collectionId: id,
+  });
+  if (running) return running;
 
   // Předběžná kontrola volného kreditu (BIL-1): výstup kontextu se rezervuje
   // celý, vstup (přepisy stránek) dopočítá worker při závazné rezervaci.
