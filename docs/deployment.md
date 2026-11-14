@@ -110,7 +110,8 @@ je potřeba obnovit pre-deploy dump (`pg_restore`) – dump vzniká před builde
 zápisy z doby buildu v něm nejsou: po obnově dosrovnat platby (Stripe dashboard, Fio
 výpis) a zkontrolovat OCR joby dokončené během deploye. Ponechává se 10 posledních
 pre-deploy dumpů; dump se zapisuje jako `*.dump.partial` a na `*.dump` se přejmenuje až
-po kontrole `pg_restore --list`, takže useknutý dump deploy zastaví a nezůstane po něm nic.
+po úspěšném `pg_dump` a plném přečtení (`pg_restore --file=/dev/null`), takže useknutý dump
+deploy zastaví a nezůstane po něm nic.
 
 `deploy.sh` předává `psql` a `pg_dump` heslo DB přes dočasný `.pgpass`, ne v argumentech
 (na sdíleném VPS by ho jinak viděl v `ps` každý uživatel). **Rollback na commit starší než

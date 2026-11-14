@@ -184,7 +184,8 @@ dump="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
 DUMP_PARTIAL="$dump.partial"
 pg_run pg_dump --format=custom --file="$DUMP_PARTIAL"
 # Useknutý dump (plný disk) neprojde – deploy skončí dřív, než sáhne na aplikaci.
-pg_restore --list "$DUMP_PARTIAL" >/dev/null
+# Plné čtení, ne `--list`: TOC je na začátku souboru, `--list` useknutí nepozná.
+pg_restore --file=/dev/null "$DUMP_PARTIAL"
 mv "$DUMP_PARTIAL" "$dump"
 DUMP_PARTIAL=""
 echo "Pre-deploy dump: $dump ($(du -h "$dump" | cut -f1))"
