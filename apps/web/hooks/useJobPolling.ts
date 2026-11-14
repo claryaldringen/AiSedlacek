@@ -26,7 +26,11 @@ export function useJobPolling(): {
       intervalMs?: number;
       onStep?: (step: string) => void;
       onProgress?: (completed: number, total: number) => void;
-      /** Kód chyby jobu, když skončí `error` (např. `insufficient_credit`). */
+      /**
+       * Kód chyby ukončeného jobu: u `error` (např. `insufficient_credit`,
+       * `credit_busy`) i u `completed`, který část stránek přeskočil (kód nese
+       * důvod, např. nedostatek kreditu). Hlášku vybere `jobOutcomeMessageKey`.
+       */
       onErrorCode?: (errorCode: string | null) => void;
     },
   ) => Promise<JobOutcome>;
@@ -99,7 +103,10 @@ export function useJobPolling(): {
               data.status === 'error' ||
               data.status === 'cancelled'
             ) {
-              if (data.status === 'error') options?.onErrorCode?.(data.errorCode ?? null);
+              // Kód i u `completed` – doběhlý job mohl část stránek přeskočit (kredit)
+              if (data.status === 'error' || data.status === 'completed') {
+                options?.onErrorCode?.(data.errorCode ?? null);
+              }
               settle(data.status as 'completed' | 'error' | 'cancelled');
             }
           } catch {

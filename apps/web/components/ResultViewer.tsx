@@ -19,6 +19,7 @@ const RETRANSLATE_ERROR_KEYS: Partial<Record<JobErrorCode, string>> = {
   model_refused: 'retranslationErrorRefused',
   empty_output: 'retranslationErrorEmpty',
   insufficient_credit: 'retranslationInsufficientCredit',
+  credit_busy: 'retranslationCreditBusy',
   api_error: 'retranslationErrorApi',
   not_found: 'retranslationErrorNotFound',
 };
@@ -355,13 +356,15 @@ export function ResultViewer({
         });
         if (!res.ok) {
           // Transkripce je uložená, jen překlad se nespustil (kredit, souběžný job).
-          const data = (await res.json().catch(() => ({}))) as { error?: unknown };
+          const data = (await res.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
           setRetranslateError(
-            res.status === 402 || data.error === 'insufficient_tokens'
-              ? t('retranslationInsufficientCredit')
-              : typeof data.error === 'string'
-                ? data.error
-                : t('retranslationFailed'),
+            data.code === 'credit_busy'
+              ? t('retranslationCreditBusy')
+              : res.status === 402 || data.error === 'insufficient_tokens'
+                ? t('retranslationInsufficientCredit')
+                : typeof data.error === 'string'
+                  ? data.error
+                  : t('retranslationFailed'),
           );
           setRetranslating(false);
           return true;

@@ -21,7 +21,7 @@ import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
-import { jobErrorMessageKey } from '@/lib/job-errors';
+import { jobOutcomeMessageKey } from '@/lib/job-errors';
 import { JoinWorkspaceDialog } from '@/components/JoinWorkspaceDialog';
 import { ManageWorkspaceDialog } from '@/components/ManageWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
@@ -451,9 +451,9 @@ function WorkspaceContent(): React.JSX.Element {
         });
         setFixingContexts(false);
         setFixingContextsProgress(null);
-        if (result === 'error') {
-          setError(t(jobErrorMessageKey(errorCode) ?? 'contextFixesFailed'));
-        }
+        const fixMessageKey = jobOutcomeMessageKey(result, errorCode);
+        if (fixMessageKey) setError(t(fixMessageKey));
+        else if (result === 'error') setError(t('contextFixesFailed'));
         // Reload pages to get updated contexts
         void loadPages(selectedCollectionId);
       } catch (err) {
@@ -485,10 +485,9 @@ function WorkspaceContent(): React.JSX.Element {
         let errorCode: string | null = null;
         const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
         setTranslatingContext(false);
-        if (result === 'error') {
-          const key = jobErrorMessageKey(errorCode);
-          setError(key ? t(key) : 'Context translation failed');
-        }
+        const translateMessageKey = jobOutcomeMessageKey(result, errorCode);
+        if (translateMessageKey) setError(t(translateMessageKey));
+        else if (result === 'error') setError('Context translation failed');
         void loadCollections();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error');
@@ -642,9 +641,10 @@ function WorkspaceContent(): React.JSX.Element {
       if (result === 'completed') {
         // Reload collection to get updated context and metadata
         void loadCollections();
-      } else if (result === 'error') {
-        setError(t(jobErrorMessageKey(errorCode) ?? 'generationFailed'));
       }
+      const generateMessageKey = jobOutcomeMessageKey(result, errorCode);
+      if (generateMessageKey) setError(t(generateMessageKey));
+      else if (result === 'error') setError(t('generationFailed'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('error'));
       setGeneratingContext(false);
@@ -949,9 +949,9 @@ function WorkspaceContent(): React.JSX.Element {
               await reloadPanel();
               // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
               // musí vidět, že překlad nevznikl.
-              if (outcome !== 'completed') {
-                setError(t(jobErrorMessageKey(errorCode) ?? 'regenerationFailed'));
-              }
+              const retranslateMessageKey = jobOutcomeMessageKey(outcome, errorCode);
+              if (retranslateMessageKey) setError(t(retranslateMessageKey));
+              else if (outcome !== 'completed') setError(t('regenerationFailed'));
               return;
             }
           }
@@ -1004,9 +1004,9 @@ function WorkspaceContent(): React.JSX.Element {
         // Reload the document after job completes
         const updatedPage = await reloadPanel();
         // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
-        // uživatel musí vidět, že se nic nezměnilo. Nedostatek kreditu má vlastní
-        // lokalizovanou hlášku s výzvou k dobití.
-        const creditKey = jobErrorMessageKey(errorCode);
+        // uživatel musí vidět, že se nic nezměnilo. Nedostatek kreditu (i kredit
+        // blokovaný jiným zpracováním) má vlastní lokalizovanou hlášku.
+        const creditKey = jobOutcomeMessageKey(outcome, errorCode);
         if (creditKey) {
           setError(t(creditKey));
         } else if (outcome !== 'completed' || updatedPage?.errorMessage) {

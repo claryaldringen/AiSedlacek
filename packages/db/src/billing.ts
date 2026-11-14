@@ -151,8 +151,9 @@ export class InsufficientCreditError extends Error {
 
 /**
  * Kredit chybí jen kvůli jiným běžícím akcím uživatele: bez jejich rezervací by
- * zůstatek stačil. Job se v takovém případě nemá vzdát, ale počkat, až se
- * rezervace uvolní (po vyúčtování se nevyužitá část vrací).
+ * zůstatek stačil. Akce v takovém případě skončí kódem `credit_busy` (route 409,
+ * job chybou) – uživatel ji spustí znovu, až se rezervace uvolní (po vyúčtování
+ * se nevyužitá část vrací); dobíjet kredit nemusí.
  */
 export function isBlockedByOtherHolds(shortage: {
   required: number;

@@ -6,7 +6,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
 import { releaseCreditHold, reserveCredits, settleCreditHold } from '@/lib/infrastructure/billing';
-import { insufficientCreditBody } from '@/lib/infrastructure/credit';
+import { insufficientCreditResponse } from '@/lib/infrastructure/credit';
 import { publicLlmError } from '@/lib/infrastructure/llm-errors';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
@@ -199,7 +199,7 @@ ${glossaryText}`;
     ),
   });
   if (!reservation.ok) {
-    return Response.json(insufficientCreditBody(request, t, reservation), { status: 402 });
+    return insufficientCreditResponse(request, t, reservation);
   }
   const hold = reservation.hold;
 

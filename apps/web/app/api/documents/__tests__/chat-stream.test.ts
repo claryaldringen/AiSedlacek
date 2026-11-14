@@ -369,4 +369,21 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
     expect(body.error).toContain('120');
     expect(fake).toBeUndefined();
   });
+
+  it('returns 409 credit_busy when only other running jobs block the credit', async () => {
+    mockReserve.mockResolvedValue({
+      ok: false,
+      required: 120_000,
+      available: 20_000,
+      balance: 500_000,
+      reserved: 480_000,
+    });
+    fake = undefined as unknown as FakeMessageStream;
+
+    const res = await chat(post(), ctx);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'credit_busy' });
+    expect(fake).toBeUndefined();
+  });
 });

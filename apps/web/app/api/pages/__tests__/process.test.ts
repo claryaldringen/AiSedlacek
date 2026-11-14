@@ -264,6 +264,27 @@ describe('POST /api/pages/process', () => {
     expect(vi.mocked(checkBalance).mock.calls[0]![1]).toBeGreaterThanOrEqual(441_600);
   });
 
+  it('kredit blokovaný jiným běžícím zpracováním: 409 credit_busy, ne 402 (dobíjet netřeba)', async () => {
+    const { checkBalance } = await import('@/lib/infrastructure/billing');
+    vi.mocked(checkBalance).mockResolvedValueOnce({
+      balance: 900_000,
+      reserved: 800_000,
+      available: 100_000,
+      required: 600_000,
+      sufficient: false,
+    });
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe('credit_busy');
+    expect(json.error).toBe(
+      'Kredit je dočasně rezervovaný jiným běžícím zpracováním – spusťte akci znovu po jeho dokončení.',
+    );
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
   // ── Předběžná kontrola kreditu podle toho, co job opravdu udělá (review) ──
   describe('předběžná kontrola kreditu', () => {
     const OCR_PAGE = ocrBatchReservationCredits(1, '', 'transcribe+translate');
