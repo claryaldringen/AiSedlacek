@@ -237,6 +237,9 @@ export async function regenerateDocumentResult(
             model: metadata.model,
             inputTokens: null,
             outputTokens: null,
+            // Překlad je teď součástí OCR (cena v Document.chargedCredits) – odečet
+            // dřívější retranslace by se u něj jinak dál zobrazoval (BIL-11)
+            chargedCredits: null,
             context: null,
             glossaryJson: null,
           },

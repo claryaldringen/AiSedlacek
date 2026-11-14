@@ -644,6 +644,8 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
       inputTokens: 1000,
       outputTokens: 500,
       batchId: 'job-1',
+      // Skutečný odečet za nový výsledek (BIL-11): Opus 4.6 1000 × $5 + 500 × $25
+      chargedCredits: 16_100,
     });
     // Glosář se nahradí
     expect(mocks.tx.glossaryEntry.deleteMany).toHaveBeenCalledWith({
@@ -654,7 +656,13 @@ describe('processPages – regenerace existujícího dokumentu (DAT-1)', () => {
     expect(mocks.tx.translation.upsert).toHaveBeenCalledTimes(1);
     const upsert = mocks.tx.translation.upsert.mock.calls[0]![0];
     expect(upsert.where).toEqual({ documentId_language: { documentId: 'doc-1', language: 'cs' } });
-    expect(upsert.update).toMatchObject({ text: 'překlad 0', context: null, glossaryJson: null });
+    expect(upsert.update).toMatchObject({
+      text: 'překlad 0',
+      context: null,
+      glossaryJson: null,
+      // Cena dřívější retranslace se u přepsaného překladu nezobrazuje (BIL-11)
+      chargedCredits: null,
+    });
 
     expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
       where: { id: 'p1', status: { not: 'archived' } },
