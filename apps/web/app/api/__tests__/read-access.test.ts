@@ -102,7 +102,19 @@ function documentFor(pageId: string): Record<string, unknown> {
     id: `doc-${pageId}`,
     pageId,
     chargedCredits: 72_000,
-    translations: [{ language: 'en', text: 'x', chargedCredits: 900 }],
+    model: 'claude-opus-5-5',
+    inputTokens: 1200,
+    outputTokens: 800,
+    translations: [
+      {
+        language: 'en',
+        text: 'x',
+        chargedCredits: 900,
+        model: 'claude-sonnet-4-6',
+        inputTokens: 300,
+        outputTokens: 200,
+      },
+    ],
     glossary: [],
   };
 }
@@ -219,29 +231,36 @@ describe.each([
     expect((await read('owner', 'page-archived')).status).toBe(200);
   });
 
-  // BIL-11: skutečné odečty jsou útrata vlastníka – čtenáři cizího obsahu je nedostanou
-  function documentOf(body: Record<string, unknown>): {
+  // BIL-11: skutečné odečty jsou útrata vlastníka – čtenáři cizího obsahu je nedostanou;
+  // stejně tak model a tokeny, ze kterých se cena dá dopočítat (review 3. kolo)
+  interface Usage {
     chargedCredits: number | null;
-    translations: { chargedCredits: number | null }[];
-  } {
-    return (body.document ?? body) as {
-      chargedCredits: number | null;
-      translations: { chargedCredits: number | null }[];
-    };
+    model: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
   }
+  function documentOf(body: Record<string, unknown>): Usage & { translations: Usage[] } {
+    return (body.document ?? body) as Usage & { translations: Usage[] };
+  }
+  const HIDDEN = { chargedCredits: null, model: null, inputTokens: null, outputTokens: null };
 
-  it('skutečné odečty kreditu vidí jen vlastník', async () => {
+  it('skutečné odečty kreditu, model a tokeny vidí jen vlastník', async () => {
     const own = documentOf(await (await read('owner', 'page-shared')).json());
-    expect(own.chargedCredits).toBe(72_000);
-    expect(own.translations[0]!.chargedCredits).toBe(900);
+    expect(own).toMatchObject({
+      chargedCredits: 72_000,
+      model: 'claude-opus-5-5',
+      inputTokens: 1200,
+      outputTokens: 800,
+    });
+    expect(own.translations[0]).toMatchObject({ chargedCredits: 900, inputTokens: 300 });
 
     for (const [user, pageId] of [
       ['member', 'page-shared'],
       ['stranger', 'page-public'],
     ] as const) {
       const doc = documentOf(await (await read(user, pageId)).json());
-      expect(doc.chargedCredits).toBeNull();
-      expect(doc.translations[0]!.chargedCredits).toBeNull();
+      expect(doc).toMatchObject(HIDDEN);
+      expect(doc.translations[0]).toMatchObject({ ...HIDDEN, text: 'x' });
     }
   });
 

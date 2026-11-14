@@ -563,11 +563,13 @@ export function ResultViewer({
             </summary>
             <div className="divide-y divide-stone-100 text-sm">
               <MetadataGroup title={t('processingSection')}>
-                <MetadataRow label="Model" value={result.model} />
+                {/* Model a tokeny (z nich a ceníku se dá dopočítat útrata vlastníka)
+                    u cizího dokumentu nezobrazovat – API je čtenáři ani nevrací */}
+                <MetadataRow label="Model" value={readOnly ? null : result.model} />
                 <MetadataRow
                   label={t('tokens')}
                   value={
-                    result.inputTokens != null || result.outputTokens != null
+                    !readOnly && (result.inputTokens != null || result.outputTokens != null)
                       ? t('tokensInOut', {
                           in: (result.inputTokens ?? 0).toLocaleString(locale),
                           out: (result.outputTokens ?? 0).toLocaleString(locale),
@@ -592,7 +594,7 @@ export function ResultViewer({
                 />
               </MetadataGroup>
 
-              {(result.translationModel || result.translationInputTokens != null) && (
+              {!readOnly && (result.translationModel || result.translationInputTokens != null) && (
                 <MetadataGroup title={t('translationSection')}>
                   <MetadataRow label="Model" value={result.translationModel} />
                   <MetadataRow

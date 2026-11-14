@@ -195,6 +195,15 @@ describe('GET /api/collections', () => {
         legacyInputTokens: null,
         legacyOutputTokens: null,
       },
+      // Cizí svazek se zpracovanými dokumenty – tokeny čtenáři neprozradí
+      {
+        collectionId: 'col-2',
+        model: 'claude-opus-5-5',
+        inputTokens: BigInt(700),
+        outputTokens: BigInt(350),
+        legacyInputTokens: null,
+        legacyOutputTokens: null,
+      },
     ]);
     // Skutečné odečty za svazek (OCR včetně odmítnutí a regenerací, kontexty, chat)
     mockLedgerGroupBy.mockResolvedValue([{ collectionId: 'col-1', _sum: { amount: -6000 } }]);
@@ -229,8 +238,9 @@ describe('GET /api/collections', () => {
     expect(json[0].canEdit).toBe(true);
     expect(json[1].canEdit).toBe(false);
     expect(json[1].stats.done).toBe(0);
-    expect(json[1].stats.inputTokens).toBe(0);
-    // Cena (útrata vlastníka) se u cizího svazku nevrací – UI ji skryje
+    // Tokeny ani cena (útrata vlastníka) se u cizího svazku nevrací – UI je skryje
+    expect(json[1].stats.inputTokens).toBeNull();
+    expect(json[1].stats.outputTokens).toBeNull();
     expect(json[1].stats.chargeCzk).toBeNull();
     expect(json[1].stats.chargeCredits).toBeNull();
     expect(json[1].stats.chargeEstimatedCredits).toBeNull();

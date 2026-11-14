@@ -176,11 +176,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         error: byStatus['error'] ?? 0,
         processing: byStatus['processing'] ?? 0,
         blank: byStatus['blank'] ?? 0,
-        inputTokens,
-        outputTokens,
-        // Cena (skutečné odečty kreditu) je útrata vlastníka – čtenářům cizího
-        // svazku null, UI ji pak nezobrazí. Na 4 desetinná místa – formatCzk
-        // u haléřových částek ukazuje víc míst.
+        // Cena (skutečné odečty kreditu) i tokeny (z nich a veřejného ceníku se
+        // dá cena dopočítat) jsou útrata vlastníka – čtenářům cizího svazku null,
+        // UI je pak nezobrazí. Cena na 4 desetinná místa – formatCzk u haléřových
+        // částek ukazuje víc míst.
+        inputTokens: isOwner ? inputTokens : null,
+        outputTokens: isOwner ? outputTokens : null,
         chargeCzk: isOwner ? Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000 : null,
         chargeCredits: isOwner ? (tokens?.chargeCredits ?? 0) : null,
         // Část ceny odhadnutá z tokenů (dokumenty bez záznamu odečtu); 0 = vše skutečné

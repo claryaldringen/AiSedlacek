@@ -42,15 +42,16 @@ interface DocApiResponse {
     text: string;
     context?: string | null;
     glossaryJson?: string | null;
-    model?: string;
-    inputTokens?: number;
-    outputTokens?: number;
+    // Model a tokeny: null u cizího dokumentu (útrata vlastníka)
+    model?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
     chargedCredits?: number | null;
   }[];
   glossary: { term: string; definition: string }[];
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
   /** Skutečně odečtené kredity (BIL-11); null u starších dokumentů. */
   chargedCredits?: number | null;
   processingTimeMs?: number;
@@ -1535,54 +1536,59 @@ function WorkspaceContent(): React.JSX.Element {
                     )}
                   </div>
 
-                  {/* Tokens & cost */}
-                  {(selectedCollection.stats?.inputTokens > 0 ||
-                    selectedCollection.stats?.outputTokens > 0) && (
-                    <div>
-                      <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        {t('consumption')}
-                      </h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">{t('inputTokens')}</span>
-                          <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">{t('outputTokens')}</span>
-                          <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
-                          </span>
-                        </div>
-                        {/* Cenu (útratu vlastníka) API vrací jen vlastníkovi svazku */}
-                        {selectedCollection.stats?.chargeCredits != null && (
-                          <div className="flex justify-between border-t border-slate-100 pt-1">
-                            <span className="font-medium text-slate-600">{t('price')}</span>
-                            {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
-                            <span className="font-semibold text-slate-800">
-                              {/* Skutečné odečty; část za dokumenty zpracované před
-                                záznamem odečtu je odhad (BIL-11) */}
-                              {tDoc(
-                                (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
-                                  ? 'chargeValuePartlyEstimated'
-                                  : 'chargeValue',
-                                {
-                                  czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
-                                  credits: (
-                                    selectedCollection.stats?.chargeCredits ?? 0
-                                  ).toLocaleString(locale),
-                                  estimated: (
-                                    selectedCollection.stats?.chargeEstimatedCredits ?? 0
-                                  ).toLocaleString(locale),
-                                },
-                              )}
+                  {/* Tokens & cost – u cizího svazku API tokeny ani cenu nevrací (null) */}
+                  {selectedCollection.stats?.inputTokens != null &&
+                    selectedCollection.stats.outputTokens != null &&
+                    (selectedCollection.stats.inputTokens > 0 ||
+                      selectedCollection.stats.outputTokens > 0) && (
+                      <div>
+                        <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          {t('consumption')}
+                        </h4>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">{t('inputTokens')}</span>
+                            <span className="font-medium text-slate-700">
+                              {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
                             </span>
                           </div>
-                        )}
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">{t('outputTokens')}</span>
+                            <span className="font-medium text-slate-700">
+                              {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
+                            </span>
+                          </div>
+                          {/* Cenu (útratu vlastníka) API vrací jen vlastníkovi svazku */}
+                          {selectedCollection.stats?.chargeCredits != null && (
+                            <div className="flex justify-between border-t border-slate-100 pt-1">
+                              <span className="font-medium text-slate-600">{t('price')}</span>
+                              {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
+                              <span className="font-semibold text-slate-800">
+                                {/* Skutečné odečty; část za dokumenty zpracované před
+                                záznamem odečtu je odhad (BIL-11) */}
+                                {tDoc(
+                                  (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
+                                    ? 'chargeValuePartlyEstimated'
+                                    : 'chargeValue',
+                                  {
+                                    czk: formatCzk(
+                                      selectedCollection.stats?.chargeCzk ?? 0,
+                                      locale,
+                                    ),
+                                    credits: (
+                                      selectedCollection.stats?.chargeCredits ?? 0
+                                    ).toLocaleString(locale),
+                                    estimated: (
+                                      selectedCollection.stats?.chargeEstimatedCredits ?? 0
+                                    ).toLocaleString(locale),
+                                  },
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               </details>
             </div>

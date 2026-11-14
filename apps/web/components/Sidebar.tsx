@@ -27,8 +27,9 @@ export interface Collection {
     error: number;
     processing: number;
     blank: number;
-    inputTokens: number;
-    outputTokens: number;
+    /** null u cizího svazku – z tokenů a ceníku by šla dopočítat útrata vlastníka. */
+    inputTokens: number | null;
+    outputTokens: number | null;
     /** Cena pro uživatele v Kč (náklad API × marže) – stejně jako u dokumentu. */
     /** null u cizího svazku – cena je útrata vlastníka. */
     chargeCzk: number | null;
