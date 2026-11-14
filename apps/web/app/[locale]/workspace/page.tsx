@@ -21,11 +21,17 @@ import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
+import { fixContextsCreditMessage, jobOutcomeMessageKey } from '@/lib/job-errors';
+import { jobToFollow } from '@/lib/job-follow';
+import { JoinWorkspaceDialog } from '@/components/JoinWorkspaceDialog';
+import { ManageWorkspaceDialog } from '@/components/ManageWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 import { formatCzk } from '@/lib/pricing';
+import { addChatUsageToDocument } from '@/lib/chat-usage';
+import { PanelLoadGuard, applyResultPatch, applyResultUpdate } from '@/lib/panel-result';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -39,14 +45,18 @@ interface DocApiResponse {
     text: string;
     context?: string | null;
     glossaryJson?: string | null;
-    model?: string;
-    inputTokens?: number;
-    outputTokens?: number;
+    // Model a tokeny: null u cizího dokumentu (útrata vlastníka)
+    model?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    chargedCredits?: number | null;
   }[];
   glossary: { term: string; definition: string }[];
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
+  model?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  /** Skutečně odečtené kredity (BIL-11); null u starších dokumentů. */
+  chargedCredits?: number | null;
   processingTimeMs?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -90,6 +100,7 @@ function mapDocToResult(
     model: doc.model,
     inputTokens: doc.inputTokens,
     outputTokens: doc.outputTokens,
+    chargedCredits: doc.chargedCredits,
     processingTimeMs: doc.processingTimeMs,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -102,6 +113,7 @@ function mapDocToResult(
     translationModel: translation?.model,
     translationInputTokens: translation?.inputTokens,
     translationOutputTokens: translation?.outputTokens,
+    translationChargedCredits: translation?.chargedCredits,
   };
 }
 
@@ -169,6 +181,8 @@ function WorkspaceContent(): React.JSX.Element {
 
   // Create workspace dialog
   const [createWorkspaceDialogOpen, setCreateWorkspaceDialogOpen] = useState(false);
+  const [joinWorkspaceDialogOpen, setJoinWorkspaceDialogOpen] = useState(false);
+  const [manageWorkspaceId, setManageWorkspaceId] = useState<string | null>(null);
 
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -190,6 +204,9 @@ function WorkspaceContent(): React.JSX.Element {
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+  // Naposledy otevíraná stránka panelu – pozdě doběhlé načtení (rychlé listování,
+  // regenerace po přepnutí) se do panelu nezapíše
+  const [panelLoad] = useState(() => new PanelLoadGuard());
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
   const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
@@ -410,10 +427,11 @@ function WorkspaceContent(): React.JSX.Element {
   const handleWorkspaceSelect = useCallback(
     (id: string): void => {
       router.push(`/workspace?workspace=${id}`);
+      panelLoad.close();
       setPanelResult(null);
       setPages([]);
     },
-    [router],
+    [router, panelLoad],
   );
 
   // ---- Collection navigation (URL-based for browser back/forward) ----
@@ -425,23 +443,31 @@ function WorkspaceContent(): React.JSX.Element {
         const res = await apiFetch(`/api/collections/${collectionId}/fix-document-contexts`, {
           method: 'POST',
         });
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errData.error ?? t('contextFixFailed'));
+        const body = (await res.json().catch(() => ({}))) as { error?: string; jobId?: string };
+        // Nový job, nebo (409 job_running) už běžící oprava téhož svazku – sledovat ji
+        const jobId = jobToFollow({ status: res.status, body });
+        if (!jobId) {
+          setError(body.error ?? t('contextFixFailed'));
           setFixingContexts(false);
           setFixingContextsProgress(null);
           return;
         }
-        const { jobId } = (await res.json()) as { jobId: string };
 
+        let errorCode: string | null = null;
+        let progress: { completed: number; total: number } | null = null;
         const result = await pollJob(jobId, {
           onStep: (step) => setFixingContextsProgress(step),
+          onProgress: (completed, total) => (progress = { completed, total }),
+          onErrorCode: (code) => (errorCode = code),
         });
         setFixingContexts(false);
         setFixingContextsProgress(null);
-        if (result === 'error') {
-          setError(t('contextFixesFailed'));
-        }
+        // Zastavení kvůli kreditu: kolik je opraveno a že nové spuštění opraví vše
+        const creditMessage = fixContextsCreditMessage(result, errorCode, progress);
+        const fixMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
+        if (creditMessage) setError(t(creditMessage.key, creditMessage.values));
+        else if (fixMessageKey) setError(t(fixMessageKey));
+        else if (result === 'error') setError(t('contextFixesFailed'));
         // Reload pages to get updated contexts
         void loadPages(selectedCollectionId);
       } catch (err) {
@@ -462,26 +488,28 @@ function WorkspaceContent(): React.JSX.Element {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ targetLanguage: locale }),
         });
-        if (!res.ok) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(errData.error ?? 'Translation failed');
+        const body = (await res.json().catch(() => ({}))) as { error?: string; jobId?: string };
+        // Nový job, nebo (409 job_running) už běžící překlad kontextu – sledovat ho
+        const jobId = jobToFollow({ status: res.status, body });
+        if (!jobId) {
+          setError(body.error ?? 'Translation failed');
           setTranslatingContext(false);
           return;
         }
-        const { jobId } = (await res.json()) as { jobId: string };
 
-        const result = await pollJob(jobId);
+        let errorCode: string | null = null;
+        const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
         setTranslatingContext(false);
-        if (result === 'error') {
-          setError('Context translation failed');
-        }
+        const translateMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
+        if (translateMessageKey) setError(t(translateMessageKey));
+        else if (result === 'error') setError('Context translation failed');
         void loadCollections();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error');
         setTranslatingContext(false);
       }
     },
-    [locale, loadCollections, setError, pollJob],
+    [locale, loadCollections, setError, pollJob, t],
   );
 
   const handleCollectionSelect = useCallback(
@@ -493,10 +521,11 @@ function WorkspaceContent(): React.JSX.Element {
         const params = wsParam ? `${wsParam}&collection=${id}` : `collection=${id}`;
         router.push(`/workspace?${params}`);
       }
+      panelLoad.close();
       setPanelPage(null);
       setPanelResult(null);
     },
-    [router, selectedWorkspaceId],
+    [router, selectedWorkspaceId, panelLoad],
   );
 
   const selectedCollection =
@@ -617,19 +646,20 @@ function WorkspaceContent(): React.JSX.Element {
       } catch {
         throw new Error(`Server returned ${res.status}`);
       }
-      if (!res.ok) throw new Error(data.error ?? t('generationFailed'));
+      // Nový job, nebo (409 job_running) už běžící generování kontextu – sledovat ho
+      const jobId = jobToFollow({ status: res.status, body: data });
+      if (!jobId) throw new Error(data.error ?? t('generationFailed'));
 
-      const { jobId } = data;
-      if (!jobId) throw new Error('Server nevrátil jobId');
-
-      const result = await pollJob(jobId);
+      let errorCode: string | null = null;
+      const result = await pollJob(jobId, { onErrorCode: (code) => (errorCode = code) });
       setGeneratingContext(false);
       if (result === 'completed') {
         // Reload collection to get updated context and metadata
         void loadCollections();
-      } else if (result === 'error') {
-        setError(t('generationFailed'));
       }
+      const generateMessageKey = jobOutcomeMessageKey(result, errorCode, 'text');
+      if (generateMessageKey) setError(t(generateMessageKey));
+      else if (result === 'error') setError(t('generationFailed'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('error'));
       setGeneratingContext(false);
@@ -772,11 +802,12 @@ function WorkspaceContent(): React.JSX.Element {
         return;
       }
       if (panelPage?.id === pageId) {
+        panelLoad.close();
         setPanelPage(null);
         setPanelResult(null);
       }
     },
-    [pages, panelPage, t],
+    [pages, panelPage, t, panelLoad],
   );
 
   const handleDeleteSelected = useCallback(async (): Promise<void> => {
@@ -798,30 +829,39 @@ function WorkspaceContent(): React.JSX.Element {
   }, []);
 
   // ---- Page double-click (open panel for any status) ----
+  // Všechny cesty otevření (dvojklik, předchozí/další, klávesnice, obnova z URL)
+  // vedou sem. Odpověď staršího otevření (A → B → C, GET pro B doběhne po C) se
+  // zahodí a její načtení se přeruší – panel nesmí ukázat B pod stránkou C.
   const handlePageDoubleClick = useCallback(
     async (page: PageItem): Promise<void> => {
+      const load = panelLoad.begin(page.id);
       setPanelPage(page);
       setPanelResult(null);
       setError(null);
       setPageInUrl(page.id);
+      setPanelLoading(Boolean(page.document));
 
       if (page.document) {
-        setPanelLoading(true);
         try {
-          const res = await apiFetch(`/api/documents/${page.document.id}`);
+          const res = await apiFetch(`/api/documents/${page.document.id}`, {
+            signal: load.signal,
+          });
+          if (!load.isCurrent()) return;
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as DocApiResponse;
+          if (!load.isCurrent()) return;
           setPanelAccess({ id: page.id, canEdit: readCanEdit(doc) });
           setPanelResult(mapDocToResult(doc, page, locale, true));
         } catch (err) {
+          if (!load.isCurrent()) return;
           setError(err instanceof Error ? err.message : t('error'));
         } finally {
-          setPanelLoading(false);
+          if (load.isCurrent()) setPanelLoading(false);
         }
       } else {
         // Fetch full page data for metadata (width, height, etc.)
         try {
-          const res = await apiFetch(`/api/pages/${page.id}`);
+          const res = await apiFetch(`/api/pages/${page.id}`, { signal: load.signal });
           if (res.ok) {
             const fullPage = (await res.json()) as PageItem & {
               width?: number;
@@ -829,6 +869,7 @@ function WorkspaceContent(): React.JSX.Element {
               fileSize?: number;
               errorMessage?: string;
             };
+            if (!load.isCurrent()) return;
             setPanelAccess({ id: page.id, canEdit: readCanEdit(fullPage) });
             setPanelPage(fullPage);
           }
@@ -837,7 +878,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
       }
     },
-    [setError, setPageInUrl],
+    [setError, setPageInUrl, panelLoad],
   );
 
   // ---- Restore panel from URL ?page=ID on initial load ----
@@ -881,17 +922,22 @@ function WorkspaceContent(): React.JSX.Element {
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
+      // Panel se obnoví jen tehdy, když pořád ukazuje regenerovanou stránku –
+      // uživatel mohl během regenerace přejít jinam (seznam stránek se obnoví vždy).
       const reloadPanel = async (): Promise<PageItem | null> => {
         const pageRes = await apiFetch(`/api/pages/${pageId}`);
         if (!pageRes.ok) return null;
         const updatedPage = (await pageRes.json()) as PageItem;
-        setPanelPage(updatedPage);
         setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+        if (!panelLoad.isOpen(pageId)) return updatedPage;
+        setPanelPage(updatedPage);
         if (updatedPage.document) {
           const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
           if (docRes.ok) {
             const doc = (await docRes.json()) as DocApiResponse;
-            setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+            if (panelLoad.isOpen(pageId)) {
+              setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+            }
           }
         }
         return updatedPage;
@@ -922,19 +968,21 @@ function WorkspaceContent(): React.JSX.Element {
                 throw new Error(errData.error ?? `HTTP ${retransRes.status}`);
               }
               const { jobId } = (await retransRes.json()) as { jobId: string };
+              let errorCode: string | null = null;
               const outcome = await pollJob(jobId, {
                 onStep: (step) => setRegenerateStep(step),
                 onProgress: (completed, total) => {
                   if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
                 },
+                onErrorCode: (code) => (errorCode = code),
               });
               // Reload page and document with new translation
               await reloadPanel();
               // Selhaný job (chyba modelu, DB) nesmí skončit potichu – uživatel
               // musí vidět, že překlad nevznikl.
-              if (outcome !== 'completed') {
-                setError(t('regenerationFailed'));
-              }
+              const retranslateMessageKey = jobOutcomeMessageKey(outcome, errorCode, 'text');
+              if (retranslateMessageKey) setError(t(retranslateMessageKey));
+              else if (outcome !== 'completed') setError(t('regenerationFailed'));
               return;
             }
           }
@@ -975,18 +1023,24 @@ function WorkspaceContent(): React.JSX.Element {
         }
         const { jobId } = (await response.json()) as { jobId: string };
 
+        let errorCode: string | null = null;
         const outcome = await pollJob(jobId, {
           onStep: (step) => setRegenerateStep(step),
           onProgress: (completed, total) => {
             if (total > 0) setRegenerateProgress(Math.round((completed / total) * 100));
           },
+          onErrorCode: (code) => (errorCode = code),
         });
 
         // Reload the document after job completes
         const updatedPage = await reloadPanel();
         // Neúspěšná regenerace nechá původní dokument a zapíše errorMessage –
-        // uživatel musí vidět, že se nic nezměnilo.
-        if (outcome !== 'completed' || updatedPage?.errorMessage) {
+        // uživatel musí vidět, že se nic nezměnilo. Nedostatek kreditu (i kredit
+        // blokovaný jiným zpracováním) má vlastní lokalizovanou hlášku.
+        const creditKey = jobOutcomeMessageKey(outcome, errorCode, 'ocr');
+        if (creditKey) {
+          setError(t(creditKey));
+        } else if (outcome !== 'completed' || updatedPage?.errorMessage) {
           setError(updatedPage?.errorMessage ?? t('regenerationFailed'));
         }
       } catch (err) {
@@ -999,7 +1053,7 @@ function WorkspaceContent(): React.JSX.Element {
         setRegenerateProgress(undefined);
       }
     },
-    [pages, setError, pollJob],
+    [pages, setError, pollJob, panelLoad],
   );
 
   // ---- Derived values ----
@@ -1116,6 +1170,8 @@ function WorkspaceContent(): React.JSX.Element {
       selectedWorkspaceId={selectedWorkspaceId}
       onWorkspaceSelect={handleWorkspaceSelect}
       onCreateWorkspace={() => setCreateWorkspaceDialogOpen(true)}
+      onJoinWorkspace={() => setJoinWorkspaceDialogOpen(true)}
+      onManageWorkspace={setManageWorkspaceId}
       loadingWorkspaces={loadingWorkspaces}
     >
       {/* Toolbar */}
@@ -1510,41 +1566,59 @@ function WorkspaceContent(): React.JSX.Element {
                     )}
                   </div>
 
-                  {/* Tokens & cost */}
-                  {(selectedCollection.stats?.inputTokens > 0 ||
-                    selectedCollection.stats?.outputTokens > 0) && (
-                    <div>
-                      <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        {t('consumption')}
-                      </h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">{t('inputTokens')}</span>
-                          <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">{t('outputTokens')}</span>
-                          <span className="font-medium text-slate-700">
-                            {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
-                          </span>
-                        </div>
-                        <div className="flex justify-between border-t border-slate-100 pt-1">
-                          <span className="font-medium text-slate-600">{t('price')}</span>
-                          {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
-                          <span className="font-semibold text-slate-800">
-                            {tDoc('chargeValue', {
-                              czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
-                              credits: (
-                                selectedCollection.stats?.chargeCredits ?? 0
-                              ).toLocaleString(locale),
-                            })}
-                          </span>
+                  {/* Tokens & cost – u cizího svazku API tokeny ani cenu nevrací (null) */}
+                  {selectedCollection.stats?.inputTokens != null &&
+                    selectedCollection.stats.outputTokens != null &&
+                    (selectedCollection.stats.inputTokens > 0 ||
+                      selectedCollection.stats.outputTokens > 0) && (
+                      <div>
+                        <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          {t('consumption')}
+                        </h4>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">{t('inputTokens')}</span>
+                            <span className="font-medium text-slate-700">
+                              {(selectedCollection.stats?.inputTokens / 1000).toFixed(1)}k
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">{t('outputTokens')}</span>
+                            <span className="font-medium text-slate-700">
+                              {(selectedCollection.stats?.outputTokens / 1000).toFixed(1)}k
+                            </span>
+                          </div>
+                          {/* Cenu (útratu vlastníka) API vrací jen vlastníkovi svazku */}
+                          {selectedCollection.stats?.chargeCredits != null && (
+                            <div className="flex justify-between border-t border-slate-100 pt-1">
+                              <span className="font-medium text-slate-600">{t('price')}</span>
+                              {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
+                              <span className="font-semibold text-slate-800">
+                                {/* Skutečné odečty; část za dokumenty zpracované před
+                                záznamem odečtu je odhad (BIL-11) */}
+                                {tDoc(
+                                  (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
+                                    ? 'chargeValuePartlyEstimated'
+                                    : 'chargeValue',
+                                  {
+                                    czk: formatCzk(
+                                      selectedCollection.stats?.chargeCzk ?? 0,
+                                      locale,
+                                    ),
+                                    credits: (
+                                      selectedCollection.stats?.chargeCredits ?? 0
+                                    ).toLocaleString(locale),
+                                    estimated: (
+                                      selectedCollection.stats?.chargeEstimatedCredits ?? 0
+                                    ).toLocaleString(locale),
+                                  },
+                                )}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               </details>
             </div>
@@ -1700,20 +1774,58 @@ function WorkspaceContent(): React.JSX.Element {
         }}
       />
 
+      {/* Join shared workspace by invite code */}
+      <JoinWorkspaceDialog
+        open={joinWorkspaceDialogOpen}
+        onClose={() => setJoinWorkspaceDialogOpen(false)}
+        onJoined={(workspace) => {
+          void loadWorkspaces();
+          handleWorkspaceSelect(workspace.id);
+        }}
+      />
+
+      {/* Manage shared workspace: members, invite code, leave */}
+      <ManageWorkspaceDialog
+        workspaceId={manageWorkspaceId}
+        onClose={() => setManageWorkspaceId(null)}
+        onChanged={() => {
+          void loadWorkspaces();
+          if (manageWorkspaceId === selectedWorkspaceId) void loadCollections();
+        }}
+        onLeft={() => {
+          const left = manageWorkspaceId;
+          setManageWorkspaceId(null);
+          setWorkspaces((prev) => prev.filter((ws) => ws.id !== left));
+          void loadWorkspaces();
+          const home = workspaces.find((ws) => ws.type === 'home');
+          if (left === selectedWorkspaceId && home) handleWorkspaceSelect(home.id);
+        }}
+      />
+
       {/* Document panel */}
       <DocumentPanel
         page={panelPage}
         result={panelResult}
         isLoading={panelLoading}
         onClose={() => {
+          panelLoad.close();
           setPanelPage(null);
           setPanelResult(null);
           setPanelLoading(false);
           setPageInUrl(null);
         }}
-        onResultUpdate={(updated) => setPanelResult(updated)}
+        // Jen pro dokument, který panel pořád ukazuje – zastaralý snímek (rollback
+        // z chatu, doběhlé uložení či retranslace po přepnutí stránky) se zahodí
+        onResultPatch={(documentId, patch, options) =>
+          setPanelResult((prev) => applyResultPatch(prev, documentId, patch, options))
+        }
+        onChatUsage={(documentId, usage) =>
+          setPanelResult((prev) => addChatUsageToDocument(prev, documentId, usage))
+        }
         onPageUpdate={(updated) => {
-          setPanelPage(updated);
+          // Rollback přejmenování může doběhnout po přepnutí stránky – panel jen
+          // pro stránku, kterou pořád ukazuje; seznam stránek se aktualizuje vždy
+          setPanelPage((prev) => applyResultUpdate(prev, updated));
           setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
         }}
         onRegenerate={panelReadOnly ? undefined : (pageId) => void handleRegenerate(pageId)}

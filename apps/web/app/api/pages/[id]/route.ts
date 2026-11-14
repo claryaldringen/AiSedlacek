@@ -6,6 +6,7 @@ import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { canReadPage } from '@/lib/infrastructure/authz';
+import { hideChargesFromReader } from '@/lib/infrastructure/charges';
 
 const CLIENT_SETTABLE_STATUSES = new Set(['pending', 'blank', 'archived']);
 
@@ -40,7 +41,13 @@ export async function GET(request: NextRequest, { params }: RouteContext): Promi
     return NextResponse.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
-  return NextResponse.json({ ...page, canEdit: page.userId === userId });
+  const canEdit = page.userId === userId;
+  // Skutečné odečty kreditu (útrata vlastníka) jen vlastníkovi
+  return NextResponse.json({
+    ...page,
+    document: page.document ? hideChargesFromReader(page.document, canEdit) : null,
+    canEdit,
+  });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext): Promise<NextResponse> {

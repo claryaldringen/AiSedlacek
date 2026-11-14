@@ -1,6 +1,6 @@
 {
   "name": "ai-sedlacek-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI klient pro čtečku starých textů — stahování, úprava a nahrávání historických rukopisů",
   "type": "module",
   "bin": {

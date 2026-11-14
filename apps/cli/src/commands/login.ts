@@ -5,6 +5,13 @@ import open from 'open';
 import ora from 'ora';
 import { loadConfig } from '../lib/config.js';
 import { saveToken, getToken } from '../lib/auth.js';
+import {
+  TOKEN_CALLBACK_REJECTED,
+  buildAuthUrl,
+  createPkcePair,
+  exchangeCode,
+  parseCallback,
+} from '../lib/login-flow.js';
 import * as output from '../lib/output.js';
 
 export const loginCommand = new Command('login')
@@ -17,14 +24,17 @@ export const loginCommand = new Command('login')
 
     const config = loadConfig();
     const state = crypto.randomBytes(16).toString('hex');
+    // PKCE: prohlížeč předá jen jednorázový kód, token si CLI vyzvedne POSTem
+    // s ověřovačem – v adrese ani historii prohlížeče se token neobjeví.
+    const pkce = createPkcePair();
 
-    const { port, tokenPromise, server } = await startCallbackServer(state);
+    const { port, resultPromise, server } = await startCallbackServer(state);
 
     // Callback server poslouchá jen na 127.0.0.1, proto redirect míří přímo na tuto adresu
     // ("localhost" se v prohlížeči může přeložit na ::1, kde nikdo neposlouchá). Stránka
     // /auth/cli povoluje jen http: na loopback s explicitním portem a cestou /callback.
     const redirect = `http://127.0.0.1:${port}/callback`;
-    const authUrl = `${config.server}/auth/cli?state=${state}&redirect=${encodeURIComponent(redirect)}`;
+    const authUrl = buildAuthUrl(config.server, state, redirect, pkce.challenge);
 
     const spinner = ora('Otevírám prohlížeč pro přihlášení...').start();
 
@@ -39,8 +49,11 @@ export const loginCommand = new Command('login')
           5 * 60 * 1000,
         );
       });
-      const token = await Promise.race([tokenPromise, timeout]);
+      const code = await Promise.race([resultPromise, timeout]);
       clearTimeout(timeoutId!);
+
+      // Token si CLI vyzvedne jen výměnou kódu s PKCE ověřovačem
+      const token = await exchangeCode(config.server, code, pkce.verifier);
       saveToken(token);
 
       spinner.stop();
@@ -56,13 +69,13 @@ export const loginCommand = new Command('login')
 
 function startCallbackServer(
   expectedState: string,
-): Promise<{ port: number; tokenPromise: Promise<string>; server: http.Server }> {
+): Promise<{ port: number; resultPromise: Promise<string>; server: http.Server }> {
   return new Promise((resolveSetup) => {
-    let resolveToken: (token: string) => void;
-    let rejectToken: (err: Error) => void;
-    const tokenPromise = new Promise<string>((res, rej) => {
-      resolveToken = res;
-      rejectToken = rej;
+    let resolveResult: (code: string) => void;
+    let rejectResult: (err: Error) => void;
+    const resultPromise = new Promise<string>((res, rej) => {
+      resolveResult = res;
+      rejectResult = rej;
     });
 
     const server = http.createServer((req, res) => {
@@ -73,21 +86,28 @@ function startCallbackServer(
         return;
       }
 
-      const token = url.searchParams.get('token');
-      const state = url.searchParams.get('state');
+      const result = parseCallback(url, expectedState);
 
       // Cizí požadavek (jiný lokální proces, skenování portů z webové stránky) nesmí
       // přihlášení shodit – odmítni ho a čekej dál na skutečný callback nebo timeout.
-      if (state !== expectedState) {
+      if (result.kind === 'ignore') {
         res.writeHead(400);
         res.end('Neplatný state parametr');
         return;
       }
 
-      if (!token) {
+      if (result.kind === 'token-rejected') {
+        // Token v URL nepřijímáme (login CSRF) – jen jednorázový kód s PKCE
         res.writeHead(400);
-        res.end('Token chybí');
-        rejectToken(new Error('Token missing'));
+        res.end('Přihlášení odmítnuto');
+        rejectResult(new Error(TOKEN_CALLBACK_REJECTED));
+        return;
+      }
+
+      if (result.kind === 'missing') {
+        res.writeHead(400);
+        res.end('Přihlašovací údaje chybí');
+        rejectResult(new Error('Token missing'));
         return;
       }
 
@@ -95,13 +115,13 @@ function startCallbackServer(
       res.end(
         '<html><body><h1>Přihlášení úspěšné!</h1><p>Můžete zavřít tuto stránku.</p></body></html>',
       );
-      resolveToken(token);
+      resolveResult(result.code);
     });
 
-    // Bindni jen na loopback (127.0.0.1), ať token z callbacku nemůže zachytit nikdo v síti.
+    // Bindni jen na loopback (127.0.0.1), ať kód z callbacku nemůže zachytit nikdo v síti.
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number };
-      resolveSetup({ port: addr.port, tokenPromise, server });
+      resolveSetup({ port: addr.port, resultPromise, server });
     });
   });
 }

@@ -1,13 +1,15 @@
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { prisma } from '@/lib/infrastructure/db';
-import { getTokenBalance, generateVariableSymbol, czkToTokens } from '@/lib/infrastructure/billing';
+import { getCreditState, generateVariableSymbol, czkToTokens } from '@/lib/infrastructure/billing';
 
 export async function GET(): Promise<Response> {
   const authResult = await getAuthenticatedUserId();
   if (authResult.error) return authResult.error;
   const { userId } = authResult;
 
-  const balance = await getTokenBalance(userId);
+  // `reserved` = kredit rezervovaný pro právě běžící placené akce (BIL-1);
+  // nové akce můžou čerpat jen `available`.
+  const { balance, reserved, available } = await getCreditState(userId);
 
   // Ensure user has a numeric variable symbol
   const user = await prisma.user.findUnique({
@@ -36,5 +38,13 @@ export async function GET(): Promise<Response> {
 
   const fioEnabled = !!process.env.FIO_API_TOKEN;
 
-  return Response.json({ balance, variableSymbol, tokensPer100Czk, fioEnabled, transactions });
+  return Response.json({
+    balance,
+    reserved,
+    available,
+    variableSymbol,
+    tokensPer100Czk,
+    fioEnabled,
+    transactions,
+  });
 }

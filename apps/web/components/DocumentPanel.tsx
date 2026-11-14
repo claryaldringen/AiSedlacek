@@ -2,17 +2,29 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { ResultViewer, type DocumentResult } from './ResultViewer';
+import { ResultViewer, type DocumentResult, type ResultPatchHandler } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
 import { apiFetch } from '@/lib/infrastructure/api-client';
+import type { ChatTokenUsage } from '@/lib/chat-usage';
 
 interface DocumentPanelProps {
   page: PageItem | null;
   result: DocumentResult | null;
   isLoading: boolean;
   onClose: () => void;
-  onResultUpdate?: (updated: DocumentResult) => void;
+  /**
+   * Jen změněná pole dokumentu `documentId` (uložení, návrh z chatu a jeho
+   * rollback, doběhlá retranslace) – ne celý snímek, který by vrátil změny
+   * uložené mezitím, ani zápis do panelu s jiným dokumentem.
+   */
+  onResultPatch?: ResultPatchHandler;
+  /**
+   * Spotřeba odpovědi chatu k dokumentu `documentId`. Rodič ji má přičíst
+   * funkčním updatem jen k panelu, který ten dokument pořád ukazuje
+   * (`addChatUsageToDocument`) – uživatel mohl mezitím přepnout stránku.
+   */
+  onChatUsage?: (documentId: string, usage: ChatTokenUsage) => void;
   onPageUpdate?: (updated: PageItem) => void;
   onRegenerate?: (pageId: string) => void;
   isRegenerating?: boolean;
@@ -44,7 +56,8 @@ export function DocumentPanel({
   result,
   isLoading,
   onClose,
-  onResultUpdate,
+  onResultPatch,
+  onChatUsage,
   onPageUpdate,
   onRegenerate,
   isRegenerating,
@@ -86,9 +99,20 @@ export function DocumentPanel({
   const handleChatApplyUpdate = useCallback(
     (field: string, content: string): void => {
       if (!result) return;
-      // Optimistický update + rollback při selhání PATCHe.
-      const previous = result;
-      onResultUpdate?.({ ...result, [field]: content });
+      // Optimistický update + rollback při selhání PATCHe – jen měněné pole.
+      // Rollback jen když panel pořád ukazuje tuto úpravu (uživatel mohl pole
+      // mezitím upravit znovu, nebo přepnout stránku).
+      const key = field as 'transcription' | 'translation' | 'context';
+      const previousValue = result[key];
+      const language =
+        key === 'translation' ? { translationLanguage: result.translationLanguage } : {};
+      onResultPatch?.(result.id, { [key]: content }, language);
+      const rollback = (): void =>
+        onResultPatch?.(
+          result.id,
+          { [key]: previousValue },
+          { ...language, expected: { [key]: content } },
+        );
       void (async () => {
         try {
           const res = await apiFetch(`/api/documents/${result.id}`, {
@@ -101,13 +125,13 @@ export function DocumentPanel({
                 : {}),
             }),
           });
-          if (!res.ok) onResultUpdate?.(previous);
+          if (!res.ok) rollback();
         } catch {
-          onResultUpdate?.(previous);
+          rollback();
         }
       })();
     },
-    [result, onResultUpdate],
+    [result, onResultPatch],
   );
 
   const handleTitleClick = useCallback((): void => {
@@ -385,7 +409,7 @@ export function DocumentPanel({
               <div className="flex flex-1 flex-col overflow-y-auto">
                 <ResultViewer
                   result={result}
-                  onUpdate={onResultUpdate}
+                  onPatch={onResultPatch}
                   highlightQuery={highlightQuery}
                   readOnly={readOnly}
                 />
@@ -401,12 +425,11 @@ export function DocumentPanel({
                       }}
                       onApplyUpdate={handleChatApplyUpdate}
                       onTokenUsage={(usage) => {
-                        onResultUpdate?.({
-                          ...result,
-                          chatInputTokens: (result.chatInputTokens ?? 0) + usage.inputTokens,
-                          chatOutputTokens: (result.chatOutputTokens ?? 0) + usage.outputTokens,
-                          chatModel: usage.model,
-                        });
+                        // Skutečně odečtené kredity (a tokeny) odpovědi k souhrnu chatu –
+                        // ne přes `onResultUpdate(addChatUsage(result, …))`: `result` je
+                        // snímek z doby renderu a po přepnutí stránky by panel přepsal
+                        // obsahem tohoto dokumentu.
+                        onChatUsage?.(result.id, usage);
                       }}
                     />
                   </div>

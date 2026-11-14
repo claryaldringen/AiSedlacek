@@ -19,7 +19,7 @@ export class ResendEmailProvider implements IEmailProvider {
     const apiKey = process.env['RESEND_API_KEY'];
     if (!apiKey) throw new Error('RESEND_API_KEY is not set');
     this.client = new Resend(apiKey);
-    this.from = process.env['EMAIL_FROM'] ?? 'Čtečka rukopisů <noreply@ai-sedlacek.cz>';
+    this.from = process.env['EMAIL_FROM'] ?? 'AI Sedláček <noreply@aisedlacek.com>';
   }
 
   async sendPasswordReset(email: string, resetUrl: string, locale: string): Promise<void> {

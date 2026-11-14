@@ -98,7 +98,25 @@ function findWorkspaceItem({ where }: { where: ItemWhere }): { id: string } | nu
 }
 
 function documentFor(pageId: string): Record<string, unknown> {
-  return { id: `doc-${pageId}`, pageId, translations: [], glossary: [] };
+  return {
+    id: `doc-${pageId}`,
+    pageId,
+    chargedCredits: 72_000,
+    model: 'claude-opus-5-5',
+    inputTokens: 1200,
+    outputTokens: 800,
+    translations: [
+      {
+        language: 'en',
+        text: 'x',
+        chargedCredits: 900,
+        model: 'claude-sonnet-4-6',
+        inputTokens: 300,
+        outputTokens: 200,
+      },
+    ],
+    glossary: [],
+  };
 }
 
 // ── Mocks ────────────────────────────────────────────────
@@ -211,6 +229,39 @@ describe.each([
   it('archived page is 404 even for a member of the shared workspace', async () => {
     expect((await read('member', 'page-archived')).status).toBe(404);
     expect((await read('owner', 'page-archived')).status).toBe(200);
+  });
+
+  // BIL-11: skutečné odečty jsou útrata vlastníka – čtenáři cizího obsahu je nedostanou;
+  // stejně tak model a tokeny, ze kterých se cena dá dopočítat (review 3. kolo)
+  interface Usage {
+    chargedCredits: number | null;
+    model: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+  }
+  function documentOf(body: Record<string, unknown>): Usage & { translations: Usage[] } {
+    return (body.document ?? body) as Usage & { translations: Usage[] };
+  }
+  const HIDDEN = { chargedCredits: null, model: null, inputTokens: null, outputTokens: null };
+
+  it('skutečné odečty kreditu, model a tokeny vidí jen vlastník', async () => {
+    const own = documentOf(await (await read('owner', 'page-shared')).json());
+    expect(own).toMatchObject({
+      chargedCredits: 72_000,
+      model: 'claude-opus-5-5',
+      inputTokens: 1200,
+      outputTokens: 800,
+    });
+    expect(own.translations[0]).toMatchObject({ chargedCredits: 900, inputTokens: 300 });
+
+    for (const [user, pageId] of [
+      ['member', 'page-shared'],
+      ['stranger', 'page-public'],
+    ] as const) {
+      const doc = documentOf(await (await read(user, pageId)).json());
+      expect(doc).toMatchObject(HIDDEN);
+      expect(doc.translations[0]).toMatchObject({ ...HIDDEN, text: 'x' });
+    }
   });
 
   it('anyone reads a public page or a page in a public collection, read-only', async () => {

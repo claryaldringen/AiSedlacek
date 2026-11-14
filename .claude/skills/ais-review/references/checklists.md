@@ -60,15 +60,24 @@ Formát nálezu:
 ## Peníze a LLM
 
 - Každé volání Claude (`messages.create`, `messages.stream`, `beta.messages.stream`)
-  má odpovídající `deductTokens` / `deductTokensIfSufficient`
-  (`packages/db/src/billing.ts`) s **modelem z odpovědi** (`response.model`,
-  `finalMsg.model`), ne s konstantou.
+  má **rezervaci před voláním** a **vyúčtování po něm** (`packages/db/src/billing.ts`:
+  `runBilledCall`, ve workeru `createBilledMessage`, jinak `reserveCredits` →
+  `settleCreditHold` / `releaseCreditHold`) s **modelem z odpovědi**
+  (`response.model`, `finalMsg.model`), ne s konstantou. Rezervace = maximální
+  cena (`reservationCredits` / `ocrBatchReservationCredits`: odhad vstupu + celý
+  `max_tokens` sazbou primárního modelu volání – u OCR `OCR_MODEL`, ne dražšího
+  serverového fallbacku; vzácný přesah při fallbacku kryje volný kredit, jinak ho
+  nese provozovatel, rozhodnutí 2026-11-14) a musí odpovídat skutečnému
+  `max_tokens` volání (`LLM_MAX_TOKENS`).
+- Zůstatek nikdy do minusu (rozhodnutí 2026-10-15): žádný odečet mimo
+  rezervaci / `consumeCredits`, rezervace, které nic nevyúčtuje, se uvolní
+  (chyba volání, konec jobu, `releaseJobHolds` při úklidu přerušených jobů).
 - Spotřeba se účtuje i při chybě po vzniku usage (odmítnutí, nevalidní JSON,
   `max_tokens`) – jinak platíme API za uživatele.
 - Každý model z `packages/shared/src/models.ts` má řádek v `MODEL_PRICING_USD`
   (`packages/shared/src/pricing.ts`). Model bez ceny se účtuje nejdražší
   sazbou – nový model bez řádku je High.
-- Zůstatek se kontroluje před drahým voláním. Retry jobu neúčtuje dvakrát
+- Volný kredit se kontroluje před drahým voláním (rezervací, ne jen `balance > 0`). Retry jobu neúčtuje dvakrát
   (`referenceId`, idempotence). Člen sdíleného workspace neplatí za akce nad
   cizím obsahem a nemůže je spustit.
 - Cena zobrazená v UI (`apps/web/lib/pricing.ts`, `chargeForUsage`) = částka,

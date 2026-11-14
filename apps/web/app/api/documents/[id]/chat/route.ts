@@ -1,14 +1,23 @@
 import { NextRequest } from 'next/server';
+import { randomUUID } from 'crypto';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { releaseCreditHold, reserveCredits, settleCreditHold } from '@/lib/infrastructure/billing';
+import { insufficientCreditResponse } from '@/lib/infrastructure/credit';
+import { publicLlmError } from '@/lib/infrastructure/llm-errors';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import {
+  LLM_MAX_TOKENS,
+  MAX_IMAGE_INPUT_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -57,29 +66,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (auth.error) return auth.error;
   const { userId } = auth;
 
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    const encoder = new TextEncoder();
-    const body = encoder.encode(
-      `data: ${JSON.stringify({ type: 'insufficient_tokens', balance })}\n\n`,
-    );
-    return new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(body);
-          controller.close();
-        },
-      }),
-      {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-        },
-      },
-    );
-  }
-
   const { id } = await params;
 
   let body: unknown;
@@ -125,7 +111,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     include: {
       translations: true,
       glossary: true,
-      page: { select: { imageUrl: true, mimeType: true, userId: true } },
+      page: { select: { imageUrl: true, mimeType: true, userId: true, collectionId: true } },
     },
   });
 
@@ -195,6 +181,28 @@ ${glossaryText}`;
     claudeMessages.push({ role: messages[i]!.role, content: messages[i]!.content });
   }
 
+  // Rezervace maximální ceny odpovědi před voláním modelu (BIL-1): odhad vstupu
+  // (systémový prompt, kontext dokumentu, konverzace, obrázek) + celý max_tokens.
+  // Bez volného kreditu se model nezavolá. Klíč je unikátní pro každý request –
+  // chat se neopakuje automaticky, každé odeslání je nová placená operace.
+  const referenceId = `chat:${id}:${randomUUID()}`;
+  const reservation = await reserveCredits({
+    userId,
+    referenceId,
+    description: `Chat s dokumentem ${id}`,
+    amount: reservationCredits(
+      [TEXT_MODEL],
+      estimateInputTokens(
+        [SYSTEM_PROMPT, contextText, ...messages.map((m) => m.content)].join('\n'),
+      ) + (imageBase64 ? MAX_IMAGE_INPUT_TOKENS : 0),
+      LLM_MAX_TOKENS.chat,
+    ),
+  });
+  if (!reservation.ok) {
+    return insufficientCreditResponse(request, t, reservation);
+  }
+  const hold = reservation.hold;
+
   // Stream response
   const client = new Anthropic();
   const encoder = new TextEncoder();
@@ -220,26 +228,34 @@ ${glossaryText}`;
       };
 
       // Spotřeba se účtuje nejvýš jednou – ani selhání účtování v hlavní cestě
-      // nesmí vést k druhému (částečnému) stržení v chybové cestě.
+      // nesmí vést k druhému (částečnému) stržení v chybové cestě. Vyúčtování
+      // uzavře rezervaci; nevyužitá část se vrací (BIL-1). Vrací skutečně
+      // odečtené kredity – UI je ukáže jako cenu chatu (může být méně než cena
+      // podle tokenů, když volný kredit nestačil – přesah nese provozovatel).
       let charged = false;
       const charge = async (
         inputTokens: number,
         outputTokens: number,
         model: string,
         description: string,
-      ): Promise<void> => {
-        if (charged) return;
+      ): Promise<number> => {
+        if (charged) return 0;
         charged = true;
-        const deductResult = await deductTokensIfSufficient(
-          userId,
-          inputTokens,
-          outputTokens,
-          description,
-          `chat-${id}-${Date.now()}`,
-          model,
-        );
-        if (!deductResult.success) {
-          console.warn(`[Chat] Insufficient balance for user ${userId}, response already streamed`);
+        try {
+          const settled = await settleCreditHold(hold, [
+            {
+              referenceId,
+              description,
+              model,
+              inputTokens,
+              outputTokens,
+              collectionId: doc.page.collectionId,
+            },
+          ]);
+          return settled.charged;
+        } catch (billingErr) {
+          await releaseCreditHold(hold).catch(() => false);
+          throw billingErr;
         }
       };
 
@@ -247,7 +263,8 @@ ${glossaryText}`;
       try {
         const messageStream = client.messages.stream({
           model: TEXT_MODEL,
-          max_tokens: 8192,
+          // Stejný limit, se kterým počítá rezervace (LLM_MAX_TOKENS.chat)
+          max_tokens: LLM_MAX_TOKENS.chat,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: claudeMessages,
@@ -266,15 +283,14 @@ ${glossaryText}`;
           model: finalMsg.model,
         };
 
-        // Atomically check balance and deduct tokens
-        await charge(
+        const chargedCredits = await charge(
           finalMsg.usage.input_tokens,
           finalMsg.usage.output_tokens,
           finalMsg.model,
           `Chat s dokumentem ${id}`,
         );
 
-        send({ type: 'done', usage });
+        send({ type: 'done', usage, chargedCredits });
       } catch (err) {
         // Přerušená odpověď (klient zavřel spojení, chyba API uprostřed streamu) už
         // stála peníze – naúčtujeme spotřebu, která vznikla. Vstup a model známe
@@ -283,6 +299,8 @@ ${glossaryText}`;
         // na token – spíš podhodnocuje, uživatel nezaplatí víc, než spotřeboval).
         // Bez snapshotu (chyba před message_start) žádná spotřeba nevznikla.
         const partial = anthropicStream?.currentMessage;
+        // Částečná spotřeba, kterou se podařilo vyúčtovat – klient ji přičte k ceně
+        let partialCharge: Record<string, unknown> = {};
         if (partial && !charged) {
           const outputTokens = Math.max(
             partial.usage.output_tokens,
@@ -294,20 +312,35 @@ ${glossaryText}`;
               `in=${partial.usage.input_tokens} out=${outputTokens}`,
           );
           try {
-            await charge(
+            const chargedCredits = await charge(
               partial.usage.input_tokens,
               outputTokens,
               partial.model,
               `Chat s dokumentem ${id} (přerušeno)`,
             );
+            partialCharge = {
+              usage: {
+                inputTokens: partial.usage.input_tokens,
+                outputTokens,
+                model: partial.model,
+              },
+              chargedCredits,
+            };
           } catch (billingErr) {
             console.error('[Chat] Částečnou spotřebu se nepodařilo naúčtovat:', billingErr);
           }
         }
 
-        const message = err instanceof Error ? err.message : t('serverError');
-        send({ type: 'error', error: message });
+        // Surová chyba SDK/Prismy jen do logu, klientovi obecná lokalizovaná hláška
+        send({ type: 'error', error: publicLlmError(err, t, 'Chat'), ...partialCharge });
       } finally {
+        // Rezervace, kterou nic nevyúčtovalo (chyba před message_start, selhání
+        // účtování), se uvolní – jinak by blokovala kredit až do vypršení.
+        if (!charged) {
+          await releaseCreditHold(hold).catch((releaseErr: unknown) => {
+            console.error('[Chat] Uvolnění rezervace selhalo:', releaseErr);
+          });
+        }
         if (!closed) {
           closed = true;
           try {

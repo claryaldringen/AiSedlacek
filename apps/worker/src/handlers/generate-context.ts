@@ -2,10 +2,9 @@
  * Worker handler for generating collection context from transcriptions.
  */
 
-import { createMessage } from '../lib/llm';
+import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 
 export interface GenerateContextJobData {
   collectionId: string;
@@ -90,29 +89,27 @@ Výstup formátuj jako přehledný markdown s nadpisy a tabulkami.
 Přepisy stránek:
 ${concatenated}`;
 
-  // Call Claude Sonnet
-  const response = await createMessage({
-    model: TEXT_MODEL,
-    // Kontext se ukládá jen kompletní (stopReason === 'end_turn') – limit musí
-    // stačit i pro velké svazky, stejně jako fetch-context a translate-context.
-    maxTokens: 16_000,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // Call Claude Sonnet – s rezervací maximální ceny a vyúčtováním hned po volání
+  // (BIL-1), ne až po zápisu do DB. Bez volného kreditu se model nezavolá.
+  const { response } = await createBilledMessage(
+    {
+      userId,
+      jobId,
+      // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+      referenceId: `generate-context:${jobId}:${collectionId}`,
+      description: `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
+      collectionId,
+    },
+    {
+      model: TEXT_MODEL,
+      // Kontext se ukládá jen kompletní (stopReason === 'end_turn') – limit musí
+      // stačit i pro velké svazky, stejně jako fetch-context a translate-context.
+      maxTokens: LLM_MAX_TOKENS.generateContext,
+      messages: [{ role: 'user', content: prompt }],
+    },
+  );
 
   const context = response.text;
-
-  // Odečíst hned po volání (stejně jako OCR dávky) – ne až po zápisu do DB.
-  await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
-    // Deterministický klíč z jobu (BIL-3, dřív Date.now())
-    `generate-context:${jobId}:${collectionId}`,
-    response.model,
-  ).catch((err) => {
-    console.warn('[Worker:generate-context] Token deduction failed:', err);
-  });
 
   // Kontext svazku nemá historii – přepsat ho smí jen kompletní, neprázdný
   // výstup (DAT-2, stejně jako fetch-context ve webu).
@@ -139,13 +136,25 @@ ${concatenated}`;
   } | null = null;
 
   try {
-    const metadataResponse = await createMessage({
-      model: TEXT_MODEL,
-      maxTokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
+    // Vyúčtuje se hned po volání, před parsováním – neplatný JSON jinak přeskočil
+    // odečet a volání bylo zadarmo. Bez volného kreditu se metadata přeskočí
+    // (best-effort), kontext se uloží.
+    const { response: metadataResponse } = await createBilledMessage(
+      {
+        userId,
+        jobId,
+        // Deterministický klíč z jobu (BIL-3, dřív Date.now())
+        referenceId: `generate-context-meta:${jobId}:${collectionId}`,
+        description: `Metadata kontextu svazku ${collection.name}`,
+        collectionId,
+      },
+      {
+        model: TEXT_MODEL,
+        maxTokens: LLM_MAX_TOKENS.contextMetadata,
+        messages: [
+          {
+            role: 'user',
+            content: `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
 
 Formát:
 {
@@ -159,23 +168,10 @@ Formát:
 
 Kontext:
 ${context}`,
-        },
-      ],
-    });
-
-    // Odečíst před parsováním – neplatný JSON jinak přeskočil odečet a volání
-    // bylo zadarmo.
-    await deductTokensIfSufficient(
-      userId,
-      metadataResponse.inputTokens,
-      metadataResponse.outputTokens,
-      `Metadata kontextu svazku ${collection.name}`,
-      // Deterministický klíč z jobu (BIL-3, dřív Date.now())
-      `generate-context-meta:${jobId}:${collectionId}`,
-      metadataResponse.model,
-    ).catch((err) => {
-      console.warn('[Worker:generate-context] Token deduction failed:', err);
-    });
+          },
+        ],
+      },
+    );
 
     // Model občas obalí JSON do ``` bloku i přes instrukci.
     const metadataText = metadataResponse.text

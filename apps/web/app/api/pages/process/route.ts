@@ -3,7 +3,8 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import type { ProcessingMode } from '@ai-sedlacek/ocr';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
-import { checkBalance } from '@/lib/infrastructure/billing';
+import { requireCredit } from '@/lib/infrastructure/credit';
+import { minimumJobCredit } from '@/lib/infrastructure/ocr-job-credit';
 import { getOwnedCollection } from '@/lib/infrastructure/authz';
 import { isTranslationLanguage } from '@ai-sedlacek/shared';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
@@ -52,7 +53,13 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Verify all pages belong to the current user
   const ownedPages = await prisma.page.findMany({
     where: { id: { in: pageIds as string[] }, userId },
-    select: { id: true, collectionId: true, status: true },
+    select: {
+      id: true,
+      collectionId: true,
+      status: true,
+      hash: true,
+      document: { select: { translations: { select: { language: true } } } },
+    },
   });
   const ownedIds = new Set(ownedPages.map((p) => p.id));
   const unauthorizedIds = (pageIds as string[]).filter((pid) => !ownedIds.has(pid));
@@ -66,18 +73,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ error: t('pageNotFound') }, { status: 404 });
   }
 
-  // Check token balance before starting
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return Response.json({ error: t('insufficientCredit'), balance }, { status: 402 });
-  }
-
   if (language !== undefined && language !== '' && !isTranslationLanguage(language)) {
     return Response.json({ error: t('unsupportedLanguage') }, { status: 400 });
   }
   const targetLang = isTranslationLanguage(language) ? language : 'cs';
   const processingMode: ProcessingMode =
     rawMode === 'translate' ? 'translate' : 'transcribe+translate';
+
   const collectionId =
     typeof rawCollectionId === 'string'
       ? rawCollectionId
@@ -125,6 +127,20 @@ export async function POST(request: NextRequest): Promise<Response> {
       { error: t('processingAlreadyRunning'), jobId: overlappingJob.id },
       { status: 409 },
     );
+  }
+
+  // Předběžná kontrola kreditu (BIL-1) až za kontrolami souběhu: uživatel s běžícím
+  // jobem dostane 409 s jeho jobId, ne 402. Minimum podle toho, co job opravdu
+  // udělá (OCR, kopie, nebo jen překlad) – závazná rezervace je ve workeru před
+  // každým voláním a při nízkém zůstatku dávky zmenší, případně zpracování zastaví.
+  const minimum = await minimumJobCredit(userId, ownedPages, {
+    language: targetLang,
+    mode: processingMode,
+    regenerate,
+  });
+  if (minimum !== null) {
+    const noCredit = await requireCredit(request, t, userId, minimum);
+    if (noCredit) return noCredit;
   }
 
   // Create ProcessingJob in DB with status 'queued' — worker picks it up

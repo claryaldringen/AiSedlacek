@@ -8,6 +8,8 @@ interface AppShellProps {
   selectedWorkspaceId: string | null;
   onWorkspaceSelect: (id: string) => void;
   onCreateWorkspace: () => void;
+  onJoinWorkspace?: () => void;
+  onManageWorkspace?: (id: string) => void;
   loadingWorkspaces: boolean;
 }
 
@@ -17,6 +19,8 @@ export function AppShell({
   selectedWorkspaceId,
   onWorkspaceSelect,
   onCreateWorkspace,
+  onJoinWorkspace,
+  onManageWorkspace,
   loadingWorkspaces,
 }: AppShellProps): React.JSX.Element {
   return (
@@ -27,6 +31,8 @@ export function AppShell({
         selectedWorkspaceId={selectedWorkspaceId}
         onWorkspaceSelect={onWorkspaceSelect}
         onCreateWorkspace={onCreateWorkspace}
+        onJoinWorkspace={onJoinWorkspace}
+        onManageWorkspace={onManageWorkspace}
         loadingWorkspaces={loadingWorkspaces}
       />
 

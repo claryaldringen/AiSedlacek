@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCliCallbackUrl, parseCliRedirect } from '../redirect';
+import { buildCliCallbackUrl, parseCliRedirect, parseCodeChallenge } from '../redirect';
 
 describe('parseCliRedirect', () => {
   it.each([
@@ -88,12 +88,45 @@ describe('buildCliCallbackUrl', () => {
     const redirect = parseCliRedirect('http://127.0.0.1:5000/callback?token=evil&state=evil');
     expect(redirect).not.toBeNull();
 
-    const result = new URL(buildCliCallbackUrl(redirect!, 'tok&en=1', 'st#ate'));
+    const result = new URL(buildCliCallbackUrl(redirect!, { token: 'tok&en=1' }, 'st#ate'));
 
     expect(result.protocol).toBe('http:');
     expect(result.host).toBe('127.0.0.1:5000');
     expect(result.pathname).toBe('/callback');
     expect(result.searchParams.getAll('token')).toEqual(['tok&en=1']);
     expect(result.searchParams.getAll('state')).toEqual(['st#ate']);
+  });
+});
+
+describe('buildCliCallbackUrl – jednorázový kód (CLI ≥ 0.3.0)', () => {
+  it('předá jen kód, žádný token – ani podvržený v redirect URL', () => {
+    const redirect = parseCliRedirect('http://127.0.0.1:5000/callback?token=evil&code=evil');
+    const result = new URL(buildCliCallbackUrl(redirect!, { code: 'abc' }, 'st'));
+
+    expect(result.searchParams.getAll('code')).toEqual(['abc']);
+    expect(result.searchParams.has('token')).toBe(false);
+    expect(result.searchParams.get('state')).toBe('st');
+  });
+});
+
+describe('parseCodeChallenge', () => {
+  const challenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+  it('S256 výzva → nový tok s kódem', () => {
+    expect(parseCodeChallenge(challenge, 'S256')).toEqual({ kind: 'pkce', challenge });
+  });
+
+  it('bez výzvy → starší CLI, token postaru', () => {
+    expect(parseCodeChallenge(null, null)).toEqual({ kind: 'legacy' });
+  });
+
+  it.each([
+    ['metoda plain', challenge, 'plain'],
+    ['chybí metoda', challenge, null],
+    ['metoda bez výzvy', null, 'S256'],
+    ['krátká výzva', 'abc', 'S256'],
+    ['znaky mimo base64url', `${challenge.slice(0, 42)}+`, 'S256'],
+  ])('%s → neplatný požadavek', (_name, c, m) => {
+    expect(parseCodeChallenge(c, m)).toEqual({ kind: 'invalid' });
   });
 });

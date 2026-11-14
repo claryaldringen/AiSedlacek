@@ -26,10 +26,12 @@ model User {
   collections   Collection[]
   pages         Page[]
   tokenTransactions TokenTransaction[]
+  creditHolds    CreditHold[]
   processingJobs ProcessingJob[]
   workspaces           Workspace[]
   workspaceMemberships WorkspaceMember[]
   apiTokens            ApiToken[]
+  cliAuthCodes         CliAuthCode[]
 }
 
 model Account {
@@ -161,6 +163,10 @@ model Document {
   outputTokens    Int?
   processingTimeMs Int?
   batchId         String?
+  // Kredity skutečně odečtené za aktuální výsledek OCR (podíl dávky včetně
+  // odmítnutých pokusů, u kopie cena deduplikace). Null = zpracováno před
+  // zavedením (BIL-11) nebo odečet selhal – UI pak cenu jen odhadne z tokenů.
+  chargedCredits  Int?
 
   @@index([hash])
 }
@@ -176,6 +182,9 @@ model Translation {
   model        String?
   inputTokens  Int?
   outputTokens Int?
+  // Kredity odečtené za samostatný překlad (retranslace, překlad do dalšího
+  // jazyka); null = součást OCR, nebo zpracováno před zavedením (BIL-11).
+  chargedCredits Int?
 
   // Per-language context and glossary (translated from document's original)
   context      String?
@@ -232,6 +241,7 @@ model ProcessingJob {
   currentPageId  String?
   currentStep    String?  // Human-readable current step description
   errors         String[] // Array of error messages
+  errorCode      String?  // kód chyby jobu pro lokalizaci v UI (JobErrorCode, packages/shared)
   pageIds        String[] // Original page IDs for reference
   language       String   @default("cs")
   mode           String   @default("transcribe+translate")
@@ -261,9 +271,41 @@ model TokenTransaction {
   description String
   referenceId String?              // Stripe payment ID, FIO transaction ID, document ID
   createdAt   DateTime             @default(now())
+  // Spotřeba LLM (BIL-11): model a tokeny, ze kterých se částka spočítala,
+  // a svazek, ke kterému patří (cena svazku = součet skutečných odečtů).
+  // U transakcí před zavedením jsou prázdné.
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  collectionId String?
 
   @@unique([userId, referenceId])
   @@index([userId, createdAt])
+  @@index([collectionId])
+}
+
+// Rezervace kreditu před placeným voláním LLM (BIL-1). Zůstatek v ledgeru
+// (součet TokenTransaction) se rezervací nemění – volný kredit = zůstatek
+// minus aktivní rezervace. Po volání se rezervace uzavře (`settled`) a do
+// ledgeru se zapíše jen skutečná spotřeba s `referenceId` rezervace; zbytek
+// rezervace se tím vrací. Rezervace osiřelé po pádu workeru/webu se uvolní
+// (`released`) při úklidu přerušených jobů nebo po vypršení `expiresAt`.
+model CreditHold {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int       // rezervované kredity (kladné)
+  referenceId String    // klíč operace = referenceId budoucího odečtu
+  description String
+  jobId       String?   // ProcessingJob, v rámci kterého rezervace vznikla
+  status      String    @default("active") // active | settled | released
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  closedAt    DateTime?
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+  @@index([jobId])
 }
 
 // ---- Workspaces ----
@@ -306,6 +348,22 @@ model ApiToken {
   createdAt  DateTime  @default(now())
 
   @@index([userId])
+}
+
+// Jednorázový autorizační kód pro `ais login` (CLI ≥ 0.3.0): prohlížeč předá na
+// loopback jen krátce platný kód, CLI ho vymění za API token přes POST s PKCE
+// ověřovačem – token se tak nikdy neocitne v URL ani v historii prohlížeče.
+model CliAuthCode {
+  id            String    @id @default(cuid())
+  codeHash      String    @unique // SHA-256 kódu, kód sám se neukládá
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeChallenge String    // base64url(SHA-256(code_verifier)) – PKCE S256
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([expiresAt])
 }
 
 model WorkspaceItem {

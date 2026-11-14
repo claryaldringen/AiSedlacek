@@ -54,6 +54,11 @@ Konfigurační soubor: `~/.config/ai-sedlacek/config.json`
 
 Po `ais login` se do stejného adresáře uloží i API token.
 
+Od verze 0.3.0 se token při `ais login` nepředává přes adresu v prohlížeči: prohlížeč
+předá na lokální callback jen jednorázový, krátce platný kód a CLI ho vymění za token
+přímo u serveru (PKCE, metoda S256). Token se tak neobjeví v historii prohlížeče
+a CLI token předaný přes adresu nepřijme.
+
 ## Lokální workspace
 
 `ais pull` stahuje dokumenty do `.ais-workspace/` v aktuální složce. V něm můžeš transkripci nebo

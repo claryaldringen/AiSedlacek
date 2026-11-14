@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/infrastructure/db';
-import { checkBalance } from '@/lib/infrastructure/billing';
-import { isTranslationLanguage } from '@ai-sedlacek/shared';
+import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  isTranslationLanguage,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 
@@ -16,11 +23,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
-
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return NextResponse.json({ error: 'insufficient_tokens', balance }, { status: 402 });
-  }
 
   const { id } = await params;
 
@@ -61,6 +63,29 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (!doc || doc.page.userId !== userId) {
     return NextResponse.json({ error: t('documentNotFound') }, { status: 404 });
   }
+
+  // Retranslace téhož dokumentu už čeká nebo běží → 409 s jejím jobId (před
+  // kontrolou kreditu); druhý job by překlad zaplatil podruhé a přepsal první.
+  const running = await runningJobConflict(t, userId, {
+    type: 'retranslate',
+    documentId: id,
+    language: targetLang,
+  });
+  if (running) return running;
+
+  // Předběžná kontrola volného kreditu na rezervaci volání (BIL-1) – závazně se
+  // rezervuje ve workeru těsně před voláním modelu.
+  const noCredit = await requireCredit(
+    request,
+    t,
+    userId,
+    reservationCredits(
+      [TEXT_MODEL],
+      estimateInputTokens(`${doc.transcription}\n${previousTranslation ?? ''}`),
+      LLM_MAX_TOKENS.retranslate,
+    ),
+  );
+  if (noCredit) return noCredit;
 
   // Create ProcessingJob for the worker to pick up
   const job = await prisma.processingJob.create({

@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
+import { releaseJobHolds } from '@ai-sedlacek/db/billing';
 import { processPages } from './handlers/process-pages';
 import { handleRetranslate } from './handlers/retranslate';
 import { handleGenerateContext } from './handlers/generate-context';
@@ -18,8 +19,8 @@ import { handleFixContexts } from './handlers/fix-contexts';
 import { handleTranslateContext } from './handlers/translate-context';
 import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
 import { parseOcrJobOptions } from './lib/job-options';
-import { resetUnfinishedPages } from './lib/page-status';
 import { assertLlmProviderAllowed } from './lib/startup-checks';
+import { handleJobFailure } from './lib/job-failure';
 
 // Fail-fast na nebezpečnou konfiguraci dřív, než worker začne brát joby (SEC-12)
 try {
@@ -87,27 +88,17 @@ async function executeJob(job: {
     }
     console.log(`[Worker] Job ${job.id} (${jobType}) completed`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Neznámá chyba';
-    console.error(`[Worker] Job ${job.id} (${jobType}) failed:`, message);
-    await prisma.processingJob
-      .update({
-        where: { id: job.id },
-        data: {
-          status: 'error',
-          currentStep: `Chyba: ${message}`,
-          errors: { push: message },
-        },
-      })
-      .catch(() => {});
-
-    // Reset stuck "processing" pages back to "pending" so they can be retried
-    if (jobType === 'ocr' && job.pageIds.length > 0) {
-      const resetCount = await resetUnfinishedPages(job.pageIds).catch(() => 0);
-      if (resetCount > 0) {
-        console.log(`[Worker] Reset ${resetCount} stuck pages for job ${job.id}`);
-      }
-    }
+    // Chyba s kódem pro UI (kredit blokovaný jinou akcí = credit_busy), viz job-failure.ts
+    await handleJobFailure({ id: job.id, type: jobType, pageIds: job.pageIds }, err);
   } finally {
+    // Pojistka (BIL-1): rezervace, kterou job nevyúčtoval ani neuvolnil (chyba
+    // mezi rezervací a voláním), nesmí blokovat kredit až do úklidu po TTL.
+    await releaseJobHolds([job.id]).catch((err: unknown) => {
+      console.error(
+        `[Worker] Release of holds for job ${job.id} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
     activeJobCount--;
     if (jobType === 'ocr') {
       activeOcrCollections.delete(collectionKey);

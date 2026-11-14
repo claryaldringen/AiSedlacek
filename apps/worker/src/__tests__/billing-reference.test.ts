@@ -19,20 +19,18 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   createMessage: vi.fn(),
-  deductTokensIfSufficient: vi.fn(),
   createVersion: vi.fn(),
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
-vi.mock('@ai-sedlacek/db/billing', () => ({
-  deductTokensIfSufficient: mocks.deductTokensIfSufficient,
-}));
+vi.mock('@ai-sedlacek/db/billing', async () => (await import('./billing-mock')).billingModule());
 vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersion }));
 vi.mock('../lib/llm', () => ({ createMessage: mocks.createMessage, isCliMode: () => false }));
 
 import { handleRetranslate } from '../handlers/retranslate';
 import { handleTranslateContext } from '../handlers/translate-context';
 import { handleGenerateContext } from '../handlers/generate-context';
+import { billing, charges, resetBillingMock } from './billing-mock';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,7 +47,7 @@ beforeEach(() => {
   mocks.prisma.documentVersion.create.mockResolvedValue({});
   mocks.prisma.document.update.mockResolvedValue({});
   mocks.prisma.collection.update.mockResolvedValue({});
-  mocks.deductTokensIfSufficient.mockResolvedValue({ success: true, balance: 1000 });
+  resetBillingMock();
   mocks.createVersion.mockResolvedValue(undefined);
   mocks.createMessage.mockResolvedValue({
     text: '{"title": "Kronika"}',
@@ -64,9 +62,9 @@ beforeEach(() => {
 async function referenceIdsOfTwoRuns(run: () => Promise<void>): Promise<string[][]> {
   const runs: string[][] = [];
   for (let i = 0; i < 2; i++) {
-    mocks.deductTokensIfSufficient.mockClear();
+    billing.settleCreditHold.mockClear();
     await run();
-    runs.push(mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4] as string));
+    runs.push(charges().map((c) => c.referenceId));
     // Jiný čas mezi běhy – s Date.now() by se klíče lišily
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -164,7 +162,7 @@ describe('kontext svazku se nepřepíše neúplným výstupem modelu', () => {
     ).rejects.toThrow(/beze změny/);
 
     expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
-    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+    expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
   });
 
   it('generate-context při max_tokens nechá kontext beze změny a účtuje', async () => {
@@ -189,7 +187,7 @@ describe('kontext svazku se nepřepíše neúplným výstupem modelu', () => {
     ).rejects.toThrow(/beze změny/);
 
     expect(mocks.prisma.collection.update).not.toHaveBeenCalled();
-    expect(mocks.deductTokensIfSufficient).toHaveBeenCalledTimes(1);
+    expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
     expect(mocks.createMessage.mock.calls[0]![0].maxTokens).toBe(16_000);
   });
 
@@ -252,7 +250,7 @@ describe('generate-context – metadata z druhého volání (R-8)', () => {
   }
 
   function referenceIds(): string[] {
-    return mocks.deductTokensIfSufficient.mock.calls.map((c) => c[4] as string);
+    return charges().map((c) => c.referenceId);
   }
 
   it('metadata v ```json bloku naparsuje a uloží', async () => {
@@ -288,8 +286,53 @@ describe('generate-context – metadata z druhého volání (R-8)', () => {
       'generate-context:job-g:col-1',
       'generate-context-meta:job-g:col-1',
     ]);
-    const [, input, output] = mocks.deductTokensIfSufficient.mock.calls[1]!;
-    expect([input, output]).toEqual([80, 40]);
+    const meta = charges()[1]!;
+    expect([meta.inputTokens, meta.outputTokens]).toEqual([80, 40]);
+    expect(mocks.prisma.collection.update).toHaveBeenCalledWith({
+      where: { id: 'col-1' },
+      data: { context: CONTEXT, contextLanguage: 'cs' },
+    });
+  });
+});
+
+describe('generate-context – rezervace kreditu (BIL-1)', () => {
+  const CONTEXT = '# Kontext\n\nKronika města.';
+
+  beforeEach(() => {
+    mocks.prisma.collection.findUnique.mockResolvedValue({
+      id: 'col-1',
+      userId: 'user-1',
+      name: 'Svazek',
+    });
+    mocks.prisma.page.findMany.mockResolvedValue([
+      { displayName: null, filename: 'a.jpg', document: { transcription: 'text' } },
+    ]);
+  });
+
+  it('bez kreditu na metadata kontext uloží a metadata přeskočí', async () => {
+    mocks.createMessage.mockResolvedValueOnce({
+      text: CONTEXT,
+      model: 'claude-sonnet-4-6',
+      inputTokens: 1000,
+      outputTokens: 500,
+      stopReason: 'end_turn',
+    });
+    billing.reserveCredits
+      .mockImplementationOnce(
+        async (p: { userId: string; amount: number; referenceId: string }) => ({
+          ok: true,
+          hold: { id: 'h1', userId: p.userId, amount: p.amount, referenceId: p.referenceId },
+        }),
+      )
+      .mockResolvedValueOnce({ ok: false, required: 20_000, available: 0 });
+
+    await handleGenerateContext('job-g', {
+      collectionId: 'col-1',
+      pageIds: ['p1'],
+      userId: 'user-1',
+    });
+
+    expect(mocks.createMessage).toHaveBeenCalledTimes(1);
     expect(mocks.prisma.collection.update).toHaveBeenCalledWith({
       where: { id: 'col-1' },
       data: { context: CONTEXT, contextLanguage: 'cs' },

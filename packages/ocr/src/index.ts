@@ -13,6 +13,7 @@ export {
   BATCH_MAX_OUTPUT_TOKENS,
   BATCH_OUTPUT_TOKENS_PER_PAGE,
   batchMaxTokens,
+  ocrBatchReservationCredits,
   processWithClaude,
   processWithClaudeBatch,
   OcrRefusalError,

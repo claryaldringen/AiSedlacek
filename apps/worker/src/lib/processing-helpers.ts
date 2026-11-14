@@ -5,7 +5,9 @@
 import crypto from 'crypto';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
+import type { CreditTx } from '@ai-sedlacek/db/billing';
 import type { StructuredOcrResult } from '@ai-sedlacek/ocr';
+import { NON_DEDUP_MODELS } from '@ai-sedlacek/shared';
 import { getStorage } from './storage';
 import { truncateContext } from './batch-utils';
 
@@ -51,13 +53,23 @@ export async function getPreviousPageContext(
 
 // ── saveDocumentResult ────────────────────────────────────────
 
+/** Metadata zpracování ukládaná k dokumentu. */
+export interface DocumentMetadata {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  processingTimeMs: number;
+  /** Kredity skutečně odečtené za výsledek (BIL-11); null = odečet neznámý. */
+  chargedCredits?: number | null;
+}
+
 export async function saveDocumentResult(
   pageId: string,
   existingDoc: { id: string } | null,
   hash: string,
   result: StructuredOcrResult,
   rawResponseLine: string,
-  metadata: { model: string; inputTokens: number; outputTokens: number; processingTimeMs: number },
+  metadata: DocumentMetadata,
   targetLang: string,
   batchId?: string,
 ): Promise<{ id: string }> {
@@ -67,6 +79,8 @@ export async function saveDocumentResult(
         documentId: existingDoc.id,
         language: result.translationLanguage || targetLang,
         text: result.translation,
+        // Dokument už existoval – celé OCR volání zaplatil tento překlad
+        ...(metadata.chargedCredits != null ? { chargedCredits: metadata.chargedCredits } : {}),
       },
     });
     // Posunout Document.updatedAt – podle něj `ais push` detekuje, že se překlad
@@ -91,6 +105,7 @@ export async function saveDocumentResult(
       inputTokens: metadata.inputTokens,
       outputTokens: metadata.outputTokens,
       processingTimeMs: metadata.processingTimeMs,
+      chargedCredits: metadata.chargedCredits ?? null,
       ...(batchId ? { batchId } : {}),
       glossary: {
         create: result.glossary.map((g) => ({
@@ -151,7 +166,7 @@ export async function regenerateDocumentResult(
   documentId: string,
   result: StructuredOcrResult,
   rawResponse: string,
-  metadata: { model: string; inputTokens: number; outputTokens: number; processingTimeMs: number },
+  metadata: DocumentMetadata,
   targetLang: string,
   jobId: string,
 ): Promise<{ id: string }> {
@@ -208,6 +223,8 @@ export async function regenerateDocumentResult(
             inputTokens: metadata.inputTokens,
             outputTokens: metadata.outputTokens,
             processingTimeMs: metadata.processingTimeMs,
+            // Cena aktuálního výsledku – předchozí zpracování zůstává v ledgeru svazku
+            chargedCredits: metadata.chargedCredits ?? null,
             batchId: jobId,
             glossary: {
               create: result.glossary.map((g) => ({ term: g.term, definition: g.definition })),
@@ -222,6 +239,9 @@ export async function regenerateDocumentResult(
             model: metadata.model,
             inputTokens: null,
             outputTokens: null,
+            // Překlad je teď součástí OCR (cena v Document.chargedCredits) – odečet
+            // dřívější retranslace by se u něj jinak dál zobrazoval (BIL-11)
+            chargedCredits: null,
             context: null,
             glossaryJson: null,
           },
@@ -267,12 +287,8 @@ export interface DedupSourceDocument {
   glossary: { term: string; definition: string }[];
 }
 
-/**
- * Modely, jejichž výstup nevznikl placeným API voláním workeru: CLI režim
- * (`LLM_PROVIDER=claude-cli`) a výsledky odeslané přes `POST /api/pages/[id]/result`
- * (`ais submit`), kde si model i obsah volí klient.
- */
-export const NON_DEDUP_MODELS = ['claude-cli', 'claude-agent-cli'];
+/** Viz `NON_DEDUP_MODELS` v packages/shared (sdílí ho předběžná kontrola kreditu v API). */
+export { NON_DEDUP_MODELS };
 
 /**
  * Najde dokument se stejným hashem obrázku, který lze zkopírovat místo nového OCR.
@@ -294,7 +310,7 @@ export async function findDedupSourceDocument(
     where: {
       hash,
       page: { userId, status: { not: 'archived' } },
-      model: { notIn: NON_DEDUP_MODELS },
+      model: { notIn: [...NON_DEDUP_MODELS] },
       outputTokens: { gt: 0 },
     },
     orderBy: { createdAt: 'desc' },
@@ -307,12 +323,19 @@ export async function findDedupSourceDocument(
 /**
  * Copy an existing Document of the SAME user for a new page, including translations,
  * glossary, and versions. Source must come from `findDedupSourceDocument` (SEC-2).
+ *
+ * Běží v transakci `tx` – volající (deduplikace ve workeru) ji sdílí s odečtem
+ * kreditu, takže když kopie selže, odečet se vrátí a uživatel nezaplatí za nic.
+ * Nový dokument nemá žádné verze, proto se čísla verzí přidělují přímo (1…n).
  */
 export async function copyDocumentForPage(
+  tx: CreditTx,
   pageId: string,
   source: DedupSourceDocument,
+  /** Kredity odečtené za kopii (cena původního OCR); null = neúčtováno. */
+  chargedCredits: number | null = null,
 ): Promise<{ id: string }> {
-  const doc = await prisma.document.create({
+  const doc = await tx.document.create({
     data: {
       pageId,
       hash: source.hash,
@@ -324,6 +347,7 @@ export async function copyDocumentForPage(
       inputTokens: source.inputTokens,
       outputTokens: source.outputTokens,
       processingTimeMs: source.processingTimeMs,
+      chargedCredits,
       glossary: {
         create: source.glossary.map((g) => ({
           term: g.term,
@@ -337,29 +361,31 @@ export async function copyDocumentForPage(
           model: t.model,
           inputTokens: t.inputTokens,
           outputTokens: t.outputTokens,
+          // Kopie překladu se neúčtuje – cena kopie je jen cena původního OCR
+          chargedCredits: t.inputTokens || t.outputTokens ? 0 : null,
         })),
       },
     },
+    select: { id: true },
   });
 
-  // Create initial version records
-  await createVersion(
-    doc.id,
-    'transcription',
-    source.transcription,
-    'ai_initial',
-    source.model ?? undefined,
-  );
-  for (const t of source.translations) {
-    await createVersion(
-      doc.id,
-      `translation:${t.language}`,
-      t.text,
-      'ai_initial',
-      source.model ?? undefined,
-    );
-  }
-  await createVersion(doc.id, 'context', source.context, 'ai_initial', source.model ?? undefined);
+  // Počáteční verze (transkripce, překlady, kontext)
+  const model = source.model ?? undefined;
+  const initial = [
+    { field: 'transcription', content: source.transcription },
+    ...source.translations.map((t) => ({ field: `translation:${t.language}`, content: t.text })),
+    { field: 'context', content: source.context },
+  ];
+  await tx.documentVersion.createMany({
+    data: initial.map((v, i) => ({
+      documentId: doc.id,
+      version: i + 1,
+      field: v.field,
+      content: v.content,
+      source: 'ai_initial',
+      model,
+    })),
+  });
 
   return doc;
 }

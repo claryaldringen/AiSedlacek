@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { InsufficientCreditError, checkBalance, runBilledCall } from '@/lib/infrastructure/billing';
+import { insufficientCreditResponse } from '@/lib/infrastructure/credit';
+import { publicLlmError } from '@/lib/infrastructure/llm-errors';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 const MAX_FETCH_BYTES = 5 * 1024 * 1024; // 5 MB of HTML is plenty for context
 
@@ -43,11 +51,11 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     return NextResponse.json({ error: t('collectionNotFound') }, { status: 404 });
   }
 
-  // Gate on token balance before spending money on Claude (this route bills the user).
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
-  }
+  // Předběžná kontrola ještě před stahováním URL (BIL-1); závazná rezervace
+  // s odhadem vstupu proběhne těsně před voláním modelu.
+  const minimum = reservationCredits([TEXT_MODEL], 0, LLM_MAX_TOKENS.fetchContext);
+  const precheck = await checkBalance(userId, minimum);
+  if (!precheck.sufficient) return insufficientCreditResponse(request, t, precheck);
 
   // Get new content — either from URL or from provided text
   let newContent: string;
@@ -89,8 +97,8 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   // Use Claude to extract and merge context
   const client = new Anthropic();
-  let response;
-  try {
+  let response: Anthropic.Message;
+  {
     const hasExisting = existingContext.trim().length > 0;
     let prompt: string;
 
@@ -144,27 +152,48 @@ Text:
 ${newContent}`;
     }
 
-    response = await client.messages.create({
-      model: TEXT_MODEL,
-      // Sloučení dlouhého kontextu s textem z URL se do 4096 tokenů nevešlo
-      // a useknutý výsledek přepsal původní kontext.
-      max_tokens: 16_000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Chyba AI';
-    return NextResponse.json({ error: `Extrakce kontextu selhala: ${message}` }, { status: 422 });
+    // Rezervace maximální ceny před voláním, vyúčtování skutečné spotřeby hned
+    // po něm (BIL-1) – i když se výsledek neuloží (useknutý výstup).
+    const referenceId = `fetch-context:${id}:${randomUUID()}`;
+    const description = `Kontext svazku ${collection.name} ${sourceLabel}`;
+    try {
+      ({ result: response } = await runBilledCall(
+        {
+          userId,
+          referenceId,
+          description,
+          amount: reservationCredits(
+            [TEXT_MODEL],
+            estimateInputTokens(prompt),
+            LLM_MAX_TOKENS.fetchContext,
+          ),
+        },
+        () =>
+          client.messages.create({
+            model: TEXT_MODEL,
+            // Sloučení dlouhého kontextu s textem z URL se do 4096 tokenů nevešlo
+            // a useknutý výsledek přepsal původní kontext.
+            max_tokens: LLM_MAX_TOKENS.fetchContext,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        (r) => [
+          {
+            referenceId,
+            description,
+            model: r.model,
+            inputTokens: r.usage.input_tokens,
+            outputTokens: r.usage.output_tokens,
+            collectionId: id,
+          },
+        ],
+      ));
+    } catch (err) {
+      if (err instanceof InsufficientCreditError)
+        return insufficientCreditResponse(request, t, err);
+      // Surová chyba SDK/Prismy jen do logu, klientovi obecná lokalizovaná hláška
+      return NextResponse.json({ error: publicLlmError(err, t, 'fetch-context') }, { status: 422 });
+    }
   }
-
-  // Bill the user for the context-extraction call.
-  await deductTokensIfSufficient(
-    userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
-    'fetch-context',
-    undefined,
-    response.model,
-  );
 
   const context = response.content
     .flatMap((block) => (block.type === 'text' ? [block.text] : []))
@@ -217,13 +246,7 @@ async function extractMetadata(
   userId: string,
 ): Promise<void> {
   try {
-    const metaResponse = await client.messages.create({
-      model: TEXT_MODEL,
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
+    const prompt = `Z následujícího kontextu historického díla extrahuj strukturovaná metadata. Vrať POUZE platný JSON objekt bez markdown backticks, bez dalšího textu.
 
 Formát:
 {
@@ -236,19 +259,39 @@ Formát:
 }
 
 Kontext:
-${context}`,
+${context}`;
+
+    // I toto volání se platí (dřív bylo zadarmo) – s rezervací předem (BIL-1).
+    // Bez volného kreditu se metadata přeskočí (best-effort), kontext už je uložený.
+    const referenceId = `fetch-context-metadata:${collectionId}:${randomUUID()}`;
+    const description = 'Metadata kontextu svazku';
+    const { result: metaResponse } = await runBilledCall(
+      {
+        userId,
+        referenceId,
+        description,
+        amount: reservationCredits(
+          [TEXT_MODEL],
+          estimateInputTokens(prompt),
+          LLM_MAX_TOKENS.contextMetadata,
+        ),
+      },
+      () =>
+        client.messages.create({
+          model: TEXT_MODEL,
+          max_tokens: LLM_MAX_TOKENS.contextMetadata,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      (r) => [
+        {
+          referenceId,
+          description,
+          model: r.model,
+          inputTokens: r.usage.input_tokens,
+          outputTokens: r.usage.output_tokens,
+          collectionId,
         },
       ],
-    });
-
-    // Bill for the metadata call too (previously this Claude call was free).
-    await deductTokensIfSufficient(
-      userId,
-      metaResponse.usage.input_tokens,
-      metaResponse.usage.output_tokens,
-      'fetch-context-metadata',
-      undefined,
-      metaResponse.model,
     );
 
     const text = metaResponse.content[0]?.type === 'text' ? metaResponse.content[0].text : '';

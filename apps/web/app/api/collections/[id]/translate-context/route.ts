@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
-import { checkBalance } from '@/lib/infrastructure/billing';
-import { isTranslationLanguage } from '@ai-sedlacek/shared';
+import { requireCredit } from '@/lib/infrastructure/credit';
+import { runningJobConflict } from '@/lib/infrastructure/running-job';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  isTranslationLanguage,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -18,13 +25,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   const auth = await getAuthenticatedUserId();
   if (auth.error) return auth.error;
   const { userId } = auth;
-
-  // Jediný LLM endpoint, který dřív zůstatek nekontroloval – fungoval i se
-  // záporným zůstatkem.
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
-  }
 
   const { id } = await params;
 
@@ -48,6 +48,27 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
   if (!collection.context || collection.context.trim().length === 0) {
     return NextResponse.json({ error: 'No context to translate' }, { status: 400 });
   }
+
+  // Stejná akce nad svazkem už běží → 409 s jejím jobId (před kontrolou kreditu)
+  const running = await runningJobConflict(t, userId, {
+    type: 'translate-context',
+    collectionId: id,
+  });
+  if (running) return running;
+
+  // Předběžná kontrola volného kreditu na rezervaci překladu (BIL-1); dřív tento
+  // endpoint zůstatek nekontroloval vůbec.
+  const noCredit = await requireCredit(
+    request,
+    t,
+    userId,
+    reservationCredits(
+      [TEXT_MODEL],
+      estimateInputTokens(collection.context),
+      LLM_MAX_TOKENS.translateContext,
+    ),
+  );
+  if (noCredit) return noCredit;
 
   const job = await prisma.processingJob.create({
     data: {

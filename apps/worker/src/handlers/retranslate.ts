@@ -2,11 +2,11 @@
  * Worker handler for retranslation jobs.
  */
 
-import { createMessage } from '../lib/llm';
+import { chargedCreditsOf, createBilledMessage } from '../lib/billed-message';
+import { JobError } from '../lib/job-error';
 import { LANGUAGE_NAMES, LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
-import { deductTokensIfSufficient } from '@ai-sedlacek/db/billing';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 
 const STEPS_CS = {
   loading: 'Načítám dokument…',
@@ -37,9 +37,9 @@ function isUniqueViolation(e: unknown): boolean {
 }
 
 /** Podmíněný zápis v transakci nenašel výchozí text – překlad se mezitím změnil. */
-class TranslationChangedError extends Error {
+class TranslationChangedError extends JobError {
   constructor() {
-    super(TRANSLATION_CHANGED_MESSAGE);
+    super('translation_changed', TRANSLATION_CHANGED_MESSAGE);
     this.name = 'TranslationChangedError';
   }
 }
@@ -65,16 +65,16 @@ export async function handleRetranslate(jobId: string, data: RetranslateJobData)
     where: { id: documentId },
     include: {
       translations: { where: { language: targetLang } },
-      page: { select: { userId: true, collection: { select: { name: true } } } },
+      page: { select: { userId: true, collection: { select: { id: true, name: true } } } },
     },
   });
 
   if (!doc) {
-    throw new Error(`Dokument ${documentId} nenalezen`);
+    throw new JobError('not_found', `Dokument ${documentId} nenalezen`);
   }
 
   if (doc.page.userId !== userId) {
-    throw new Error('Přístup zamítnut');
+    throw new JobError('not_found', 'Přístup zamítnut');
   }
 
   // Stav překladu v DB na začátku jobu – při ukládání se z něj ověřuje, že ho
@@ -119,12 +119,26 @@ Return ONLY the updated translation in markdown, nothing else.`;
         : `Translate this historical transcription into modern ${langName}. Preserve structure, all references and citations. Use square brackets to explain archaic terms. Format as markdown.\n\n${doc.transcription}`;
   }
 
-  const response = await createMessage({
-    model: TEXT_MODEL,
-    maxTokens: 8192,
-    temperature: 0.3,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // Rezervace maximální ceny před voláním, vyúčtování skutečné spotřeby hned
+  // po něm (BIL-1) – i když se výsledek nakonec neuloží. Bez volného kreditu se
+  // model nezavolá a job skončí chybou (InsufficientCreditError).
+  const { response, billing } = await createBilledMessage(
+    {
+      userId,
+      jobId,
+      // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož
+      // jobu po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
+      referenceId: `retranslate:${jobId}:${documentId}:${targetLang}`,
+      description: `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
+      collectionId: doc.page.collection?.id ?? null,
+    },
+    {
+      model: TEXT_MODEL,
+      maxTokens: LLM_MAX_TOKENS.retranslate,
+      temperature: 0.3,
+      messages: [{ role: 'user', content: prompt }],
+    },
+  );
 
   const translatedText = response.text;
 
@@ -133,25 +147,6 @@ Return ONLY the updated translation in markdown, nothing else.`;
     data: { currentStep: s.saving },
   });
 
-  // Atomically check balance and deduct tokens – hned po volání, spotřeba vznikla
-  // i v případě, že se výsledek nakonec neuloží.
-  const deductResult = await deductTokensIfSufficient(
-    userId,
-    response.inputTokens,
-    response.outputTokens,
-    `Retranslace dokumentu ${documentId}${doc.page.collection?.name ? ` [${doc.page.collection.name}]` : ''}`,
-    // Deterministický klíč (job + dokument + jazyk): opakované zpracování téhož jobu
-    // po restartu workeru neúčtuje dvakrát (BIL-3, dřív Date.now()).
-    `retranslate:${jobId}:${documentId}:${targetLang}`,
-    response.model,
-  );
-
-  if (!deductResult.success) {
-    console.warn(
-      `[Worker:retranslate] Insufficient balance for user ${userId}, saving result anyway`,
-    );
-  }
-
   // Useknutý (max_tokens) nebo odmítnutý výstup by přepsal překlad neúplným
   // textem – neukládat (spotřeba je už naúčtovaná výše).
   if (response.stopReason !== 'end_turn' || translatedText.trim() === '') {
@@ -159,7 +154,17 @@ Return ONLY the updated translation in markdown, nothing else.`;
       response.stopReason === 'end_turn'
         ? 'prázdný výstup'
         : (response.stopReason ?? 'neznámý důvod');
-    throw new Error(`Model nevrátil kompletní překlad (${reason}) – překlad zůstal beze změny`);
+    // Kód pro lokalizovanou hlášku v UI (worker píše česky, UI může být anglicky)
+    const code =
+      response.stopReason === 'end_turn'
+        ? 'empty_output'
+        : response.stopReason === 'refusal'
+          ? 'model_refused'
+          : 'output_truncated';
+    throw new JobError(
+      code,
+      `Model nevrátil kompletní překlad (${reason}) – překlad zůstal beze změny`,
+    );
   }
 
   await saveRetranslation({
@@ -170,6 +175,7 @@ Return ONLY the updated translation in markdown, nothing else.`;
     model: response.model,
     inputTokens: response.inputTokens,
     outputTokens: response.outputTokens,
+    chargedCredits: chargedCreditsOf(billing),
   });
 
   // Mark job as completed
@@ -205,8 +211,19 @@ async function saveRetranslation(params: {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** Kredity odečtené za retranslaci (BIL-11); null = neznámé. */
+  chargedCredits: number | null;
 }): Promise<void> {
-  const { documentId, language, baseTranslation, text, model, inputTokens, outputTokens } = params;
+  const {
+    documentId,
+    language,
+    baseTranslation,
+    text,
+    model,
+    inputTokens,
+    outputTokens,
+    chargedCredits,
+  } = params;
   const where = { documentId_language: { documentId, language } };
 
   for (let attempt = 1; ; attempt++) {
@@ -218,7 +235,7 @@ async function saveRetranslation(params: {
 
         if (currentText === null) {
           await tx.translation.create({
-            data: { documentId, language, text, model, inputTokens, outputTokens },
+            data: { documentId, language, text, model, inputTokens, outputTokens, chargedCredits },
           });
         } else {
           const last = await tx.documentVersion.findFirst({
@@ -238,7 +255,7 @@ async function saveRetranslation(params: {
           });
           const { count } = await tx.translation.updateMany({
             where: { documentId, language, text: currentText },
-            data: { text, model, inputTokens, outputTokens },
+            data: { text, model, inputTokens, outputTokens, chargedCredits },
           });
           // Řádek se změnil mezi čtením a zápisem – rollback i založené verze
           if (count === 0) throw new TranslationChangedError();

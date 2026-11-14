@@ -6,8 +6,26 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { chargeForUsage, formatCzk } from '@/lib/pricing';
+import { formatCzk, resultCharges, type DisplayedCharge } from '@/lib/pricing';
+import { isJobErrorCode, type JobErrorCode } from '@ai-sedlacek/shared';
+
+/**
+ * Lokalizovaná hláška k chybě retranslace podle kódu z workeru – text chyby
+ * z workeru je česky a u chyb API by to byla surová zpráva SDK.
+ */
+const RETRANSLATE_ERROR_KEYS: Partial<Record<JobErrorCode, string>> = {
+  translation_changed: 'retranslationErrorChanged',
+  output_truncated: 'retranslationErrorTruncated',
+  model_refused: 'retranslationErrorRefused',
+  empty_output: 'retranslationErrorEmpty',
+  insufficient_credit: 'retranslationInsufficientCredit',
+  credit_busy: 'retranslationCreditBusy',
+  api_error: 'retranslationErrorApi',
+  not_found: 'retranslationErrorNotFound',
+};
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
+import { runRetranslation, waitForJobEnd, type StartResponse } from '@/lib/job-follow';
+import type { ResultPatchOptions } from '@/lib/panel-result';
 
 export interface DocumentResult {
   id: string;
@@ -23,6 +41,8 @@ export interface DocumentResult {
   inputTokens?: number | null;
   outputTokens?: number | null;
   processingTimeMs?: number | null;
+  /** Skutečně odečtené kredity za OCR (BIL-11); null = starší dokument, cena odhadem. */
+  chargedCredits?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   // Page metadata (passed through)
@@ -36,15 +56,29 @@ export interface DocumentResult {
   translationModel?: string | null;
   translationInputTokens?: number | null;
   translationOutputTokens?: number | null;
-  // Chat accumulated cost
+  translationChargedCredits?: number | null;
+  // Chat v této relaci: tokeny a skutečně odečtené kredity (lib/chat-usage.ts)
   chatInputTokens?: number;
   chatOutputTokens?: number;
   chatModel?: string;
+  chatChargedCredits?: number;
+  chatChargeIncomplete?: boolean;
 }
+
+/**
+ * Změna polí dokumentu v panelu: jen změněná pole dokumentu `documentId` –
+ * rodič je aplikuje přes `applyResultPatch` nad aktuálním stavem (ne celý
+ * snímek, který by vrátil změny uložené mezitím, ani zápis do jiného dokumentu).
+ */
+export type ResultPatchHandler = (
+  documentId: string,
+  patch: Partial<DocumentResult>,
+  options?: ResultPatchOptions<DocumentResult>,
+) => void;
 
 interface ResultViewerProps {
   result: DocumentResult;
-  onUpdate?: (updated: DocumentResult) => void;
+  onPatch?: ResultPatchHandler;
   highlightQuery?: string;
   /** Cizí dokument – bez editace textů a obnovy verzí (historie zůstane k prohlížení). */
   readOnly?: boolean;
@@ -206,46 +240,50 @@ function EditableSection({
 
 export function ResultViewer({
   result,
-  onUpdate,
+  onPatch,
   highlightQuery,
   readOnly = false,
 }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const tc = useTranslations('common');
   const locale = useLocale();
-  // Cena pro uživatele – stejný výpočet jako účtování kreditů.
-  const formatCharge = (
-    model: string | null | undefined,
-    inputTokens: number | null | undefined,
-    outputTokens: number | null | undefined,
-  ): string | null => {
-    const charge = chargeForUsage(model, inputTokens, outputTokens);
-    return charge
-      ? t('chargeValue', {
-          czk: formatCzk(charge.czk, locale),
-          credits: charge.credits.toLocaleString(locale),
-        })
+  // Ceny pro panel metadat (BIL-11): skutečný odečet, u starších dokumentů
+  // označený odhad, chat přesně; u cizího dokumentu (readOnly) se nezobrazují.
+  const charges = resultCharges(result, readOnly);
+  const chargeLabel = (charge: DisplayedCharge): string | null =>
+    charge
+      ? t(
+          charge.incomplete
+            ? 'chargeValueIncomplete'
+            : charge.estimated
+              ? 'chargeValueEstimated'
+              : 'chargeValue',
+          {
+            czk: formatCzk(charge.czk, locale),
+            credits: charge.credits.toLocaleString(locale),
+          },
+        )
       : null;
-  };
   const [saving, setSaving] = useState(false);
   const [retranslating, setRetranslating] = useState(false);
+  // Retranslace čeká na dokončení jiné (předchozí) retranslace téhož dokumentu
+  const [waitingForOtherRetranslation, setWaitingForOtherRetranslation] = useState(false);
   // Během retranslace se texty needitují – ruční úprava překladu by se srazila
   // s výsledkem jobu (přepsal by ji) a nová transkripce by spustila další
   // souběžnou retranslaci.
   const retranslateLock = retranslating ? t('editLockedWhileRetranslating') : undefined;
 
-  // Interval pro polling retranslace ukládáme do refu, aby šel uklidit.
-  const retranslatePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Pollování retranslace (vlastní i sledované cizí) jde zastavit přes abort.
+  const retranslateAbortRef = useRef<AbortController | null>(null);
   // Vždy aktuální id zobrazeného dokumentu — pro ověření, že doběhlý poll
-  // patří k dokumentu, který je stále otevřený.
-  const currentResultIdRef = useRef(result.id);
+  // patří k dokumentu, který je stále otevřený. Po odpojení null: poll, který
+  // doběhne později, už nic neaplikuje.
+  const currentResultIdRef = useRef<string | null>(result.id);
   currentResultIdRef.current = result.id;
 
   const stopRetranslatePoll = useCallback((): void => {
-    if (retranslatePollRef.current) {
-      clearInterval(retranslatePollRef.current);
-      retranslatePollRef.current = null;
-    }
+    retranslateAbortRef.current?.abort();
+    retranslateAbortRef.current = null;
   }, []);
 
   // Úklid pollu při přepnutí na jiný dokument i při unmountu — jinak by poll
@@ -253,6 +291,11 @@ export function ResultViewer({
   useEffect(() => {
     return () => stopRetranslatePoll();
   }, [result.id, stopRetranslatePoll]);
+  useEffect(() => {
+    return () => {
+      currentResultIdRef.current = null;
+    };
+  }, []);
 
   // Chyba posledního uložení – bez ní se dřív editace při chybě serveru tvářila
   // jako uložená (apiFetch nevyhazuje na ne-2xx odpovědi, proto apiFetchOk).
@@ -288,14 +331,19 @@ export function ResultViewer({
         if (field === 'translation' && translationLanguage !== result.translationLanguage) {
           return result;
         }
-        const updated = { ...result, [field]: value };
-        onUpdate?.(updated);
-        return updated;
+        // Do panelu jen uložené pole – ne snímek `result` z doby před PATCH
+        // (mezitím mohl přibýt návrh z chatu nebo spotřeba chatu).
+        onPatch?.(
+          result.id,
+          { [field]: value },
+          field === 'translation' ? { translationLanguage: result.translationLanguage } : {},
+        );
+        return { ...result, [field]: value };
       } finally {
         setSaving(false);
       }
     },
-    [result, onUpdate, tc],
+    [result, onPatch, tc],
   );
 
   const trySaveField = useCallback(
@@ -328,98 +376,123 @@ export function ResultViewer({
       }
 
       // Re-translate based on updated transcription via worker job
+      stopRetranslatePoll();
+      const controller = new AbortController();
+      retranslateAbortRef.current = controller;
+      const isStale = (): boolean =>
+        controller.signal.aborted || currentResultIdRef.current !== docId;
       setRetranslating(true);
+      setWaitingForOtherRetranslation(false);
       setRetranslateError(null);
-      try {
-        const res = await apiFetch(`/api/documents/${result.id}/retranslate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            language: result.translationLanguage,
-            previousTranslation: result.translation,
-          }),
-        });
-        if (!res.ok) {
-          // Transkripce je uložená, jen překlad se nespustil (kredit, souběžný job).
-          const data = (await res.json().catch(() => ({}))) as { error?: unknown };
-          setRetranslateError(
-            res.status === 402 || data.error === 'insufficient_tokens'
-              ? t('retranslationInsufficientCredit')
-              : typeof data.error === 'string'
-                ? data.error
-                : t('retranslationFailed'),
-          );
-          setRetranslating(false);
-          return true;
-        }
-        const { jobId } = (await res.json()) as { jobId: string };
+      let followedOther = false;
 
-        // Poll for job completion — interval v refu, ať ho lze uklidit.
-        stopRetranslatePoll();
-        retranslatePollRef.current = setInterval(async () => {
-          try {
-            const statusRes = await apiFetch(`/api/pages/process/status?jobId=${jobId}`);
-            if (!statusRes.ok) {
-              stopRetranslatePoll();
-              setRetranslating(false);
-              return;
-            }
-            const statusData = (await statusRes.json()) as {
-              status: string;
-              currentStep?: string | null;
-              errors?: string[];
-            };
-            if (
-              statusData.status === 'completed' ||
-              statusData.status === 'error' ||
-              statusData.status === 'cancelled'
-            ) {
-              stopRetranslatePoll();
-              setRetranslating(false);
-              if (statusData.status === 'error' && currentResultIdRef.current === docId) {
-                // Worker ukládá důvod do errors (poslední = tento běh), jinak obecná hláška.
-                setRetranslateError(statusData.errors?.at(-1) || t('retranslationFailed'));
-              }
-              if (statusData.status === 'completed') {
-                // Reload the document to get the new translation
-                const docRes = await apiFetch(`/api/documents/${result.id}`);
-                if (docRes.ok) {
-                  const doc = (await docRes.json()) as {
-                    translations: {
-                      language: string;
-                      text: string;
-                      model?: string;
-                      inputTokens?: number;
-                      outputTokens?: number;
-                    }[];
-                  };
-                  const translation = doc.translations.find(
-                    (t: { language: string }) => t.language === result.translationLanguage,
-                  );
-                  // Aplikuj jen pokud je stále otevřený dokument, pro který poll běžel.
-                  if (translation && currentResultIdRef.current === docId) {
-                    onUpdate?.({
-                      ...updated,
-                      translation: translation.text,
-                      translationModel: translation.model,
-                      translationInputTokens: translation.inputTokens,
-                      translationOutputTokens: translation.outputTokens,
-                    });
-                  }
-                }
-              }
-            }
-          } catch {
-            stopRetranslatePoll();
-            setRetranslating(false);
-          }
-        }, 2000);
+      // Načte aktuální překlad z DB a aplikuje ho (jen u téhož otevřeného dokumentu)
+      const applyLatestTranslation = async (): Promise<void> => {
+        const docRes = await apiFetch(`/api/documents/${docId}`);
+        if (!docRes.ok) return;
+        const doc = (await docRes.json()) as {
+          translations: {
+            language: string;
+            text: string;
+            model?: string | null;
+            inputTokens?: number | null;
+            outputTokens?: number | null;
+            chargedCredits?: number | null;
+          }[];
+        };
+        const translation = doc.translations.find(
+          (tr: { language: string }) => tr.language === updated.translationLanguage,
+        );
+        if (translation && !isStale()) {
+          // Jen pole překladu nad aktuálním stavem panelu – snímek `updated`
+          // z doby uložení transkripce by vrátil mezitím uložený kontext,
+          // návrh z chatu i spotřebu chatu.
+          onPatch?.(
+            docId,
+            {
+              translation: translation.text,
+              translationModel: translation.model,
+              translationInputTokens: translation.inputTokens,
+              translationOutputTokens: translation.outputTokens,
+              translationChargedCredits: translation.chargedCredits,
+            },
+            { translationLanguage: updated.translationLanguage },
+          );
+        }
+      };
+
+      try {
+        // Když už retranslace téhož dokumentu a jazyka běží (409 job_running),
+        // počká se na ni a pak se spustí nová s aktuální transkripcí – jinak by
+        // se tato úprava do překladu nikdy nepromítla.
+        const outcome = await runRetranslation({
+          start: async (attempt): Promise<StartResponse> => {
+            const res = await apiFetch(`/api/documents/${docId}/retranslate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                language: updated.translationLanguage,
+                // Po cizí retranslaci je text z klienta zastaralý – worker vezme
+                // aktuální překlad z DB
+                ...(attempt === 0 ? { previousTranslation: updated.translation } : {}),
+              }),
+            });
+            const body = (await res.json().catch(() => ({}))) as StartResponse['body'];
+            return { status: res.status, body };
+          },
+          waitForJob: (jobId, own) => {
+            if (!own) followedOther = true;
+            setWaitingForOtherRetranslation(!own);
+            return waitForJobEnd(jobId, {
+              fetchStatus: (id) => apiFetch(`/api/pages/process/status?jobId=${id}`),
+              signal: controller.signal,
+            });
+          },
+          isStale,
+        });
+        if (outcome.kind === 'stale') return true;
+
+        if (outcome.kind === 'not_started') {
+          // Transkripce je uložená, jen překlad se nespustil (kredit, chyba).
+          const { status, body } = outcome.response;
+          setRetranslateError(
+            body.code === 'credit_busy'
+              ? t('retranslationCreditBusy')
+              : status === 402 || body.error === 'insufficient_tokens'
+                ? t('retranslationInsufficientCredit')
+                : typeof body.error === 'string'
+                  ? body.error
+                  : t('retranslationFailed'),
+          );
+        } else if (outcome.kind === 'still_running') {
+          setRetranslateError(t('retranslationStillRunning'));
+        } else if (outcome.end.status === 'error') {
+          // Hláška podle kódu chyby v jazyce UI; neznámý kód (nebo starší
+          // worker bez kódu) → obecná hláška, ne český text z workeru.
+          const key = isJobErrorCode(outcome.end.errorCode)
+            ? RETRANSLATE_ERROR_KEYS[outcome.end.errorCode]
+            : undefined;
+          setRetranslateError(t(key ?? 'retranslationFailed'));
+        }
+        // Nový překlad (vlastní, nebo aspoň ten z dokončené cizí retranslace)
+        if ((outcome.kind === 'done' && outcome.end.status === 'completed') || followedOther) {
+          await applyLatestTranslation();
+        }
       } catch {
-        setRetranslating(false);
+        // Síťová chyba při zakládání – transkripce je uložená, překlad beze změny
+        if (!isStale()) setRetranslateError(t('retranslationFailed'));
+      } finally {
+        // Novější retranslace (další uložení) má vlastní stav; po přepnutí
+        // dokumentu (abort, ref vynulován) se zámek editace uvolní.
+        if (retranslateAbortRef.current === controller || retranslateAbortRef.current === null) {
+          retranslateAbortRef.current = null;
+          setRetranslating(false);
+          setWaitingForOtherRetranslation(false);
+        }
       }
       return true;
     },
-    [result, onUpdate, saveField, stopRetranslatePoll, t],
+    [result, onPatch, saveField, stopRetranslatePoll, t],
   );
 
   return (
@@ -451,7 +524,9 @@ export function ResultViewer({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            {t('translationUpdatingFromTranscription')}
+            {waitingForOtherRetranslation
+              ? t('translationWaitingForPreviousRetranslation')
+              : t('translationUpdatingFromTranscription')}
           </div>
           <div className="h-1 bg-blue-200">
             <div
@@ -539,11 +614,13 @@ export function ResultViewer({
             </summary>
             <div className="divide-y divide-stone-100 text-sm">
               <MetadataGroup title={t('processingSection')}>
-                <MetadataRow label="Model" value={result.model} />
+                {/* Model a tokeny (z nich a ceníku se dá dopočítat útrata vlastníka)
+                    u cizího dokumentu nezobrazovat – API je čtenáři ani nevrací */}
+                <MetadataRow label="Model" value={readOnly ? null : result.model} />
                 <MetadataRow
                   label={t('tokens')}
                   value={
-                    result.inputTokens != null || result.outputTokens != null
+                    !readOnly && (result.inputTokens != null || result.outputTokens != null)
                       ? t('tokensInOut', {
                           in: (result.inputTokens ?? 0).toLocaleString(locale),
                           out: (result.outputTokens ?? 0).toLocaleString(locale),
@@ -557,10 +634,7 @@ export function ResultViewer({
                     result.processingTimeMs != null ? formatDuration(result.processingTimeMs) : null
                   }
                 />
-                <MetadataRow
-                  label={t('totalPrice')}
-                  value={formatCharge(result.model, result.inputTokens, result.outputTokens)}
-                />
+                <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.ocr)} />
                 <MetadataRow
                   label={t('createdAt')}
                   value={result.createdAt ? formatDate(result.createdAt) : null}
@@ -571,7 +645,7 @@ export function ResultViewer({
                 />
               </MetadataGroup>
 
-              {(result.translationModel || result.translationInputTokens != null) && (
+              {!readOnly && (result.translationModel || result.translationInputTokens != null) && (
                 <MetadataGroup title={t('translationSection')}>
                   <MetadataRow label="Model" value={result.translationModel} />
                   <MetadataRow
@@ -586,18 +660,11 @@ export function ResultViewer({
                         : null
                     }
                   />
-                  <MetadataRow
-                    label={t('totalPrice')}
-                    value={formatCharge(
-                      result.translationModel,
-                      result.translationInputTokens,
-                      result.translationOutputTokens,
-                    )}
-                  />
+                  <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.translation)} />
                 </MetadataGroup>
               )}
 
-              {(result.chatInputTokens ?? 0) > 0 && (
+              {((result.chatInputTokens ?? 0) > 0 || charges.chat) && (
                 <MetadataGroup title={t('chat')}>
                   <MetadataRow label="Model" value={result.chatModel} />
                   <MetadataRow
@@ -607,41 +674,15 @@ export function ResultViewer({
                       out: (result.chatOutputTokens ?? 0).toLocaleString(locale),
                     })}
                   />
-                  <MetadataRow
-                    label={t('totalPrice')}
-                    value={formatCharge(
-                      result.chatModel,
-                      result.chatInputTokens,
-                      result.chatOutputTokens,
-                    )}
-                  />
+                  <MetadataRow label={t('totalPrice')} value={chargeLabel(charges.chat)} />
                 </MetadataGroup>
               )}
 
-              {(() => {
-                const charges = [
-                  chargeForUsage(result.model, result.inputTokens, result.outputTokens),
-                  chargeForUsage(
-                    result.translationModel,
-                    result.translationInputTokens,
-                    result.translationOutputTokens,
-                  ),
-                  chargeForUsage(result.chatModel, result.chatInputTokens, result.chatOutputTokens),
-                ];
-                const czk = charges.reduce((sum, c) => sum + (c?.czk ?? 0), 0);
-                const credits = charges.reduce((sum, c) => sum + (c?.credits ?? 0), 0);
-                return credits > 0 ? (
-                  <MetadataGroup title={t('grandTotal')}>
-                    <MetadataRow
-                      label={t('totalGrandPrice')}
-                      value={t('chargeValue', {
-                        czk: formatCzk(czk, locale),
-                        credits: credits.toLocaleString(locale),
-                      })}
-                    />
-                  </MetadataGroup>
-                ) : null;
-              })()}
+              {charges.total && (
+                <MetadataGroup title={t('grandTotal')}>
+                  <MetadataRow label={t('totalGrandPrice')} value={chargeLabel(charges.total)} />
+                </MetadataGroup>
+              )}
 
               {(result.mimeType || result.width || result.hash) && (
                 <MetadataGroup title={t('imageSection')}>

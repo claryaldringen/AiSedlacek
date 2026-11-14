@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@ai-sedlacek/db', () => ({ prisma: mocks.prisma }));
+vi.mock('@ai-sedlacek/db/billing', async () => (await import('./billing-mock')).billingModule());
 
 import {
   reclaimStuckJobs,
@@ -16,9 +17,11 @@ import {
   MAX_RECLAIMS,
   RECLAIM_MARKER,
 } from '../lib/reclaim';
+import { billing, resetBillingMock } from './billing-mock';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetBillingMock();
   mocks.prisma.processingJob.update.mockResolvedValue({});
   mocks.prisma.page.updateMany.mockResolvedValue({ count: 0 });
 });
@@ -47,6 +50,41 @@ describe('reclaimStuckJobs (PERF-1)', () => {
       where: { id: { in: ['p1', 'p2'] }, status: 'processing', document: { isNot: null } },
       data: { status: 'done', errorMessage: null },
     });
+    // Rezervace kreditu přerušeného jobu se uvolní (BIL-1) – i prošlé rezervace webu
+    expect(billing.releaseJobHolds).toHaveBeenCalledWith(['job-1']);
+    expect(billing.releaseExpiredHolds).toHaveBeenCalled();
+    // Při startu se uvolní rezervace všech jobů (i zrušených a chybových)
+    expect(billing.releaseAllJobHolds).toHaveBeenCalledTimes(1);
+  });
+
+  it('periodický úklid rezervace ostatních jobů nechává', async () => {
+    mocks.prisma.processingJob.findMany.mockResolvedValue([]);
+
+    await reclaimStuckJobs(false);
+
+    expect(billing.releaseAllJobHolds).not.toHaveBeenCalled();
+  });
+
+  it('při startu uvolní rezervace jobů, i když žádný job neběží', async () => {
+    mocks.prisma.processingJob.findMany.mockResolvedValue([]);
+
+    await reclaimStuckJobs(true);
+
+    expect(billing.releaseAllJobHolds).toHaveBeenCalledTimes(1);
+  });
+
+  it('chyba úklidu rezervací obnovu jobů nezastaví', async () => {
+    billing.releaseExpiredHolds.mockRejectedValue(new Error('DB down'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.prisma.processingJob.findMany.mockResolvedValue([
+      { id: 'job-1', pageIds: ['p1'], errors: [] },
+    ]);
+
+    await reclaimStuckJobs(true);
+
+    expect(mocks.prisma.processingJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'job-1' } }),
+    );
   });
 
   it('job opakovaně shazující worker už znovu nespustí, ale označí jako chybný', async () => {

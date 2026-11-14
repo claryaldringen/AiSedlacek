@@ -112,6 +112,52 @@ export function isRefusalBilled(outputTokens: number, category: string | null): 
   );
 }
 
+/**
+ * Horní odhad počtu vstupních tokenů textu pro rezervaci kreditu (BIL-1).
+ * Tokenizér Claude dává na token alespoň jeden bajt UTF-8; dva bajty na token
+ * jsou s rezervou i pro češtinu, starou němčinu a latinu (skutečně ~3–4 znaky
+ * na token). Přesný počet zná až odpověď API – rezervace jen nesmí výrazně
+ * podstřelit, nevyužitá část se po volání vrací.
+ */
+export function estimateInputTokens(text: string): number {
+  if (text.length === 0) return 0;
+  return Math.ceil(new TextEncoder().encode(text).length / 2);
+}
+
+/**
+ * Strop tokenů jednoho obrázku u modelů s vysokým rozlišením (Opus 4.7+,
+ * Sonnet 5+): delší strana se zmenší na 2576 px, nejvýš ~4784 tokenů. Starší
+ * modely (Sonnet 4.6) mají strop nižší, takže odhad je pro ně s rezervou.
+ */
+export const MAX_IMAGE_INPUT_TOKENS = 4_784;
+
+/**
+ * Režie zprávy (role, oddělovače bloků, systémové tokeny API) navíc k obsahu –
+ * aby rezervace krátkých volání nepodstřelila.
+ */
+export const MESSAGE_OVERHEAD_TOKENS = 200;
+
+/**
+ * Kredity, které se před voláním LLM rezervují (BIL-1): nejvyšší možná cena
+ * volání – vstup podle odhadu, výstup celý `max_tokens` – nejvyšší sazbou
+ * z předaných modelů. Předává se primární model volání (u OCR `OCR_MODEL`), ne
+ * dražší serverový fallback: ten nastává jen při odmítnutí a vzácný přesah nad
+ * rezervaci pokryje volný kredit, jinak ho nese provozovatel – zůstatek do
+ * minusu nejde (rozhodnutí 2026-11-14). Po volání se naúčtuje skutečná spotřeba
+ * a zbytek rezervace se vrátí.
+ */
+export function reservationCredits(
+  models: readonly string[],
+  estimatedInputTokens: number,
+  maxOutputTokens: number,
+): number {
+  if (models.length === 0) throw new Error('reservationCredits: chybí model');
+  const input = Math.max(0, estimatedInputTokens) + MESSAGE_OVERHEAD_TOKENS;
+  return Math.max(
+    ...models.map((model) => creditsForUsage(model, input, Math.max(0, maxOutputTokens))),
+  );
+}
+
 /** Kredity za dobití částky v haléřích. */
 export function czkToCredits(amountHalire: number): number {
   return Math.floor((amountHalire / 100 / BILLING.creditPriceCzkPerMillion) * 1_000_000);

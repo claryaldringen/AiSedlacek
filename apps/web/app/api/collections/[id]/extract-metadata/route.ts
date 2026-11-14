@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
-import { checkBalance, deductTokensIfSufficient } from '@/lib/infrastructure/billing';
+import { InsufficientCreditError, runBilledCall } from '@/lib/infrastructure/billing';
+import { insufficientCreditResponse } from '@/lib/infrastructure/credit';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
-import { TEXT_MODEL } from '@ai-sedlacek/shared';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  estimateInputTokens,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -32,12 +39,6 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
 
   if (!collection.context || collection.context.trim().length === 0) {
     return NextResponse.json({ error: t('collectionHasNoContext') }, { status: 400 });
-  }
-
-  // Gate on balance before spending money on Claude.
-  const { balance, sufficient } = await checkBalance(userId);
-  if (!sufficient) {
-    return NextResponse.json({ error: t('insufficientCredit'), balance }, { status: 402 });
   }
 
   // Whitelist locale (it gets interpolated into the prompt) to avoid injection.
@@ -78,22 +79,45 @@ Format:
 Context:
 ${collection.context}`;
 
+  // Rezervace maximální ceny před voláním, vyúčtování hned po něm – bez ohledu
+  // na to, jak dopadne parsování níže (BIL-1). Bez volného kreditu 402.
   const client = new Anthropic();
-  const response = await client.messages.create({
-    model: TEXT_MODEL,
-    max_tokens: 1024,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  // Bill for the call regardless of how parsing goes below.
-  await deductTokensIfSufficient(
-    userId,
-    response.usage.input_tokens,
-    response.usage.output_tokens,
-    'extract-metadata',
-    undefined,
-    response.model,
-  );
+  const referenceId = `extract-metadata:${id}:${randomUUID()}`;
+  const description = `Metadata svazku ${collection.name}`;
+  let response: Anthropic.Message;
+  try {
+    ({ result: response } = await runBilledCall(
+      {
+        userId,
+        referenceId,
+        description,
+        amount: reservationCredits(
+          [TEXT_MODEL],
+          estimateInputTokens(prompt),
+          LLM_MAX_TOKENS.contextMetadata,
+        ),
+      },
+      () =>
+        client.messages.create({
+          model: TEXT_MODEL,
+          max_tokens: LLM_MAX_TOKENS.contextMetadata,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      (r) => [
+        {
+          referenceId,
+          description,
+          model: r.model,
+          inputTokens: r.usage.input_tokens,
+          outputTokens: r.usage.output_tokens,
+          collectionId: id,
+        },
+      ],
+    ));
+  } catch (err) {
+    if (err instanceof InsufficientCreditError) return insufficientCreditResponse(request, t, err);
+    throw err;
+  }
 
   const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
   if (!text) {

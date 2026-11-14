@@ -12,6 +12,7 @@ const mockJobFindUnique = vi.fn();
 const mockJobFindFirst = vi.fn();
 const mockJobUpdate = vi.fn();
 const mockPageUpdateMany = vi.fn();
+const mockPageFindMany = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
@@ -20,7 +21,10 @@ vi.mock('@/lib/infrastructure/db', () => ({
       findFirst: (...args: unknown[]) => mockJobFindFirst(...args),
       update: (...args: unknown[]) => mockJobUpdate(...args),
     },
-    page: { updateMany: (...args: unknown[]) => mockPageUpdateMany(...args) },
+    page: {
+      updateMany: (...args: unknown[]) => mockPageUpdateMany(...args),
+      findMany: (...args: unknown[]) => mockPageFindMany(...args),
+    },
   },
 }));
 
@@ -28,7 +32,7 @@ vi.mock('@/lib/infrastructure/auth-utils', () => ({
   getAuthenticatedUserId: vi.fn().mockResolvedValue({ userId: 'user-1' }),
 }));
 
-import { POST as cancelJob } from '@/app/api/pages/process/status/route';
+import { GET as jobStatus, POST as cancelJob } from '@/app/api/pages/process/status/route';
 import { POST as resetInterrupted } from '@/app/api/pages/process/interrupted/route';
 
 // ── Helpers ──────────────────────────────────────────────
@@ -128,5 +132,32 @@ describe('POST /api/pages/process/interrupted', () => {
       where: { userId: 'user-1', status: 'processing' },
       data: { status: 'pending', errorMessage: null },
     });
+  });
+});
+
+describe('GET /api/pages/process/status – kód chyby jobu', () => {
+  it('vrátí errorCode, podle kterého UI ukáže hlášku v jazyce uživatele', async () => {
+    mockJobFindUnique.mockResolvedValue({
+      ...JOB,
+      status: 'error',
+      type: 'retranslate',
+      pageIds: [],
+      totalPages: 1,
+      completedPages: 0,
+      errors: ['Překlad byl mezitím ručně upraven – výsledek retranslace se neuložil.'],
+      errorCode: 'translation_changed',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    mockPageFindMany.mockResolvedValue([]);
+
+    const res = await jobStatus(
+      new NextRequest('http://localhost/api/pages/process/status?jobId=job-1', {
+        headers: { 'x-locale': 'en' },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'error', errorCode: 'translation_changed' });
   });
 });

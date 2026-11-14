@@ -121,6 +121,42 @@ předává – po dobu takového rollbacku je heslo v `ps` vidět.
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker
 > znovu zařadí. Deployovat ideálně ve chvíli, kdy neběží velké OCR dávky.
 
+### Verze s rezervací kreditu (otevřené nálezy review 2026-10)
+
+Běžný `deploy.sh`, ruční kroky jen tyto:
+
+- Migrace (všechny jen přidávají tabulky nebo nullable sloupce, data se nemění):
+  `20261114120000_add_credit_hold`, `20261114130000_add_charge_records`,
+  `20261114140000_add_job_error_code`, `20261114150000_add_cli_auth_code`.
+- Web a worker nasazovat spolu (deploy restartuje oba) – worker po startu uvolní
+  rezervace kreditu jobů přerušených deployem.
+- Po deployi znovu nainstalovat zálohovací skript (viz [Zálohy](#zálohy)).
+- **Hned po deployi** vydat CLI 0.3.0 (viz [CLI 0.3.0](#cli-030--přihlášení-bez-tokenu-v-url))
+  – stránka `/auth/cli` od deploye radí uživatelům 0.2.0 aktualizovat.
+
+Změna chování pro uživatele: před každým voláním modelu se rezervuje **maximální** možná
+cena (celý `max_tokens` sazbou primárního modelu), nevyužitá část se po dokončení vrací.
+OCR potřebuje volných zhruba 24 Kč kreditu na jednu stránku, 43 Kč na 3 a 70 Kč na dávku
+6 stránek (skutečná cena ~3,60 Kč za stránku); při nižším zůstatku se dávky zmenší,
+případně zpracování nezačne s hláškou, kolik kreditu chybí.
+
+**Po nasazení změřit skutečnou spotřebu a stropy zmenšit.** Rezervace = `max_tokens`
+(`THINKING_TOKENS_RESERVE` + `BATCH_OUTPUT_TOKENS_PER_PAGE` × stránky v `packages/ocr`),
+takže menší rezervace znamená menší `max_tokens` – ten nesmí odpověď oříznout. K 2026-11-14
+neexistují data pro Opus 5.5 s adaptivním thinkingem (od 2026-10 neproběhl žádný job);
+Opus 4.6 měl výstup na stránku p99 ≈ 3 000, max 3 415 tokenů. Po prvních desítkách dávek:
+
+```sql
+WITH b AS (
+  SELECT "batchId", min(model) AS model, count(*) AS pages, sum("outputTokens") AS out
+  FROM "Document" WHERE "batchId" IS NOT NULL AND "outputTokens" > 0 GROUP BY "batchId")
+SELECT model, pages, count(*) AS batches,
+  percentile_cont(0.99) WITHIN GROUP (ORDER BY out) AS p99_out, max(out) AS max_out
+FROM b GROUP BY model, pages ORDER BY model, pages;
+```
+
+`out` dávky zahrnuje i thinking. Strop `max_tokens` nastavit s rezervou nad maximum.
+
 ## Vydání CLI
 
 CLI (`ai-sedlacek-cli`, příkaz `ais`) vydává na npm workflow
@@ -150,6 +186,20 @@ Jednorázové nastavení (vlastník balíčku na npmjs.com):
   authentication and disallow tokens** (trusted publishing funguje dál, klasické tokeny ne).
 - GitHub prostředí `npm` je omezené jen na tagy `cli-v*` (Settings → Environments → `npm`
   → Deployment branches and tags); volitelně tam lze přidat povinné schválení před publikací.
+
+### CLI 0.3.0 – přihlášení bez tokenu v URL
+
+Verze 0.3.0 (připravená, zatím nevydaná) předává při `ais login` místo tokenu jen
+jednorázový kód s PKCE; token si vyzvedne `POST /api/auth/cli/exchange`. Pořadí:
+
+1. Nasadit server (migrace `…_add_cli_auth_code` přidá tabulku `CliAuthCode`).
+2. **Hned potom, bez odkladu,** otagovat `cli-v0.3.0` podle postupu výše – stránka
+   `/auth/cli` od deploye uživatelům 0.2.0 radí aktualizovat.
+
+Starší CLI (≤ 0.2.0) dál funguje – autorizační stránka mu bez PKCE výzvy předá token
+postaru a doporučí aktualizaci. CLI 0.3.0 token v callbacku **nepřijme** (podvržený
+callback s cizím tokenem by uživatele přihlásil k cizímu účtu – login CSRF), funguje
+proto jen proti serveru s výměnou kódu; proto se vydává až po deployi serveru.
 
 ## Databáze a migrace
 
@@ -211,9 +261,24 @@ systemctl daemon-reload && systemctl enable --now aisedlacek-backup.timer
 echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/default/aisedlacek-backup
 ```
 
-- Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní.
-- S `BACKUP_REMOTE` se dumpy i uploady synchronizují mimo VPS (uploady se na
-  cíli nemažou). Bez něj je záloha jen na stejném disku a uploady se nezálohují.
+- Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní. Dump se píše do
+  `*.dump.partial` a na `*.dump` se přejmenuje až po ověření plným přečtením
+  (`pg_restore --file=/dev/null` – `--list` čte jen obsah a useknutý dump propustí);
+  nepovedený dump se smaže. Vlastní `.partial` po přerušeném běhu se smažou na začátku
+  dalšího běhu, staré pre-deploy `.partial` uklidí rotace.
+- Přihlašovací údaje k DB jdou do `pg_dump` přes `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`
+  a dočasný `.pgpass` (práva 600, po skončení se smaže) – heslo není v argumentech
+  procesu, takže ho ostatní uživatelé sdíleného VPS nevidí v `ps`. Zděděná `PGPASSWORD`
+  se pro `pg_dump` ruší (`env -u PGPASSWORD`), jinak by měla přednost před `.pgpass`.
+- S `BACKUP_REMOTE` se dumpy i uploady kopírují mimo VPS **jen přírůstkově**
+  (`rsync --ignore-existing`, bez `--delete`): na cíli se nic nemaže ani nepřepisuje,
+  takže smazání nebo poškození lokálních souborů se na off-site kopii nepropíše.
+  Off-site jdou jen `*.dump`, které projdou plným přečtením (i pre-deploy dumpy).
+  Starých dumpů na cíli proto přibývá – retenci je potřeba nastavit na cílovém úložišti
+  (např. snapshoty Storage Boxu nebo občasný ruční úklid). Bez `BACKUP_REMOTE` je záloha
+  jen na stejném disku a uploady se nezálohují.
+- **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
+  `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
 - Obnova: `sudo -u postgres pg_restore --clean --if-exists -d aisedlacek < <soubor.dump>`
   (dumpy patří rootovi s právy 600, proto přes stdin; obnovu je dobré si jednou vyzkoušet
   na kopii DB).
@@ -245,7 +310,7 @@ systemctl reload caddy
 | `AUTH_SECRET`, `AUTH_TRUST_HOST`, `NEXTAUTH_URL` | ano | NextAuth v5 (`https://aisedlacek.com`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | ano | Google OAuth |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | ne | GitHub OAuth (v produkci zatím nenastaveno) |
-| `RESEND_API_KEY`, `EMAIL_FROM` | **ano** | Odesílání e-mailů. **Bez nich nefunguje registrace e-mailem** (ověřovací odkaz skončí jen v logu) ani reset hesla. V produkci k 2026-10-14 chybí. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | **ano** | Odesílání e-mailů přes Resend. **Bez nich nefunguje registrace e-mailem** (ověřovací odkaz skončí jen v logu) ani reset hesla. V produkci od 2026-11-14: `EMAIL_FROM="AI Sedláček <noreply@aisedlacek.com>"`, doména `aisedlacek.com` ověřená v Resendu (region EU, DNS v Cloudflare: CNAME `send` a `rsend`, TXT `resend._domainkey` a `_dmarc`), klíč jen pro odesílání z této domény. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ano | Platby kartou |
 | `FIO_API_TOKEN` | ne | Dobíjení převodem (bez něj se Fio v UI skryje) |
 | ~~`TOKEN_MULTIPLIER`, `TOKEN_PRICE_PER_MILLION`~~ | – | Od 2026-10 se nepoužívají. Ceník je v kódu (`packages/shared/src/pricing.ts`): uživatel platí skutečný náklad API daného modelu × marže 2 (kurz 23 Kč/USD), 1M kreditů = 50 Kč. |

@@ -3,6 +3,7 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
+import { releaseAllJobHolds, releaseExpiredHolds, releaseJobHolds } from '@ai-sedlacek/db/billing';
 import { resetUnfinishedPages } from './page-status';
 
 // A running job whose row hasn't been touched in this long is considered orphaned
@@ -62,6 +63,22 @@ export async function errorsKeepingReclaimMarkers(
  * Job, který už byl vrácen MAX_RECLAIMS-krát, se znovu nespouští a skončí `error`.
  */
 export async function reclaimStuckJobs(onStartup: boolean): Promise<void> {
+  // Rezervace kreditu po vypršení (pád webu uprostřed chatu apod., BIL-1) –
+  // nezávisle na jobech, chyba úklidu nesmí zastavit obnovu jobů.
+  await releaseExpiredHolds().catch((err: unknown) => {
+    console.error('[Worker] releaseExpiredHolds failed:', err instanceof Error ? err.message : err);
+  });
+  // Při startu žádný job legitimně neběží (jediná instance workeru) – uvolnit
+  // rezervace všech jobů, i zrušených a chybových, které by jinak držely kredit
+  // až do vypršení TTL.
+  if (onStartup) {
+    await releaseAllJobHolds().catch((err: unknown) => {
+      console.error(
+        '[Worker] releaseAllJobHolds failed:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
   try {
     const where = onStartup
       ? { status: 'running' }
@@ -100,6 +117,9 @@ export async function reclaimStuckJobs(onStartup: boolean): Promise<void> {
       console.error(`[Worker] Job ${job.id} gave up after ${MAX_RECLAIMS} reclaims`);
     }
 
+    // Rezervace kreditu přerušených jobů (BIL-1): volání, pro které vznikly, už
+    // neběží – obnovený job si před dalším voláním zarezervuje znovu.
+    await releaseJobHolds(stuck.map((j) => j.id));
     await resetUnfinishedPages(stuck.flatMap((j) => j.pageIds));
     console.log(
       `[Worker] Reclaimed ${requeue.length} stuck job(s), gave up ${giveUp.length} job(s)`,

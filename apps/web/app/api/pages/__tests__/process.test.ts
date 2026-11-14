@@ -7,6 +7,7 @@ const mockPageFindMany = vi.fn();
 const mockPageUpdateMany = vi.fn();
 const mockProcessingJobFindFirst = vi.fn();
 const mockProcessingJobCreate = vi.fn();
+const mockDocumentFindMany = vi.fn();
 
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
@@ -18,6 +19,8 @@ vi.mock('@/lib/infrastructure/db', () => ({
       findFirst: (...args: unknown[]) => mockProcessingJobFindFirst(...args),
       create: (...args: unknown[]) => mockProcessingJobCreate(...args),
     },
+    // Zdroje deduplikace pro předběžnou kontrolu kreditu
+    document: { findMany: (...args: unknown[]) => mockDocumentFindMany(...args) },
   },
 }));
 
@@ -31,7 +34,13 @@ vi.mock('@/lib/infrastructure/authz', () => ({
 }));
 
 vi.mock('@/lib/infrastructure/billing', () => ({
-  checkBalance: vi.fn().mockResolvedValue({ balance: 1_000_000, sufficient: true }),
+  checkBalance: vi.fn().mockResolvedValue({
+    balance: 1_000_000,
+    reserved: 0,
+    available: 1_000_000,
+    required: 1,
+    sufficient: true,
+  }),
   deductTokensIfSufficient: vi.fn().mockResolvedValue({ success: true, balance: 999_000 }),
 }));
 
@@ -49,6 +58,13 @@ function makeRequest(body: unknown): NextRequest {
 // ── Import route handler (after mocks) ──────────────────
 
 import { POST } from '@/app/api/pages/process/route';
+import { ocrBatchReservationCredits } from '@ai-sedlacek/ocr';
+import {
+  LLM_MAX_TOKENS,
+  TEXT_MODEL,
+  creditsForUsage,
+  reservationCredits,
+} from '@ai-sedlacek/shared';
 
 // ── Tests ────────────────────────────────────────────────
 
@@ -58,6 +74,7 @@ describe('POST /api/pages/process', () => {
     mockPageUpdateMany.mockResolvedValue({ count: 0 });
     mockProcessingJobFindFirst.mockResolvedValue(null); // No running job
     mockProcessingJobCreate.mockResolvedValue({ id: 'job-123', status: 'queued' });
+    mockDocumentFindMany.mockResolvedValue([]);
     mockGetOwnedCollection.mockImplementation((userId: string, id: string) =>
       Promise.resolve({ id, userId }),
     );
@@ -226,12 +243,128 @@ describe('POST /api/pages/process', () => {
 
   it('returns 402 when balance is insufficient', async () => {
     const { checkBalance } = await import('@/lib/infrastructure/billing');
-    vi.mocked(checkBalance).mockResolvedValueOnce({ balance: 0, sufficient: false });
+    vi.mocked(checkBalance).mockResolvedValueOnce({
+      balance: 0,
+      reserved: 0,
+      available: 0,
+      required: 600_000,
+      sufficient: false,
+    });
 
     const res = await POST(makeRequest({ pageIds: ['page-1'] }));
 
     expect(res.status).toBe(402);
     const json = await res.json();
-    expect(json.error).toBe('Nedostatečný kredit');
+    expect(json.code).toBe('insufficient_credit');
+    expect(json.error).toMatch(
+      /^Nedostatečný kredit – akce potřebuje volných alespoň 600\s000 tokenů/,
+    );
+    // Předběžná kontrola počítá s rezervací maximální ceny aspoň jedné stránky
+    // (16k + 8k výstupních tokenů × $20 za 1M u Opus 5.5 → ≥ 441 600 kreditů)
+    expect(vi.mocked(checkBalance).mock.calls[0]![1]).toBeGreaterThanOrEqual(441_600);
+  });
+
+  it('kredit blokovaný jiným běžícím zpracováním: 409 credit_busy, ne 402 (dobíjet netřeba)', async () => {
+    const { checkBalance } = await import('@/lib/infrastructure/billing');
+    vi.mocked(checkBalance).mockResolvedValueOnce({
+      balance: 900_000,
+      reserved: 800_000,
+      available: 100_000,
+      required: 600_000,
+      sufficient: false,
+    });
+
+    const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe('credit_busy');
+    expect(json.error).toBe(
+      'Kredit je dočasně rezervovaný jiným běžícím zpracováním – spusťte akci znovu po jeho dokončení.',
+    );
+    expect(mockProcessingJobCreate).not.toHaveBeenCalled();
+  });
+
+  // ── Předběžná kontrola kreditu podle toho, co job opravdu udělá (review) ──
+  describe('předběžná kontrola kreditu', () => {
+    const OCR_PAGE = ocrBatchReservationCredits(1, '', 'transcribe+translate');
+    const TRANSLATION = reservationCredits([TEXT_MODEL], 0, LLM_MAX_TOKENS.translateDocument);
+
+    function pages(list: Record<string, unknown>[]): void {
+      mockPageFindMany.mockResolvedValue(
+        list.map((p) => ({
+          collectionId: null,
+          status: 'pending',
+          hash: `h-${p.id}`,
+          document: null,
+          ...p,
+        })),
+      );
+    }
+
+    async function checkBalanceMock(): Promise<ReturnType<typeof vi.fn>> {
+      const { checkBalance } = await import('@/lib/infrastructure/billing');
+      return vi.mocked(checkBalance) as unknown as ReturnType<typeof vi.fn>;
+    }
+
+    it('běžící job dostane přednost: 409 s jobId, ne 402', async () => {
+      mockProcessingJobFindFirst.mockResolvedValue({ id: 'job-running' });
+      const checkBalance = await checkBalanceMock();
+
+      const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ jobId: 'job-running' });
+      expect(checkBalance).not.toHaveBeenCalled();
+    });
+
+    it('jen překlad do dalšího jazyka: stačí rezervace překladu, ne OCR', async () => {
+      pages([{ id: 'page-1', document: { translations: [{ language: 'cs' }] } }]);
+      const checkBalance = await checkBalanceMock();
+
+      const res = await POST(makeRequest({ pageIds: ['page-1'], language: 'en' }));
+
+      expect(res.status).toBe(200);
+      expect(checkBalance.mock.calls[0]![1]).toBe(TRANSLATION);
+      expect(TRANSLATION).toBeLessThan(OCR_PAGE);
+    });
+
+    it('stránky už přeložené do cílového jazyka: žádná kontrola kreditu', async () => {
+      pages([{ id: 'page-1', document: { translations: [{ language: 'cs' }] } }]);
+      const checkBalance = await checkBalanceMock();
+
+      const res = await POST(makeRequest({ pageIds: ['page-1'], language: 'cs' }));
+
+      expect(res.status).toBe(200);
+      expect(checkBalance).not.toHaveBeenCalled();
+    });
+
+    it('deduplikovaná stránka: stačí cena kopie (zdroj jen vlastní, z API)', async () => {
+      pages([{ id: 'page-1', hash: 'same' }]);
+      mockDocumentFindMany.mockResolvedValue([
+        { hash: 'same', model: 'claude-opus-5-5', inputTokens: 1000, outputTokens: 500 },
+      ]);
+      const checkBalance = await checkBalanceMock();
+
+      const res = await POST(makeRequest({ pageIds: ['page-1'] }));
+
+      expect(res.status).toBe(200);
+      expect(checkBalance.mock.calls[0]![1]).toBe(creditsForUsage('claude-opus-5-5', 1000, 500));
+      expect(mockDocumentFindMany.mock.calls[0]![0].where).toMatchObject({
+        hash: { in: ['same'] },
+        page: { userId: 'test-user-id', status: { not: 'archived' } },
+        model: { notIn: ['claude-cli', 'claude-agent-cli'] },
+        outputTokens: { gt: 0 },
+      });
+    });
+
+    it('regenerace stránky s dokumentem potřebuje rezervaci OCR', async () => {
+      pages([{ id: 'page-1', document: { translations: [{ language: 'cs' }] } }]);
+      const checkBalance = await checkBalanceMock();
+
+      await POST(makeRequest({ pageIds: ['page-1'], regenerate: true }));
+
+      expect(checkBalance.mock.calls[0]![1]).toBe(OCR_PAGE);
+    });
   });
 });

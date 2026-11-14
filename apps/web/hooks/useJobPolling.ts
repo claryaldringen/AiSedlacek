@@ -5,6 +5,8 @@ import { apiFetch } from '@/lib/infrastructure/api-client';
 
 interface JobStatus {
   status: string;
+  /** Kód chyby jobu (JobErrorCode) pro lokalizovanou hlášku. */
+  errorCode?: string | null;
   currentStep?: string;
   completedPages?: number;
   totalPages?: number;
@@ -24,6 +26,12 @@ export function useJobPolling(): {
       intervalMs?: number;
       onStep?: (step: string) => void;
       onProgress?: (completed: number, total: number) => void;
+      /**
+       * Kód chyby ukončeného jobu: u `error` (např. `insufficient_credit`,
+       * `credit_busy`) i u `completed`, který část stránek přeskočil (kód nese
+       * důvod, např. nedostatek kreditu). Hlášku vybere `jobOutcomeMessageKey`.
+       */
+      onErrorCode?: (errorCode: string | null) => void;
     },
   ) => Promise<JobOutcome>;
   stopPolling: () => void;
@@ -57,6 +65,7 @@ export function useJobPolling(): {
         intervalMs?: number;
         onStep?: (step: string) => void;
         onProgress?: (completed: number, total: number) => void;
+        onErrorCode?: (errorCode: string | null) => void;
       },
     ): Promise<'completed' | 'error' | 'cancelled'> => {
       const ms = options?.intervalMs ?? 2000;
@@ -94,6 +103,10 @@ export function useJobPolling(): {
               data.status === 'error' ||
               data.status === 'cancelled'
             ) {
+              // Kód i u `completed` – doběhlý job mohl část stránek přeskočit (kredit)
+              if (data.status === 'error' || data.status === 'completed') {
+                options?.onErrorCode?.(data.errorCode ?? null);
+              }
               settle(data.status as 'completed' | 'error' | 'cancelled');
             }
           } catch {
