@@ -120,15 +120,27 @@ pg_env_from_url "$DATABASE_URL" "$PGPASS_DIR"
 # Zděděná PGPASSWORD (např. z prostředí jiné aplikace na sdíleném VPS) by v libpq
 # měla přednost před PGPASSFILE – příkazy ji proto výslovně ruší (`env -u`).
 pg_run() { env -u PGPASSWORD "${PG_ENV[@]}" "$@"; }
-# Všechny nástroje Postgresu z jedné (nejnovější nainstalované) verze. pg_wrapper
-# na Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP bere nejnovějšího
-# klienta (17), pg_restore čtoucí jen soubor verzi lokálního clusteru (16) – a ta
-# dump novější verze nepřečte („unsupported version (1.16) in file header").
-# Bez /usr/lib/postgresql (vývoj mimo Debian) se použije PATH.
-PG_BIN=""
-if pg_latest="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$pg_latest" ]; then
-  PG_BIN="$pg_latest/"
-fi
+# Nástroje Postgresu ve verzi SERVERU (major ze server_version_num). pg_wrapper na
+# Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP nejnovějšího klienta (17),
+# pg_restore ze souboru verzi lokálního clusteru (16), která dump verze 17 nepřečte
+# („unsupported version (1.16) in file header"); pg_restore 17 zase do serveru 16
+# obnovuje s chybou (`SET transaction_timeout`). Ve verzi serveru dump přečte
+# i výchozí `pg_restore` a obnova projde čistě. Chybí-li nástroje verze serveru,
+# vezme se nejnovější nainstalovaná verze; mimo Debian (bez /usr/lib/postgresql) PATH.
+pg_bin_for_server() { # $1 = server_version_num (např. 160015)
+  local major="" dir=""
+  if [[ "$1" =~ ^[0-9]{5,}$ ]]; then major=$(($1 / 10000)); fi
+  if [ -n "$major" ] && [ -x "/usr/lib/postgresql/$major/bin/pg_dump" ] &&
+    [ -x "/usr/lib/postgresql/$major/bin/pg_restore" ]; then
+    printf '%s/' "/usr/lib/postgresql/$major/bin"
+    return 0
+  fi
+  if dir="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$dir" ]; then
+    printf '%s/' "$dir"
+  fi
+}
+pg_server_num="$(pg_run psql -X -tAc 'SHOW server_version_num' 2>/dev/null || true)"
+PG_BIN="$(pg_bin_for_server "$pg_server_num")"
 
 echo "=== Checking migration history ==="
 # Pojistka ještě před npm ci a buildem (ty přepisují běžící aplikaci): historie

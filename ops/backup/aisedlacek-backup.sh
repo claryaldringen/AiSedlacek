@@ -101,15 +101,27 @@ fi
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
-# Všechny nástroje Postgresu z jedné (nejnovější nainstalované) verze. pg_wrapper
-# na Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP bere nejnovějšího
-# klienta (17), pg_restore čtoucí jen soubor verzi lokálního clusteru (16) – a ta
-# dump novější verze nepřečte („unsupported version (1.16) in file header"), takže
-# by ověření každou noc selhalo a dump se zahodil. Stejně jako deploy.sh.
-PG_BIN=""
-if pg_latest="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$pg_latest" ]; then
-  PG_BIN="$pg_latest/"
-fi
+# Nástroje Postgresu ve verzi SERVERU (major ze server_version_num). pg_wrapper na
+# Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP nejnovějšího klienta (17),
+# pg_restore ze souboru verzi lokálního clusteru (16), která dump verze 17 nepřečte
+# („unsupported version (1.16) in file header"); pg_restore 17 zase do serveru 16
+# obnovuje s chybou (`SET transaction_timeout`). Ve verzi serveru dump přečte
+# i výchozí `pg_restore` a obnova projde čistě. Chybí-li nástroje verze serveru,
+# vezme se nejnovější nainstalovaná verze; mimo Debian (bez /usr/lib/postgresql) PATH.
+pg_bin_for_server() { # $1 = server_version_num (např. 160015)
+  local major="" dir=""
+  if [[ "$1" =~ ^[0-9]{5,}$ ]]; then major=$(($1 / 10000)); fi
+  if [ -n "$major" ] && [ -x "/usr/lib/postgresql/$major/bin/pg_dump" ] &&
+    [ -x "/usr/lib/postgresql/$major/bin/pg_restore" ]; then
+    printf '%s/' "/usr/lib/postgresql/$major/bin"
+    return 0
+  fi
+  if dir="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$dir" ]; then
+    printf '%s/' "$dir"
+  fi
+}
+pg_server_num="$(env -u PGPASSWORD "${pg_env[@]}" psql -X -tAc 'SHOW server_version_num' 2>/dev/null || true)"
+PG_BIN="$(pg_bin_for_server "$pg_server_num")"
 
 # Ověření dumpu plným přečtením: pg_restore --list čte jen obsah (TOC) na
 # začátku souboru, poškozená nebo useknutá data za ním by prošla. Výstup do

@@ -106,7 +106,7 @@ Kontrola i záloha běží před `npm ci`, takže když selžou, běžící apli
 netknutá. Build běží před migrací, takže neprošlý build nechá databázi netknutou
 – běžící aplikace ale může být rozbitá (`npm ci` a build už přepsaly soubory). Rollback:
 `DEPLOY_REF=<předchozí commit> /opt/AiSedlacek/deploy.sh`; pokud už proběhla migrace,
-je potřeba obnovit pre-deploy dump (`pg_restore`) – dump vzniká před buildem, takže
+je potřeba obnovit pre-deploy dump ([Obnova DB ze zálohy](#obnova-db-ze-zálohy)) – dump vzniká před buildem, takže
 zápisy z doby buildu v něm nejsou: po obnově dosrovnat platby (Stripe dashboard, Fio
 výpis) a zkontrolovat OCR joby dokončené během deploye. Ponechává se 10 posledních
 pre-deploy dumpů; dump se zapisuje jako `*.dump.partial` a na `*.dump` se přejmenuje až
@@ -279,10 +279,31 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
   jen na stejném disku a uploady se nezálohují.
 - **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
   `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
-- Obnova: `sudo -u postgres /usr/lib/postgresql/17/bin/pg_restore --clean --if-exists -d
-  aisedlacek < <soubor.dump>` (dumpy patří rootovi s právy 600, proto přes stdin; obnovu je
-  dobré si jednou vyzkoušet na kopii DB). **Verze `pg_restore` musí být aspoň taková jako
-  `pg_dump`, který dump vytvořil** – viz [Verze nástrojů Postgresu](#verze-nástrojů-postgresu).
+- Obnova – viz [Obnova DB ze zálohy](#obnova-db-ze-zálohy).
+
+### Obnova DB ze zálohy
+
+Vždy do **čisté** DB, nikdy `--clean` přes běžící zmigrovanou DB: `--clean` maže jen
+objekty z dumpu, tabulky z novějších migrací (s FK na `User`) by zůstaly, `_prisma_migrations`
+by se vrátila a další deploy by spadl na „relation already exists". Původní DB se jen
+přejmenuje – nic se neztratí.
+
+```bash
+cd /opt/AiSedlacek
+pm2 stop ai-sedlacek-web ai-sedlacek-worker        # během obnovy nic nezapisuje
+sudo -u postgres psql -X -c 'ALTER DATABASE aisedlacek RENAME TO aisedlacek_pred_obnovou_RRRRMMDD'
+sudo -u postgres createdb -O <uživatel z DATABASE_URL> aisedlacek
+sudo -u postgres pg_restore --exit-on-error --single-transaction -d aisedlacek < <soubor.dump>
+# kód odpovídající dumpu: DEPLOY_REF=<commit z doby dumpu> ./deploy.sh  (jinak jen:)
+pm2 start ecosystem.config.cjs --update-env
+```
+
+Dumpy patří rootovi s právy 600, proto přes stdin. Obnovu je dobré si jednou vyzkoušet na
+kopii DB. **Výjimka:** pre-deploy dumpy z 2026-11-14 (deploy `f39a9b9`, soubory
+`pre-deploy-20261114-1646*.dump`) jsou ve formátu Postgresu 17 – výchozí `pg_restore` 16 je
+nepřečte; `/usr/lib/postgresql/17/bin/pg_restore` je obnoví, ale skončí jednou chybou
+`unrecognized configuration parameter "transaction_timeout"` (neškodná) a nejde s ním
+`--single-transaction`/`--exit-on-error`.
 
 ### Ruční přístup k DB
 
@@ -294,13 +315,18 @@ v `ps` každý uživatel.
 ### Verze nástrojů Postgresu
 
 Na serveru je cluster Postgres 16 a klientské nástroje 16 i 17. `/usr/bin/pg_*` je
-`pg_wrapper`, který verzi vybírá podle cíle: přes TCP (`deploy.sh`, záloha) bere
-nejnovějšího klienta (17), přes lokální socket a u `pg_restore` ze souboru verzi clusteru
+`pg_wrapper`, který verzi vybírá podle cíle a volání – `pg_dump` s připojením přes
+proměnné `PGHOST` bere nejnovějšího klienta (17), `pg_restore` ze souboru verzi clusteru
 (16). Dump z `pg_dump` 17 ale `pg_restore` 16 nepřečte (`unsupported version (1.16) in file
-header`). `deploy.sh` i zálohovací skript proto berou všechny nástroje z nejnovější
-nainstalované verze (`/usr/lib/postgresql/<nejvyšší>/bin`); všechny dumpy v
-`/var/backups/aisedlacek` jsou ve formátu verze 17. Ručně vždy použít `pg_restore` stejné
-nebo vyšší verze (`/usr/lib/postgresql/17/bin/pg_restore`).
+header`) a `pg_restore` 17 do serveru 16 obnovuje s chybou (`transaction_timeout`).
+`deploy.sh` i zálohovací skript proto berou nástroje **ve verzi serveru**
+(`SHOW server_version_num` → `/usr/lib/postgresql/<major>/bin`, záložně nejnovější
+nainstalovanou): dumpy jsou ve formátu verze serveru a přečte je i výchozí
+`sudo -u postgres pg_restore`. Po upgradu clusteru se verze posune sama.
+
+**Rollback na commity `f39a9b9` až před touto opravou** (2026-11-14): jejich `deploy.sh`
+spadne na ověření dumpu (`pg_dump` 17 / `pg_restore` 16). Spustit s nástroji verze serveru:
+`PATH=/usr/lib/postgresql/16/bin:$PATH DEPLOY_REF=<commit> /opt/AiSedlacek/deploy.sh`.
 
 ## Caddy
 
