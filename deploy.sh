@@ -120,6 +120,15 @@ pg_env_from_url "$DATABASE_URL" "$PGPASS_DIR"
 # Zděděná PGPASSWORD (např. z prostředí jiné aplikace na sdíleném VPS) by v libpq
 # měla přednost před PGPASSFILE – příkazy ji proto výslovně ruší (`env -u`).
 pg_run() { env -u PGPASSWORD "${PG_ENV[@]}" "$@"; }
+# Všechny nástroje Postgresu z jedné (nejnovější nainstalované) verze. pg_wrapper
+# na Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP bere nejnovějšího
+# klienta (17), pg_restore čtoucí jen soubor verzi lokálního clusteru (16) – a ta
+# dump novější verze nepřečte („unsupported version (1.16) in file header").
+# Bez /usr/lib/postgresql (vývoj mimo Debian) se použije PATH.
+PG_BIN=""
+if pg_latest="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$pg_latest" ]; then
+  PG_BIN="$pg_latest/"
+fi
 
 echo "=== Checking migration history ==="
 # Pojistka ještě před npm ci a buildem (ty přepisují běžící aplikaci): historie
@@ -129,7 +138,7 @@ echo "=== Checking migration history ==="
 # „already exists"), nebo znovu spustil starou datovou migraci.
 # Jednorázový baseline: docs/deployment.md – Kontrola historie migrací.
 # -X: bez ~/.psqlrc (např. \timing by změnil výstup a kontrolu tiše přeskočil).
-psql_q() { pg_run psql -X -v ON_ERROR_STOP=1 -tAc "$1"; }
+psql_q() { pg_run "${PG_BIN}psql" -X -v ON_ERROR_STOP=1 -tAc "$1"; }
 db_has_tables="$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")"
 case "$db_has_tables" in
   t | f) ;;
@@ -182,10 +191,10 @@ mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 dump="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
 DUMP_PARTIAL="$dump.partial"
-pg_run pg_dump --format=custom --file="$DUMP_PARTIAL"
+pg_run "${PG_BIN}pg_dump" --format=custom --file="$DUMP_PARTIAL"
 # Useknutý dump (plný disk) neprojde – deploy skončí dřív, než sáhne na aplikaci.
 # Plné čtení, ne `--list`: TOC je na začátku souboru, `--list` useknutí nepozná.
-pg_restore --file=/dev/null "$DUMP_PARTIAL"
+"${PG_BIN}pg_restore" --file=/dev/null "$DUMP_PARTIAL"
 mv "$DUMP_PARTIAL" "$dump"
 DUMP_PARTIAL=""
 echo "Pre-deploy dump: $dump ($(du -h "$dump" | cut -f1))"

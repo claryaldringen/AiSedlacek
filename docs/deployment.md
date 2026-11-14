@@ -279,9 +279,10 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
   jen na stejném disku a uploady se nezálohují.
 - **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
   `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
-- Obnova: `sudo -u postgres pg_restore --clean --if-exists -d aisedlacek < <soubor.dump>`
-  (dumpy patří rootovi s právy 600, proto přes stdin; obnovu je dobré si jednou vyzkoušet
-  na kopii DB).
+- Obnova: `sudo -u postgres /usr/lib/postgresql/17/bin/pg_restore --clean --if-exists -d
+  aisedlacek < <soubor.dump>` (dumpy patří rootovi s právy 600, proto přes stdin; obnovu je
+  dobré si jednou vyzkoušet na kopii DB). **Verze `pg_restore` musí být aspoň taková jako
+  `pg_dump`, který dump vytvořil** – viz [Verze nástrojů Postgresu](#verze-nástrojů-postgresu).
 
 ### Ruční přístup k DB
 
@@ -289,6 +290,17 @@ Na serveru vždy přes peer autentizaci lokálního socketu – `sudo -u postgre
 aisedlacek`, `sudo -u postgres pg_dump …`. Nikdy nepředávat `DATABASE_URL` (s heslem)
 jako argument `psql`/`pg_dump`/`pg_restore`: server je sdílený a argumenty procesů vidí
 v `ps` každý uživatel.
+
+### Verze nástrojů Postgresu
+
+Na serveru je cluster Postgres 16 a klientské nástroje 16 i 17. `/usr/bin/pg_*` je
+`pg_wrapper`, který verzi vybírá podle cíle: přes TCP (`deploy.sh`, záloha) bere
+nejnovějšího klienta (17), přes lokální socket a u `pg_restore` ze souboru verzi clusteru
+(16). Dump z `pg_dump` 17 ale `pg_restore` 16 nepřečte (`unsupported version (1.16) in file
+header`). `deploy.sh` i zálohovací skript proto berou všechny nástroje z nejnovější
+nainstalované verze (`/usr/lib/postgresql/<nejvyšší>/bin`); všechny dumpy v
+`/var/backups/aisedlacek` jsou ve formátu verze 17. Ručně vždy použít `pg_restore` stejné
+nebo vyšší verze (`/usr/lib/postgresql/17/bin/pg_restore`).
 
 ## Caddy
 

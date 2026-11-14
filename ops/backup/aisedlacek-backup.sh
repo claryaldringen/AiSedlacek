@@ -101,11 +101,22 @@ fi
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
+# Všechny nástroje Postgresu z jedné (nejnovější nainstalované) verze. pg_wrapper
+# na Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP bere nejnovějšího
+# klienta (17), pg_restore čtoucí jen soubor verzi lokálního clusteru (16) – a ta
+# dump novější verze nepřečte („unsupported version (1.16) in file header"), takže
+# by ověření každou noc selhalo a dump se zahodil. Stejně jako deploy.sh.
+PG_BIN=""
+if pg_latest="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$pg_latest" ]; then
+  PG_BIN="$pg_latest/"
+fi
+
 # Ověření dumpu plným přečtením: pg_restore --list čte jen obsah (TOC) na
 # začátku souboru, poškozená nebo useknutá data za ním by prošla. Výstup do
 # /dev/null projde celý soubor včetně dat všech tabulek (bez připojení k DB).
+# Chybový výstup pg_restore jde do journalu (důvod selhání), jen stdout se zahazuje.
 verify_dump() {
-  pg_restore --file=/dev/null "$1" >/dev/null 2>&1
+  "${PG_BIN}pg_restore" --file=/dev/null "$1" >/dev/null
 }
 
 # Rozepsané dumpy po přerušeném běhu (SIGKILL, pád serveru, restart) na začátku
@@ -120,7 +131,7 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'aisedlacek-*.dump.partial' -delete
 # před PGPASSFILE – záloha by pak padala na „password authentication failed".
 dump="$BACKUP_DIR/aisedlacek-$(date +%Y%m%d-%H%M%S).dump"
 partial="$dump.partial"
-env -u PGPASSWORD "${pg_env[@]}" pg_dump --format=custom --file="$partial"
+env -u PGPASSWORD "${pg_env[@]}" "${PG_BIN}pg_dump" --format=custom --file="$partial"
 if ! verify_dump "$partial"; then
   echo "CHYBA: dump $partial nejde celý přečíst (pg_restore) – zahazuji ho" >&2
   exit 1
