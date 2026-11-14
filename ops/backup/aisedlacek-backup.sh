@@ -101,11 +101,35 @@ fi
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 
+# Nástroje Postgresu ve verzi SERVERU (major ze server_version_num). pg_wrapper na
+# Debianu/Ubuntu vybírá verzi podle cíle: pg_dump přes TCP nejnovějšího klienta (17),
+# pg_restore ze souboru verzi lokálního clusteru (16), která dump verze 17 nepřečte
+# („unsupported version (1.16) in file header"); pg_restore 17 zase do serveru 16
+# obnovuje s chybou (`SET transaction_timeout`). Ve verzi serveru dump přečte
+# i výchozí `pg_restore` a obnova projde čistě. Chybí-li nástroje verze serveru,
+# vezme se nejnovější nainstalovaná verze; mimo Debian (bez /usr/lib/postgresql) PATH.
+pg_bin_for_server() { # $1 = server_version_num (např. 160015)
+  local major="" dir=""
+  if [[ "$1" =~ ^[0-9]{5,}$ ]]; then major=$(($1 / 10000)); fi
+  if [ -n "$major" ] && [ -x "/usr/lib/postgresql/$major/bin/pg_dump" ] &&
+    [ -x "/usr/lib/postgresql/$major/bin/pg_restore" ]; then
+    printf '%s/' "/usr/lib/postgresql/$major/bin"
+    return 0
+  fi
+  if dir="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)" && [ -n "$dir" ]; then
+    printf '%s/' "$dir"
+  fi
+}
+pg_server_num="$(env -u PGPASSWORD "${pg_env[@]}" psql -X -tAc 'SHOW server_version_num' 2>/dev/null || true)"
+PG_BIN="$(pg_bin_for_server "$pg_server_num")"
+echo "Nástroje Postgresu: ${PG_BIN:-PATH} (server ${pg_server_num:-neznámý})"
+
 # Ověření dumpu plným přečtením: pg_restore --list čte jen obsah (TOC) na
 # začátku souboru, poškozená nebo useknutá data za ním by prošla. Výstup do
 # /dev/null projde celý soubor včetně dat všech tabulek (bez připojení k DB).
+# Chybový výstup pg_restore jde do journalu (důvod selhání), jen stdout se zahazuje.
 verify_dump() {
-  pg_restore --file=/dev/null "$1" >/dev/null 2>&1
+  "${PG_BIN}pg_restore" --file=/dev/null "$1" >/dev/null
 }
 
 # Rozepsané dumpy po přerušeném běhu (SIGKILL, pád serveru, restart) na začátku
@@ -120,7 +144,7 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'aisedlacek-*.dump.partial' -delete
 # před PGPASSFILE – záloha by pak padala na „password authentication failed".
 dump="$BACKUP_DIR/aisedlacek-$(date +%Y%m%d-%H%M%S).dump"
 partial="$dump.partial"
-env -u PGPASSWORD "${pg_env[@]}" pg_dump --format=custom --file="$partial"
+env -u PGPASSWORD "${pg_env[@]}" "${PG_BIN}pg_dump" --format=custom --file="$partial"
 if ! verify_dump "$partial"; then
   echo "CHYBA: dump $partial nejde celý přečíst (pg_restore) – zahazuji ho" >&2
   exit 1
