@@ -57,7 +57,8 @@ server a teprve pak spustit nový skript:
 1. `cd /opt/AiSedlacek && git status` – lokálně upravený `package-lock.json`
    vrátit (`git checkout -- package-lock.json`), jinak `git pull --ff-only` spadne.
 2. Ruční záloha mimo rotovaný adresář (denní zálohy mažou `*.dump` starší 14 dní):
-   `install -d -m 700 /var/backups/aisedlacek-manual && (umask 077; pg_dump --format=custom --file=/var/backups/aisedlacek-manual/pre-2026-10.dump "<DATABASE_URL bez ?schema>")`
+   `install -d -m 700 /var/backups/aisedlacek-manual && (umask 077; sudo -u postgres pg_dump --format=custom aisedlacek > /var/backups/aisedlacek-manual/pre-2026-10.dump)`
+   (peer autentizace přes lokální socket – heslo DB není v argumentech, viz [Ruční přístup k DB](#ruční-přístup-k-db))
    (dump obsahuje hashe hesel a OAuth tokeny – jen pro roota).
 3. `pm2 stop ai-sedlacek-worker` (joby počkají ve frontě – worker běží přes tsx přímo
    ze zdrojáků a s novým kódem nad starými `node_modules` by padal; `deploy.sh` ho
@@ -108,7 +109,14 @@ netknutá. Build běží před migrací, takže neprošlý build nechá databáz
 je potřeba obnovit pre-deploy dump (`pg_restore`) – dump vzniká před buildem, takže
 zápisy z doby buildu v něm nejsou: po obnově dosrovnat platby (Stripe dashboard, Fio
 výpis) a zkontrolovat OCR joby dokončené během deploye. Ponechává se 10 posledních
-pre-deploy dumpů.
+pre-deploy dumpů; dump se zapisuje jako `*.dump.partial` a na `*.dump` se přejmenuje až
+po úspěšném `pg_dump` a plném přečtení (`pg_restore --file=/dev/null`), takže useknutý dump
+deploy zastaví a nezůstane po něm nic.
+
+`deploy.sh` předává `psql` a `pg_dump` heslo DB přes dočasný `.pgpass`, ne v argumentech
+(na sdíleném VPS by ho jinak viděl v `ps` každý uživatel). **Rollback na commit starší než
+tato oprava** (2026-11) ale spustí `deploy.sh` toho commitu, který heslo v argumentech
+předává – po dobu takového rollbacku je heslo v `ps` vidět.
 
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker
 > znovu zařadí. Deployovat ideálně ve chvíli, kdy neběží velké OCR dávky.
@@ -224,8 +232,7 @@ stav produkční historie není ověřený:
 
 ```bash
 cd /opt/AiSedlacek
-PG_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')"; PG_URL="${PG_URL%%\?*}"
-psql "$PG_URL" -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY 1'
+sudo -u postgres psql -X -d aisedlacek -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY 1'
 git pull --ff-only origin main && ls packages/db/prisma/migrations
 ```
 
@@ -234,9 +241,10 @@ git pull --ff-only origin main && ls packages/db/prisma/migrations
 - **Datovou migraci `20260325120000_backfill_email_verified` nespouštět znovu** – pokud
   v historii chybí, jen ji označit (`resolve --applied`); jinak by označila všechny
   dosud neověřené e-mailové registrace jako ověřené.
-- Kontrola driftu (jen čtení): `npx prisma migrate diff --from-url "$PG_URL"
-  --to-schema-datamodel packages/db/prisma/schema.prisma --script` – po baseline má
-  být prázdný výstup (verze z 2026-10 nepřidává žádnou novou migraci).
+- Kontrola driftu (jen čtení): `DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//')" npx prisma migrate diff --from-schema-datasource packages/db/prisma/schema.prisma
+  --to-schema-datamodel packages/db/prisma/schema.prisma --script` (URL jde Prismě
+  v prostředí, ne v argumentech) – po baseline má být prázdný výstup (verze z 2026-10
+  nepřidává žádnou novou migraci).
 - Teprve pak `./deploy.sh`.
 
 ## Zálohy
@@ -271,8 +279,16 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
   jen na stejném disku a uploady se nezálohují.
 - **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
   `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
-- Obnova: `pg_restore --clean --if-exists -d "${DATABASE_URL%%\?*}" <soubor.dump>`
-  (obnovu je dobré si jednou vyzkoušet na kopii DB).
+- Obnova: `sudo -u postgres pg_restore --clean --if-exists -d aisedlacek < <soubor.dump>`
+  (dumpy patří rootovi s právy 600, proto přes stdin; obnovu je dobré si jednou vyzkoušet
+  na kopii DB).
+
+### Ruční přístup k DB
+
+Na serveru vždy přes peer autentizaci lokálního socketu – `sudo -u postgres psql -X -d
+aisedlacek`, `sudo -u postgres pg_dump …`. Nikdy nepředávat `DATABASE_URL` (s heslem)
+jako argument `psql`/`pg_dump`/`pg_restore`: server je sdílený a argumenty procesů vidí
+v `ps` každý uživatel.
 
 ## Caddy
 
