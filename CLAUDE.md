@@ -70,7 +70,7 @@ worker odmítne start) a agentní tok CLI `ais prompt` → `ais submit` (`POST /
 
 ### Klíčové vlastnosti UI
 
-- **Workspaces** – domácí, sdílené (invite kód) a veřejný; kolekce (svazky) se do nich zařazují
+- **Workspaces** – domácí, sdílené (invite kód) a veřejný; kolekce (svazky) se do nich zařazují. Vlastník sdíleného workspace vidí a mění pozvánkový kód a odebírá členy (s rotací kódu), člen může workspace opustit; svazky a stránky odebraného člena z workspace zmizí (data zůstanou jemu)
 - **Správa svazků** – drag & drop, grid/list, klávesové zkratky, hromadné OCR s průběhem
 - **Kontext svazku** – generování AI, import z URL, oprava kontextů stránek, překlad
 - **Inline editace** – markdown editor; chyby uložení se zobrazí a editor zůstane otevřený
@@ -120,7 +120,7 @@ v `lib/infrastructure/authz.ts`, u stránek/dokumentů přes `page.userId`).
 | documents | `[id]` (GET/PATCH/DELETE), `[id]/retranslate`, `[id]/reparse`, `[id]/versions`, `[id]/chat` (SSE) |
 | collections | `GET` (`?workspaceId=` povinné)/`POST`, `[id]`, `[id]/generate-context`, `[id]/fetch-context`, `[id]/translate-context`, `[id]/fix-document-contexts`, `[id]/extract-metadata` |
 | billing | `balance`, `checkout`, `webhook` (Stripe, ověřený podpis), `fio-check`, `qr` |
-| ostatní | `workspaces`, `workspaces/[id]`, `workspaces/[id]/items`, `workspaces/join`, `public/[slug]`, `user/locale`, `prompts`, `images/[...path]` (legacy URL) |
+| ostatní | `workspaces`, `workspaces/[id]`, `workspaces/[id]/items`, `workspaces/[id]/members/[userId]` (DELETE – odebrání člena / opuštění), `workspaces/[id]/invite-code` (POST – nový kód), `workspaces/join`, `public/[slug]`, `user/locale`, `prompts`, `images/[...path]` (legacy URL) |
 
 Uploady servíruje v produkci přímo Caddy na `/uploads/*` (viz [docs/caddy-uploads.md](docs/caddy-uploads.md)).
 Server-side fetch uživatelských URL vždy přes `safeFetch` (`lib/infrastructure/safe-fetch.ts` – SSRF ochrana).

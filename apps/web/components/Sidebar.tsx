@@ -64,6 +64,10 @@ interface SidebarProps {
   selectedWorkspaceId: string | null;
   onWorkspaceSelect: (id: string) => void;
   onCreateWorkspace: () => void;
+  /** Připojení ke sdílenému workspace pozvánkovým kódem. */
+  onJoinWorkspace?: () => void;
+  /** Správa sdíleného workspace (členové, pozvánka, opuštění). */
+  onManageWorkspace?: (id: string) => void;
   loadingWorkspaces: boolean;
 }
 
@@ -133,28 +137,55 @@ function WorkspaceButton({
   ws,
   selected,
   onClick,
+  onManage,
 }: {
   ws: Workspace;
   selected: boolean;
   onClick: () => void;
+  onManage?: () => void;
 }): React.JSX.Element {
   const t = useTranslations('sidebar');
   const displayName =
     ws.type === 'home' ? t('myWorkspace') : ws.type === 'public' ? t('publicDocuments') : ws.name;
   return (
-    <button
-      onClick={onClick}
-      className={[
-        'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
-        selected
-          ? 'bg-slate-200 font-medium text-slate-900'
-          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-      ].join(' ')}
-    >
-      <WorkspaceIcon type={ws.type} />
-      <span className="truncate">{displayName}</span>
-      <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
-    </button>
+    <div className="group relative">
+      <button
+        onClick={onClick}
+        className={[
+          'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+          onManage ? 'pr-8' : '',
+          selected
+            ? 'bg-slate-200 font-medium text-slate-900'
+            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+        ].join(' ')}
+      >
+        <WorkspaceIcon type={ws.type} />
+        <span className="truncate">{displayName}</span>
+        <span className="ml-auto shrink-0 text-xs text-slate-400">{ws._count.items}</span>
+      </button>
+      {onManage && (
+        <button
+          onClick={onManage}
+          title={t('manageWorkspace')}
+          aria-label={t('manageWorkspace')}
+          className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -163,6 +194,8 @@ export function Sidebar({
   selectedWorkspaceId,
   onWorkspaceSelect,
   onCreateWorkspace,
+  onJoinWorkspace,
+  onManageWorkspace,
   loadingWorkspaces,
 }: SidebarProps): React.JSX.Element {
   const { data: session } = useSession();
@@ -254,21 +287,45 @@ export function Sidebar({
               <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                 {t('shared')}
               </span>
-              <button
-                onClick={onCreateWorkspace}
-                className="rounded p-0.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
-                title={t('newSharedWorkspace')}
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
+              <div className="flex items-center gap-0.5">
+                {onJoinWorkspace && (
+                  <button
+                    onClick={onJoinWorkspace}
+                    className="rounded p-0.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                    title={t('joinSharedWorkspace')}
+                    aria-label={t('joinSharedWorkspace')}
+                  >
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"
+                      />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={onCreateWorkspace}
+                  className="rounded p-0.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                  title={t('newSharedWorkspace')}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-              </button>
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </button>
+              </div>
             </div>
             {sharedWorkspaces.length === 0 && (
               <p className="px-2 py-1 text-xs text-slate-400">{t('noSharedWorkspaces')}</p>
@@ -279,6 +336,7 @@ export function Sidebar({
                 ws={ws}
                 selected={selectedWorkspaceId === ws.id}
                 onClick={() => onWorkspaceSelect(ws.id)}
+                onManage={onManageWorkspace ? () => onManageWorkspace(ws.id) : undefined}
               />
             ))}
           </>

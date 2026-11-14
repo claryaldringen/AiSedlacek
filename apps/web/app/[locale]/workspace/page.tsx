@@ -21,6 +21,8 @@ import { useWorkspaceKeyboard } from '@/hooks/useWorkspaceKeyboard';
 import { CollectionMetadataEditor } from '@/components/CollectionMetadataEditor';
 import { CreateCollectionDialog } from '@/components/CreateCollectionDialog';
 import { CreateWorkspaceDialog } from '@/components/CreateWorkspaceDialog';
+import { JoinWorkspaceDialog } from '@/components/JoinWorkspaceDialog';
+import { ManageWorkspaceDialog } from '@/components/ManageWorkspaceDialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
@@ -174,6 +176,8 @@ function WorkspaceContent(): React.JSX.Element {
 
   // Create workspace dialog
   const [createWorkspaceDialogOpen, setCreateWorkspaceDialogOpen] = useState(false);
+  const [joinWorkspaceDialogOpen, setJoinWorkspaceDialogOpen] = useState(false);
+  const [manageWorkspaceId, setManageWorkspaceId] = useState<string | null>(null);
 
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -1121,6 +1125,8 @@ function WorkspaceContent(): React.JSX.Element {
       selectedWorkspaceId={selectedWorkspaceId}
       onWorkspaceSelect={handleWorkspaceSelect}
       onCreateWorkspace={() => setCreateWorkspaceDialogOpen(true)}
+      onJoinWorkspace={() => setJoinWorkspaceDialogOpen(true)}
+      onManageWorkspace={setManageWorkspaceId}
       loadingWorkspaces={loadingWorkspaces}
     >
       {/* Toolbar */}
@@ -1712,6 +1718,34 @@ function WorkspaceContent(): React.JSX.Element {
         onCreated={(workspace) => {
           setWorkspaces((prev) => [...prev, workspace]);
           handleWorkspaceSelect(workspace.id);
+        }}
+      />
+
+      {/* Join shared workspace by invite code */}
+      <JoinWorkspaceDialog
+        open={joinWorkspaceDialogOpen}
+        onClose={() => setJoinWorkspaceDialogOpen(false)}
+        onJoined={(workspace) => {
+          void loadWorkspaces();
+          handleWorkspaceSelect(workspace.id);
+        }}
+      />
+
+      {/* Manage shared workspace: members, invite code, leave */}
+      <ManageWorkspaceDialog
+        workspaceId={manageWorkspaceId}
+        onClose={() => setManageWorkspaceId(null)}
+        onChanged={() => {
+          void loadWorkspaces();
+          if (manageWorkspaceId === selectedWorkspaceId) void loadCollections();
+        }}
+        onLeft={() => {
+          const left = manageWorkspaceId;
+          setManageWorkspaceId(null);
+          setWorkspaces((prev) => prev.filter((ws) => ws.id !== left));
+          void loadWorkspaces();
+          const home = workspaces.find((ws) => ws.type === 'home');
+          if (left === selectedWorkspaceId && home) handleWorkspaceSelect(home.id);
         }}
       />
 

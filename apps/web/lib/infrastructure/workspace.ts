@@ -66,4 +66,41 @@ export function generateInviteCode(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 }
 
+/**
+ * Odebere člena ze sdíleného workspace (vyhození vlastníkem i odchod člena).
+ *
+ * V jedné transakci:
+ *  - z workspace zmizí svazky a stránky, které do něj člen zařadil (patří jemu) –
+ *    po odchodu je už nemůže spravovat, takže nesmí zůstat čitelné pro ostatní;
+ *    samotná data se nemažou (zůstávají v jeho domovském workspace),
+ *  - zruší se členství,
+ *  - při `rotateInvite` se vygeneruje nový pozvánkový kód – jinak by se vyhozený
+ *    člen mohl starým kódem hned vrátit.
+ *
+ * @returns nový pozvánkový kód (jen při `rotateInvite`)
+ */
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberUserId: string,
+  options: { rotateInvite: boolean },
+): Promise<{ inviteCode: string | null; removedItems: number }> {
+  return prisma.$transaction(async (tx) => {
+    const { count: removedItems } = await tx.workspaceItem.deleteMany({
+      where: {
+        workspaceId,
+        OR: [{ collection: { userId: memberUserId } }, { page: { userId: memberUserId } }],
+      },
+    });
+    await tx.workspaceMember.delete({
+      where: { workspaceId_userId: { workspaceId, userId: memberUserId } },
+    });
+    let inviteCode: string | null = null;
+    if (options.rotateInvite) {
+      inviteCode = generateInviteCode();
+      await tx.workspace.update({ where: { id: workspaceId }, data: { inviteCode } });
+    }
+    return { inviteCode, removedItems };
+  });
+}
+
 export { PUBLIC_WORKSPACE_ID };
