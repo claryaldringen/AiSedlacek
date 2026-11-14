@@ -113,6 +113,23 @@ pre-deploy dumpů.
 > **Pozor:** restart workeru přeruší rozpracované joby; po startu je worker
 > znovu zařadí. Deployovat ideálně ve chvíli, kdy neběží velké OCR dávky.
 
+### Verze s rezervací kreditu (otevřené nálezy review 2026-10)
+
+Běžný `deploy.sh`, ruční kroky jen tyto:
+
+- Migrace (všechny jen přidávají tabulky nebo nullable sloupce, data se nemění):
+  `20261114120000_add_credit_hold`, `20261114130000_add_charge_records`,
+  `20261114140000_add_job_error_code`, `20261114150000_add_cli_auth_code`.
+- Web a worker nasazovat spolu (deploy restartuje oba) – worker po startu uvolní
+  rezervace kreditu jobů přerušených deployem.
+- Po deployi znovu nainstalovat zálohovací skript (viz [Zálohy](#zálohy)).
+- Až potom vydat CLI 0.3.0 (viz [CLI 0.3.0](#cli-030--přihlášení-bez-tokenu-v-url)).
+
+Změna chování pro uživatele: před každým voláním modelu se rezervuje **maximální** možná
+cena (celý `max_tokens`), nevyužitá část se po dokončení vrací. Zpracování jedné stránky
+OCR tak potřebuje volných zhruba 30 Kč kreditu (skutečná cena ~3,60 Kč); při nižším
+zůstatku se dávky zmenší, případně zpracování nezačne s hláškou, kolik kreditu chybí.
+
 ## Vydání CLI
 
 CLI (`ai-sedlacek-cli`, příkaz `ais`) vydává na npm workflow
