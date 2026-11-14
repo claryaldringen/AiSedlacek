@@ -29,8 +29,13 @@ describe('ais login – PKCE a jednorázový kód (0.3.0)', () => {
       expect(parseCallback(cb('state=s&code=abc'), 's')).toEqual({ kind: 'code', code: 'abc' });
     });
 
-    it('starší server předá token – CLI ho přijme', () => {
-      expect(parseCallback(cb('state=s&token=tok'), 's')).toEqual({ kind: 'token', token: 'tok' });
+    it('token v callbacku odmítne (podvržený cizí token = login CSRF)', () => {
+      expect(parseCallback(cb('state=s&token=tok'), 's')).toEqual({ kind: 'token-rejected' });
+      // Ani vedle kódu se token nebere – rozhoduje jen kód
+      expect(parseCallback(cb('state=s&token=tok&code=abc'), 's')).toEqual({
+        kind: 'code',
+        code: 'abc',
+      });
     });
 
     it('cizí state se ignoruje (přihlášení nespadne)', () => {
@@ -63,6 +68,8 @@ describe('ais login – PKCE a jednorázový kód (0.3.0)', () => {
         code: 'c'.repeat(64),
         codeVerifier: 'verifier',
       });
+      // Chybové hlášky serveru česky jako zbytek výstupu CLI
+      expect(new Headers(init.headers).get('x-locale')).toBe('cs');
     });
 
     it('chyba serveru → srozumitelná výjimka', async () => {

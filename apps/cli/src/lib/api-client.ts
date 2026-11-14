@@ -20,6 +20,9 @@ export type ApiClient = {
   getRaw(path: string): Promise<Response>;
 };
 
+/** Jazyk chybových hlášek serveru – výstup CLI je česky (hlavička x-locale). */
+export const CLI_LOCALE = 'cs';
+
 // Povolíme jen HTTPS; výjimka je localhost přes HTTP kvůli lokálnímu vývoji.
 export function isSecureBaseUrl(serverUrl: string): boolean {
   try {
@@ -50,6 +53,7 @@ export function createApiClient(serverUrl: string, token: string): ApiClient {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
+        'x-locale': CLI_LOCALE,
         ...init?.headers,
       },
     });

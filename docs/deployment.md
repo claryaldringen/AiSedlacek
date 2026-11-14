@@ -117,13 +117,15 @@ pre-deploy dumpů.
 
 Běžný `deploy.sh`, ruční kroky jen tyto:
 
-- Migrace (všechny jen přidávají tabulky nebo nullable sloupce, data se nemění):
-  `20261114120000_add_credit_hold`, `20261114130000_add_charge_records`,
-  `20261114140000_add_job_error_code`, `20261114150000_add_cli_auth_code`.
+- Migrace (všechny jen přidávají tabulky nebo sloupce – nullable, nebo s výchozí
+  hodnotou –, data se nemění): `20261114120000_add_credit_hold`,
+  `20261114130000_add_charge_records`, `20261114140000_add_job_error_code`,
+  `20261114150000_add_cli_auth_code`, `20261114160000_add_job_credit_wait`.
 - Web a worker nasazovat spolu (deploy restartuje oba) – worker po startu uvolní
   rezervace kreditu jobů přerušených deployem.
 - Po deployi znovu nainstalovat zálohovací skript (viz [Zálohy](#zálohy)).
-- Až potom vydat CLI 0.3.0 (viz [CLI 0.3.0](#cli-030--přihlášení-bez-tokenu-v-url)).
+- **Hned po deployi** vydat CLI 0.3.0 (viz [CLI 0.3.0](#cli-030--přihlášení-bez-tokenu-v-url))
+  – stránka `/auth/cli` od deploye radí uživatelům 0.2.0 aktualizovat.
 
 Změna chování pro uživatele: před každým voláním modelu se rezervuje **maximální** možná
 cena (celý `max_tokens` sazbou primárního modelu), nevyužitá část se po dokončení vrací.
@@ -184,11 +186,13 @@ Verze 0.3.0 (připravená, zatím nevydaná) předává při `ais login` místo 
 jednorázový kód s PKCE; token si vyzvedne `POST /api/auth/cli/exchange`. Pořadí:
 
 1. Nasadit server (migrace `…_add_cli_auth_code` přidá tabulku `CliAuthCode`).
-2. Teprve potom otagovat `cli-v0.3.0` podle postupu výše.
+2. **Hned potom, bez odkladu,** otagovat `cli-v0.3.0` podle postupu výše – stránka
+   `/auth/cli` od deploye uživatelům 0.2.0 radí aktualizovat.
 
 Starší CLI (≤ 0.2.0) dál funguje – autorizační stránka mu bez PKCE výzvy předá token
-postaru a doporučí aktualizaci. CLI 0.3.0 proti ještě nenasazenému serveru také projde
-(přijme token postaru), jen bez ochrany.
+postaru a doporučí aktualizaci. CLI 0.3.0 token v callbacku **nepřijme** (podvržený
+callback s cizím tokenem by uživatele přihlásil k cizímu účtu – login CSRF), funguje
+proto jen proti serveru s výměnou kódu; proto se vydává až po deployi serveru.
 
 ## Databáze a migrace
 

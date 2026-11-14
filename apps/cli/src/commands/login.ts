@@ -6,11 +6,11 @@ import ora from 'ora';
 import { loadConfig } from '../lib/config.js';
 import { saveToken, getToken } from '../lib/auth.js';
 import {
+  TOKEN_CALLBACK_REJECTED,
   buildAuthUrl,
   createPkcePair,
   exchangeCode,
   parseCallback,
-  type CallbackResult,
 } from '../lib/login-flow.js';
 import * as output from '../lib/output.js';
 
@@ -49,13 +49,11 @@ export const loginCommand = new Command('login')
           5 * 60 * 1000,
         );
       });
-      const result = await Promise.race([resultPromise, timeout]);
+      const code = await Promise.race([resultPromise, timeout]);
       clearTimeout(timeoutId!);
 
-      const token =
-        result.kind === 'code'
-          ? await exchangeCode(config.server, result.code, pkce.verifier)
-          : result.token;
+      // Token si CLI vyzvedne jen výměnou kódu s PKCE ověřovačem
+      const token = await exchangeCode(config.server, code, pkce.verifier);
       saveToken(token);
 
       spinner.stop();
@@ -69,15 +67,13 @@ export const loginCommand = new Command('login')
     }
   });
 
-type Credential = Extract<CallbackResult, { kind: 'code' } | { kind: 'token' }>;
-
 function startCallbackServer(
   expectedState: string,
-): Promise<{ port: number; resultPromise: Promise<Credential>; server: http.Server }> {
+): Promise<{ port: number; resultPromise: Promise<string>; server: http.Server }> {
   return new Promise((resolveSetup) => {
-    let resolveResult: (result: Credential) => void;
+    let resolveResult: (code: string) => void;
     let rejectResult: (err: Error) => void;
-    const resultPromise = new Promise<Credential>((res, rej) => {
+    const resultPromise = new Promise<string>((res, rej) => {
       resolveResult = res;
       rejectResult = rej;
     });
@@ -100,6 +96,14 @@ function startCallbackServer(
         return;
       }
 
+      if (result.kind === 'token-rejected') {
+        // Token v URL nepřijímáme (login CSRF) – jen jednorázový kód s PKCE
+        res.writeHead(400);
+        res.end('Přihlášení odmítnuto');
+        rejectResult(new Error(TOKEN_CALLBACK_REJECTED));
+        return;
+      }
+
       if (result.kind === 'missing') {
         res.writeHead(400);
         res.end('Přihlašovací údaje chybí');
@@ -111,7 +115,7 @@ function startCallbackServer(
       res.end(
         '<html><body><h1>Přihlášení úspěšné!</h1><p>Můžete zavřít tuto stránku.</p></body></html>',
       );
-      resolveResult(result);
+      resolveResult(result.code);
     });
 
     // Bindni jen na loopback (127.0.0.1), ať kód z callbacku nemůže zachytit nikdo v síti.

@@ -20,6 +20,8 @@ describe('api-client', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer test-token',
+          // Hlášky serveru česky, stejně jako výstup CLI
+          'x-locale': 'cs',
         }),
       }),
     );
