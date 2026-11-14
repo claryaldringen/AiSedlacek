@@ -111,9 +111,15 @@ pg_env_from_url() {
 # <<< pg-env
 
 PGPASS_DIR="$(mktemp -d)"
-trap 'rm -rf "$PGPASS_DIR"' EXIT
+DUMP_PARTIAL=""
+# Úklid i při chybě: dočasný .pgpass a nedokončený dump (neověřený dump nesmí zůstat
+# pod jménem *.dump – denní záloha ho jinak pošle off-site jako platný).
+trap 'rm -rf "$PGPASS_DIR" ${DUMP_PARTIAL:+"$DUMP_PARTIAL"}' EXIT
 chmod 700 "$PGPASS_DIR"
 pg_env_from_url "$DATABASE_URL" "$PGPASS_DIR"
+# Zděděná PGPASSWORD (např. z prostředí jiné aplikace na sdíleném VPS) by v libpq
+# měla přednost před PGPASSFILE – příkazy ji proto výslovně ruší (`env -u`).
+pg_run() { env -u PGPASSWORD "${PG_ENV[@]}" "$@"; }
 
 echo "=== Checking migration history ==="
 # Pojistka ještě před npm ci a buildem (ty přepisují běžící aplikaci): historie
@@ -123,7 +129,7 @@ echo "=== Checking migration history ==="
 # „already exists"), nebo znovu spustil starou datovou migraci.
 # Jednorázový baseline: docs/deployment.md – Kontrola historie migrací.
 # -X: bez ~/.psqlrc (např. \timing by změnil výstup a kontrolu tiše přeskočil).
-psql_q() { env "${PG_ENV[@]}" psql -X -v ON_ERROR_STOP=1 -tAc "$1"; }
+psql_q() { pg_run psql -X -v ON_ERROR_STOP=1 -tAc "$1"; }
 db_has_tables="$(psql_q "SELECT to_regclass('\"$DB_SCHEMA\".\"User\"') IS NOT NULL")"
 case "$db_has_tables" in
   t | f) ;;
@@ -174,7 +180,14 @@ echo "=== Backing up database ==="
 # z pre-deploy dumpu se ztratí jen ty.
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
-env "${PG_ENV[@]}" pg_dump --format=custom --file="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
+dump="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).dump"
+DUMP_PARTIAL="$dump.partial"
+pg_run pg_dump --format=custom --file="$DUMP_PARTIAL"
+# Useknutý dump (plný disk) neprojde – deploy skončí dřív, než sáhne na aplikaci.
+pg_restore --list "$DUMP_PARTIAL" >/dev/null
+mv "$DUMP_PARTIAL" "$dump"
+DUMP_PARTIAL=""
+echo "Pre-deploy dump: $dump ($(du -h "$dump" | cut -f1))"
 # Ponechat 10 nejnovějších pre-deploy dumpů – disk serveru je sdílený a plný
 # disk shodí Postgres (denní zálohy rotuje ops/backup/aisedlacek-backup.sh).
 ls -1t "$BACKUP_DIR"/pre-deploy-*.dump 2>/dev/null | tail -n +11 | xargs -r rm --
