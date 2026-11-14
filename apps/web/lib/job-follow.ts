@@ -87,8 +87,8 @@ export async function runRetranslation(deps: {
 
 /**
  * Počká na konec jobu pollováním stavu (`fetchStatus` → `/api/pages/process/status`).
- * Výpadek sítě pollování nepřeruší (job běží dál na serveru), nečitelný job
- * (404/403) skončí jako `error` bez kódu. Po `signal.abort()` (přepnutí
+ * Výpadek sítě ani přechodná chyba serveru (5xx, 429) pollování nepřeruší
+ * (job běží dál na serveru), nečitelný job (404/403) skončí jako `error` bez kódu. Po `signal.abort()` (přepnutí
  * dokumentu, odpojení komponenty) vrátí `cancelled` a dál se nedotazuje.
  */
 export function waitForJobEnd(
@@ -124,20 +124,28 @@ export function waitForJobEnd(
       try {
         const res = await fetchStatus(jobId);
         if (settled) return;
-        if (!res.ok) {
+        // Přechodná chyba serveru (502/503 při deployi, 429) – job běží dál,
+        // zkusit znovu. Konec jen u nečitelného jobu (401/403/404 apod.).
+        if (!res.ok && res.status < 500 && res.status !== 429) {
           finish({ status: 'error', errorCode: null });
           return;
         }
-        const data = (await res.json()) as {
-          status?: string;
-          currentStep?: string | null;
-          errorCode?: string | null;
-        };
-        if (settled) return;
-        if (data.currentStep) onStep?.(data.currentStep);
-        if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled') {
-          finish({ status: data.status, errorCode: data.errorCode ?? null });
-          return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            status?: string;
+            currentStep?: string | null;
+            errorCode?: string | null;
+          };
+          if (settled) return;
+          if (data.currentStep) onStep?.(data.currentStep);
+          if (
+            data.status === 'completed' ||
+            data.status === 'error' ||
+            data.status === 'cancelled'
+          ) {
+            finish({ status: data.status, errorCode: data.errorCode ?? null });
+            return;
+          }
         }
       } catch {
         // Výpadek sítě – job na serveru běží dál, zkusit znovu

@@ -18,6 +18,41 @@ export function applyResultUpdate<T extends { id: string }>(
   return current !== null && current.id === updated.id ? updated : current;
 }
 
+export interface ResultPatchOptions<T> {
+  /** Patch nese pole překladu tohoto jazyka – panel s jiným jazykem nezmění. */
+  translationLanguage?: string | null;
+  /** Zapsat jen když panel tato pole pořád má (rollback optimistické úpravy). */
+  expected?: Partial<T>;
+}
+
+/**
+ * Zapíše do panelu jen změněná pole dokumentu `documentId` nad jeho aktuálním
+ * stavem – pro uložení pole, použití návrhu z chatu (a rollback) a doběhlou
+ * retranslaci. Celý snímek `{ ...result, … }` z doby, kdy akce začala, by vrátil
+ * změny uložené mezitím (kontext, návrh z chatu, spotřebu chatu).
+ * Pro funkční update: `setResult((prev) => applyResultPatch(prev, id, patch, opts))`.
+ */
+export function applyResultPatch<T extends { id: string; translationLanguage?: string | null }>(
+  current: T | null,
+  documentId: string,
+  patch: Partial<T>,
+  options: ResultPatchOptions<T> = {},
+): T | null {
+  if (current === null || current.id !== documentId) return current;
+  if (
+    options.translationLanguage !== undefined &&
+    current.translationLanguage !== options.translationLanguage
+  ) {
+    return current;
+  }
+  if (options.expected) {
+    for (const [key, value] of Object.entries(options.expected)) {
+      if (current[key as keyof T] !== value) return current;
+    }
+  }
+  return { ...current, ...patch };
+}
+
 /** Jedno otevření stránky v panelu. */
 export interface PanelLoad {
   /** Pro `fetch` – předchozí rozpracované načtení se při dalším otevření přeruší. */

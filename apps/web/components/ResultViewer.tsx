@@ -25,6 +25,7 @@ const RETRANSLATE_ERROR_KEYS: Partial<Record<JobErrorCode, string>> = {
 };
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 import { runRetranslation, waitForJobEnd, type StartResponse } from '@/lib/job-follow';
+import type { ResultPatchOptions } from '@/lib/panel-result';
 
 export interface DocumentResult {
   id: string;
@@ -64,9 +65,20 @@ export interface DocumentResult {
   chatChargeIncomplete?: boolean;
 }
 
+/**
+ * Změna polí dokumentu v panelu: jen změněná pole dokumentu `documentId` –
+ * rodič je aplikuje přes `applyResultPatch` nad aktuálním stavem (ne celý
+ * snímek, který by vrátil změny uložené mezitím, ani zápis do jiného dokumentu).
+ */
+export type ResultPatchHandler = (
+  documentId: string,
+  patch: Partial<DocumentResult>,
+  options?: ResultPatchOptions<DocumentResult>,
+) => void;
+
 interface ResultViewerProps {
   result: DocumentResult;
-  onUpdate?: (updated: DocumentResult) => void;
+  onPatch?: ResultPatchHandler;
   highlightQuery?: string;
   /** Cizí dokument – bez editace textů a obnovy verzí (historie zůstane k prohlížení). */
   readOnly?: boolean;
@@ -228,7 +240,7 @@ function EditableSection({
 
 export function ResultViewer({
   result,
-  onUpdate,
+  onPatch,
   highlightQuery,
   readOnly = false,
 }: ResultViewerProps): React.JSX.Element {
@@ -319,14 +331,19 @@ export function ResultViewer({
         if (field === 'translation' && translationLanguage !== result.translationLanguage) {
           return result;
         }
-        const updated = { ...result, [field]: value };
-        onUpdate?.(updated);
-        return updated;
+        // Do panelu jen uložené pole – ne snímek `result` z doby před PATCH
+        // (mezitím mohl přibýt návrh z chatu nebo spotřeba chatu).
+        onPatch?.(
+          result.id,
+          { [field]: value },
+          field === 'translation' ? { translationLanguage: result.translationLanguage } : {},
+        );
+        return { ...result, [field]: value };
       } finally {
         setSaving(false);
       }
     },
-    [result, onUpdate, tc],
+    [result, onPatch, tc],
   );
 
   const trySaveField = useCallback(
@@ -387,14 +404,20 @@ export function ResultViewer({
           (tr: { language: string }) => tr.language === updated.translationLanguage,
         );
         if (translation && !isStale()) {
-          onUpdate?.({
-            ...updated,
-            translation: translation.text,
-            translationModel: translation.model,
-            translationInputTokens: translation.inputTokens,
-            translationOutputTokens: translation.outputTokens,
-            translationChargedCredits: translation.chargedCredits,
-          });
+          // Jen pole překladu nad aktuálním stavem panelu – snímek `updated`
+          // z doby uložení transkripce by vrátil mezitím uložený kontext,
+          // návrh z chatu i spotřebu chatu.
+          onPatch?.(
+            docId,
+            {
+              translation: translation.text,
+              translationModel: translation.model,
+              translationInputTokens: translation.inputTokens,
+              translationOutputTokens: translation.outputTokens,
+              translationChargedCredits: translation.chargedCredits,
+            },
+            { translationLanguage: updated.translationLanguage },
+          );
         }
       };
 
@@ -469,7 +492,7 @@ export function ResultViewer({
       }
       return true;
     },
-    [result, onUpdate, saveField, stopRetranslatePoll, t],
+    [result, onPatch, saveField, stopRetranslatePoll, t],
   );
 
   return (

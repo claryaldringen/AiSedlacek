@@ -31,7 +31,7 @@ import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 import { formatCzk } from '@/lib/pricing';
 import { addChatUsageToDocument } from '@/lib/chat-usage';
-import { PanelLoadGuard, applyResultUpdate } from '@/lib/panel-result';
+import { PanelLoadGuard, applyResultPatch, applyResultUpdate } from '@/lib/panel-result';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -1816,7 +1816,9 @@ function WorkspaceContent(): React.JSX.Element {
         }}
         // Jen pro dokument, který panel pořád ukazuje – zastaralý snímek (rollback
         // z chatu, doběhlé uložení či retranslace po přepnutí stránky) se zahodí
-        onResultUpdate={(updated) => setPanelResult((prev) => applyResultUpdate(prev, updated))}
+        onResultPatch={(documentId, patch, options) =>
+          setPanelResult((prev) => applyResultPatch(prev, documentId, patch, options))
+        }
         onChatUsage={(documentId, usage) =>
           setPanelResult((prev) => addChatUsageToDocument(prev, documentId, usage))
         }

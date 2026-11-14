@@ -122,6 +122,20 @@ describe('waitForJobEnd – pollování stavu jobu', () => {
     expect(onStep).toHaveBeenCalledWith('Volám model');
   });
 
+  it('přechodná chyba serveru (502/503 při deployi, 429) pollování nepřeruší', async () => {
+    const fetchStatus = vi
+      .fn()
+      .mockResolvedValueOnce(json({ error: 'Bad Gateway' }, 502))
+      .mockResolvedValueOnce(json({ error: 'Too Many Requests' }, 429))
+      .mockResolvedValueOnce(json({ status: 'completed' }));
+
+    const promise = waitForJobEnd('job-1', { fetchStatus, intervalMs: 1000 });
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(await promise).toEqual({ status: 'completed', errorCode: null });
+    expect(fetchStatus).toHaveBeenCalledTimes(3);
+  });
+
   it('nečitelný job (404) skončí chybou bez kódu', async () => {
     const promise = waitForJobEnd('job-1', {
       fetchStatus: async () => json({ error: 'x' }, 404),
