@@ -257,9 +257,73 @@ install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup
 cp ops/backup/aisedlacek-backup.{service,timer} /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now aisedlacek-backup.timer
 
-# off-site kopie (doporučeno) – např. Hetzner Storage Box
-echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/default/aisedlacek-backup
+# off-site kopie – produkce (od 2026-11-14): šifrovaný Cloudflare R2, viz níže
+install -m 600 /dev/null /etc/default/aisedlacek-backup
+cat > /etc/default/aisedlacek-backup <<'EOF'
+BACKUP_REMOTE=rclone:r2crypt:
+RCLONE_CONFIG=/etc/aisedlacek-backup/rclone.conf
+EOF
+# (alternativa: rsync přes SSH, např. BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek)
 ```
+
+### Off-site záloha v Cloudflare R2
+
+- Bucket **`aisedlacek-backup`** v Cloudflare účtu provozovatele (jurisdikce **EU**,
+  soukromý, třída Standard – vejde se do bezplatných 10 GB). Ne `ai-sedlacek`: ten má
+  zapnutý veřejný přístup a leží v něm staré uploady z doby před VPS.
+- Přístup: R2 Account API token `aisedlacek-backup (VPS)` – jen Object Read & Write, jen
+  tento bucket, jen z IP serveru (IPv4 i IPv6 rozsah – do Cloudflare jde server výchozí
+  cestou přes IPv6).
+- `/etc/aisedlacek-backup/rclone.conf` (700/600): remote `r2` (S3, provider Cloudflare,
+  endpoint `https://<ID účtu>.eu.r2.cloudflarestorage.com`, `no_check_bucket = true`)
+  a nad ním **šifrovaný** `r2crypt` (`rclone crypt` nad `r2:aisedlacek-backup`,
+  `filename_encryption = standard`, `directory_name_encryption = false` – adresáře `db/`
+  a `uploads/` zůstávají čitelné kvůli pravidlům bucketu). Dumpy obsahují hashe hesel
+  a OAuth tokeny – v R2 jsou jen zašifrované.
+- **Hesla šifrování jsou uložená mimo server** (u provozovatele ve správci hesel). Bez nich
+  zálohy z R2 obnovit nejde. Na serveru jsou v `rclone.conf` taky (jen „obscured", tedy
+  vratně) – šifrování chrání zálohy na straně úložiště, ne před tím, kdo ovládne server.
+- **Pravidla bucketu** (nastavená 2026-11-14): životnost maže `db/` po 90 dnech (uploady
+  se nemažou); **Bucket Lock** drží `db/` 30 dní a `uploads/` 365 dní – token ze serveru
+  (ani útočník s rootem na sdíleném VPS) nesmaže ani nepřepíše dumpy mladší 30 dnů
+  a uploady mladší roku. Zámek uploadů bez omezení by šel nastavit, ale pak by nešlo
+  zálohu skenů smazat ani na žádost uživatele (GDPR).
+- Volitelně `BACKUP_HEARTBEAT_URL` v `/etc/default/aisedlacek-backup` (např. push monitor
+  Uptime Kuma, která na serveru běží, s intervalem ~25 h – časovač má náhodné zpoždění
+  a běh trvá): skript ho zavolá jen po úspěšném běhu, monitor pak upozorní, když záloha
+  neproběhne. Soubor s URL (nese token) má mít práva 600.
+
+#### Stažení zálohy z R2
+
+```bash
+export RCLONE_CONFIG=/etc/aisedlacek-backup/rclone.conf
+install -d -m 700 /var/backups/aisedlacek-restore      # dump je dešifrovaný – jen pro roota
+rclone lsf r2crypt:db/
+rclone copy r2crypt:db/<soubor.dump> /var/backups/aisedlacek-restore/
+# … obnova (Obnova DB ze zálohy), pak dešifrovaný dump smazat:
+rm -r /var/backups/aisedlacek-restore
+```
+
+#### Obnova po ztrátě serveru
+
+1. Nový stroj: Postgres 16, aplikace podle [Deploy](#deploy-nové-verze) a rclone
+   (`curl -fsSL https://rclone.org/install.sh | bash`, ověřeno s v1.73).
+2. V Cloudflare (R2 → Manage API tokens) nový Account API token – Object Read & Write,
+   jen `aisedlacek-backup`, IP filtr na adresy **nového** serveru; starý token smazat.
+3. Konfigurace (hesla crypt ze správce hesel, klíče z kroku 2 – vše přes `rclone config`
+   interaktivně, ne v argumentech):
+   ```bash
+   install -d -m 700 /etc/aisedlacek-backup
+   export RCLONE_CONFIG=/etc/aisedlacek-backup/rclone.conf
+   rclone config    # n → r2: s3, Cloudflare, klíče, endpoint .eu., acl private, no_check_bucket true
+                    # n → r2crypt: crypt, remote r2:aisedlacek-backup, standard, directory_name_encryption false, hesla
+   chmod 600 "$RCLONE_CONFIG"
+   ```
+4. Uploady: `rclone copy r2crypt:uploads /opt/AiSedlacek/uploads` (originály skenů –
+   mimo server jsou jen v R2; cesta = `UPLOAD_DIR` z `.env`).
+5. DB: stáhnout nejnovější dump (výše) a [obnovit](#obnova-db-ze-zálohy).
+6. Zálohy znovu zapnout (instalace výše, `/etc/default/aisedlacek-backup`) a ověřit:
+   `systemctl start aisedlacek-backup && journalctl -u aisedlacek-backup -n 20`.
 
 - Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní. Dump se píše do
   `*.dump.partial` a na `*.dump` se přejmenuje až po ověření plným přečtením
@@ -271,14 +335,17 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
   procesu, takže ho ostatní uživatelé sdíleného VPS nevidí v `ps`. Zděděná `PGPASSWORD`
   se pro `pg_dump` ruší (`env -u PGPASSWORD`), jinak by měla přednost před `.pgpass`.
 - S `BACKUP_REMOTE` se dumpy i uploady kopírují mimo VPS **jen přírůstkově**
-  (`rsync --ignore-existing`, bez `--delete`): na cíli se nic nemaže ani nepřepisuje,
-  takže smazání nebo poškození lokálních souborů se na off-site kopii nepropíše.
-  Off-site jdou jen `*.dump`, které projdou plným přečtením (i pre-deploy dumpy).
-  Starých dumpů na cíli proto přibývá – retenci je potřeba nastavit na cílovém úložišti
-  (např. snapshoty Storage Boxu nebo občasný ruční úklid). Bez `BACKUP_REMOTE` je záloha
-  jen na stejném disku a uploady se nezálohují.
-- **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
-  `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
+  (`rclone copy`/`rsync` s `--ignore-existing`, bez mazání): na cíli se nic nemaže ani
+  nepřepisuje, takže smazání nebo poškození lokálních souborů se na off-site kopii
+  nepropíše. Off-site jdou jen `*.dump`, které projdou plným přečtením (i pre-deploy
+  dumpy). Ověřují se a posílají jen dumpy, které cíl ještě nemá – u rclone podle výpisu
+  cíle, u rsync podle lokálního seznamu vázaného na cíl (`.offsite-sent.<hash cíle>`).
+  Rozepsané uploady (`*.partial`) se vynechávají. Starých dumpů na cíli přibývá – retenci řeší cílové úložiště
+  (R2: pravidlo životnosti). Bez `BACKUP_REMOTE` je záloha jen na stejném disku a uploady
+  se nezálohují.
+- **Po změně skriptu nebo unit je na serveru znovu nainstalovat** (deploy je nekopíruje):
+  `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`
+  a `cp ops/backup/aisedlacek-backup.{service,timer} /etc/systemd/system/ && systemctl daemon-reload`.
 - Obnova – viz [Obnova DB ze zálohy](#obnova-db-ze-zálohy).
 
 ### Obnova DB ze zálohy

@@ -6,3 +6,5 @@ After=postgresql.service
 Type=oneshot
 EnvironmentFile=-/etc/default/aisedlacek-backup
 ExecStart=/usr/local/bin/aisedlacek-backup
+# Zaseknutý běh (síť, off-site cíl) nesmí blokovat další noci včetně lokálního dumpu.
+TimeoutStartSec=4h
