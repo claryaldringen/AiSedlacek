@@ -19,3 +19,11 @@ export const OCR_EFFORT = 'medium' as const;
 
 /** Textové úlohy: retranslace, chat, kontexty svazků, metadata. */
 export const TEXT_MODEL = 'claude-sonnet-4-6';
+
+/**
+ * Pseudo-modely výsledků, které nevznikly placeným API voláním workeru: CLI režim
+ * (`LLM_PROVIDER=claude-cli`) a výsledky odeslané přes `POST /api/pages/[id]/result`
+ * (`ais submit`), kde si model i obsah volí klient. Takový výsledek se nikdy
+ * nededuplikuje (worker i předběžná kontrola kreditu v API).
+ */
+export const NON_DEDUP_MODELS: readonly string[] = ['claude-cli', 'claude-agent-cli'];

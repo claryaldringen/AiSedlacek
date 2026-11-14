@@ -16,7 +16,10 @@ const mockAnthropicStream = vi.fn();
 vi.mock('@/lib/infrastructure/db', () => ({
   prisma: {
     collection: { findUnique: (...args: unknown[]) => mockCollectionFindUnique(...args) },
-    document: { findUnique: (...args: unknown[]) => mockDocumentFindUnique(...args) },
+    document: {
+      findUnique: (...args: unknown[]) => mockDocumentFindUnique(...args),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     processingJob: {
       create: (...args: unknown[]) => mockJobCreate(...args),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -46,11 +49,15 @@ vi.mock('@/lib/infrastructure/authz', () => ({
   getOwnedCollection: vi.fn().mockResolvedValue({ id: 'col-1', userId: 'user-1' }),
 }));
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = { stream: (...args: unknown[]) => mockAnthropicStream(...args) };
-  },
-}));
+vi.mock('@anthropic-ai/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@anthropic-ai/sdk')>();
+  return {
+    default: class {
+      static APIError = actual.default.APIError;
+      messages = { stream: (...args: unknown[]) => mockAnthropicStream(...args) };
+    },
+  };
+});
 
 import { POST as translateContext } from '@/app/api/collections/[id]/translate-context/route';
 import { POST as chat } from '@/app/api/documents/[id]/chat/route';

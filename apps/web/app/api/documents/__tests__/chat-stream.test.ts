@@ -46,6 +46,7 @@ class FakeMessageStream {
 }
 
 let fake: FakeMessageStream;
+const streamParams: unknown[] = [];
 
 // ── Mocks ────────────────────────────────────────────────
 
@@ -111,16 +112,22 @@ vi.mock('@/lib/infrastructure/sharp-limit', () => ({
   withSharpLimit: (fn: () => Promise<unknown>) => mockWithSharpLimit(fn),
 }));
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = {
-      stream: () => {
-        fake = new FakeMessageStream();
-        return fake;
-      },
-    };
-  },
-}));
+vi.mock('@anthropic-ai/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@anthropic-ai/sdk')>();
+  return {
+    default: class {
+      // Typy chyb SDK zůstávají skutečné (route podle nich volí hlášku)
+      static APIError = actual.default.APIError;
+      messages = {
+        stream: (params: unknown) => {
+          streamParams.push(params);
+          fake = new FakeMessageStream();
+          return fake;
+        },
+      };
+    },
+  };
+});
 
 import { POST as chat } from '@/app/api/documents/[id]/chat/route';
 
@@ -260,7 +267,8 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
     fake.fail(new Error('Overloaded'));
     const events = await readEvents(reader);
 
-    expect(events.at(-1)).toEqual({ type: 'error', error: 'Overloaded' });
+    // Surová zpráva chyby ke klientovi nejde – jen obecná hláška v jazyce UI
+    expect(events.at(-1)).toEqual({ type: 'error', error: 'Interní chyba serveru' });
     expect(mockDeduct).toHaveBeenCalledWith(
       'user-1',
       1500,
@@ -278,7 +286,7 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
     fake.fail(new Error('invalid_request_error'));
     const events = await readEvents(reader);
 
-    expect(events).toEqual([{ type: 'error', error: 'invalid_request_error' }]);
+    expect(events).toEqual([{ type: 'error', error: 'Interní chyba serveru' }]);
     expect(mockDeduct).not.toHaveBeenCalled();
     // Rezervace bez spotřeby se uvolní (neblokuje kredit do vypršení)
     expect(mockRelease).toHaveBeenCalledWith(expect.objectContaining({ id: 'hold-1' }));
@@ -296,9 +304,38 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
     fake.finish({ model: 'claude-sonnet-4-6', usage: { input_tokens: 10, output_tokens: 5 } });
     const events = await readEvents(reader);
 
-    expect(events.at(-1)).toEqual({ type: 'error', error: 'DB down' });
+    expect(events.at(-1)).toEqual({ type: 'error', error: 'Interní chyba serveru' });
     expect(mockDeduct).toHaveBeenCalledTimes(1);
     expect(mockRelease).toHaveBeenCalled();
+  });
+
+  it('chyba Claude API jde klientovi jako lokalizovaná hláška se stavem, bez textu SDK', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const res = await chat(post(), ctx);
+    const reader = res.body!.getReader();
+
+    fake.fail(
+      new Anthropic.APIError(
+        529,
+        { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+        '529 {"type":"error","error":{"type":"overloaded_error"}}',
+        new Headers(),
+      ),
+    );
+    const events = await readEvents(reader);
+
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: 'Služba AI vrátila chybu (529) – zkuste to prosím znovu.',
+    });
+  });
+
+  it('calls the model with LLM_MAX_TOKENS.chat (same limit as the reservation)', async () => {
+    const { LLM_MAX_TOKENS } = await import('@ai-sedlacek/shared');
+    const res = await chat(post(), ctx);
+    fake.finish({ model: 'claude-sonnet-4-6', usage: { input_tokens: 10, output_tokens: 5 } });
+    await readEvents(res.body!.getReader());
+    expect(streamParams.at(-1)).toMatchObject({ max_tokens: LLM_MAX_TOKENS.chat });
   });
 
   it('reserves the maximum price before calling the model (BIL-1)', async () => {

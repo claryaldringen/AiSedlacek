@@ -5,6 +5,7 @@ import { prisma } from '@/lib/infrastructure/db';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { InsufficientCreditError, checkBalance, runBilledCall } from '@/lib/infrastructure/billing';
 import { insufficientCreditResponse } from '@/lib/infrastructure/credit';
+import { publicLlmError } from '@/lib/infrastructure/llm-errors';
 import { safeFetch, readBodyWithLimit } from '@/lib/infrastructure/safe-fetch';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import {
@@ -189,8 +190,8 @@ ${newContent}`;
     } catch (err) {
       if (err instanceof InsufficientCreditError)
         return insufficientCreditResponse(request, t, err);
-      const message = err instanceof Error ? err.message : 'Chyba AI';
-      return NextResponse.json({ error: `Extrakce kontextu selhala: ${message}` }, { status: 422 });
+      // Surová chyba SDK/Prismy jen do logu, klientovi obecná lokalizovaná hláška
+      return NextResponse.json({ error: publicLlmError(err, t, 'fetch-context') }, { status: 422 });
     }
   }
 

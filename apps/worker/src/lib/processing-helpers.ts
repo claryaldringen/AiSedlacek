@@ -7,6 +7,7 @@ import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
 import type { CreditTx } from '@ai-sedlacek/db/billing';
 import type { StructuredOcrResult } from '@ai-sedlacek/ocr';
+import { NON_DEDUP_MODELS } from '@ai-sedlacek/shared';
 import { getStorage } from './storage';
 import { truncateContext } from './batch-utils';
 
@@ -286,12 +287,8 @@ export interface DedupSourceDocument {
   glossary: { term: string; definition: string }[];
 }
 
-/**
- * Modely, jejichž výstup nevznikl placeným API voláním workeru: CLI režim
- * (`LLM_PROVIDER=claude-cli`) a výsledky odeslané přes `POST /api/pages/[id]/result`
- * (`ais submit`), kde si model i obsah volí klient.
- */
-export const NON_DEDUP_MODELS = ['claude-cli', 'claude-agent-cli'];
+/** Viz `NON_DEDUP_MODELS` v packages/shared (sdílí ho předběžná kontrola kreditu v API). */
+export { NON_DEDUP_MODELS };
 
 /**
  * Najde dokument se stejným hashem obrázku, který lze zkopírovat místo nového OCR.
@@ -313,7 +310,7 @@ export async function findDedupSourceDocument(
     where: {
       hash,
       page: { userId, status: { not: 'archived' } },
-      model: { notIn: NON_DEDUP_MODELS },
+      model: { notIn: [...NON_DEDUP_MODELS] },
       outputTokens: { gt: 0 },
     },
     orderBy: { createdAt: 'desc' },

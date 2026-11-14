@@ -358,6 +358,8 @@
     "collectionHasNoContext": "Collection has no context",
     "aiNoResult": "AI returned no result",
     "aiParseError": "Failed to parse AI response",
+    "aiServiceErrorStatus": "The AI service returned an error ({status}) – please try again.",
+    "aiServiceUnavailable": "The AI service is temporarily unavailable – please try again.",
     "noRawResponse": "Document has no stored rawResponse",
     "mustProvideCollectionOrPage": "Must provide collectionId or pageId",
     "cannotAddBoth": "Cannot add both collection and page at once",

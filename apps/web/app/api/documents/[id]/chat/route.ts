@@ -7,6 +7,7 @@ import { getStorage, storageKeyFromImageUrl } from '@/lib/adapters/storage';
 import { prepareImage, type ImageMediaType } from '@ai-sedlacek/ocr';
 import { releaseCreditHold, reserveCredits, settleCreditHold } from '@/lib/infrastructure/billing';
 import { insufficientCreditBody } from '@/lib/infrastructure/credit';
+import { publicLlmError } from '@/lib/infrastructure/llm-errors';
 import { getAuthenticatedUserId } from '@/lib/infrastructure/auth-utils';
 import { getApiTranslations } from '@/lib/infrastructure/api-locale';
 import { withSharpLimit } from '@/lib/infrastructure/sharp-limit';
@@ -259,7 +260,8 @@ ${glossaryText}`;
       try {
         const messageStream = client.messages.stream({
           model: TEXT_MODEL,
-          max_tokens: 8192,
+          // Stejný limit, se kterým počítá rezervace (LLM_MAX_TOKENS.chat)
+          max_tokens: LLM_MAX_TOKENS.chat,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: claudeMessages,
@@ -317,8 +319,8 @@ ${glossaryText}`;
           }
         }
 
-        const message = err instanceof Error ? err.message : t('serverError');
-        send({ type: 'error', error: message });
+        // Surová chyba SDK/Prismy jen do logu, klientovi obecná lokalizovaná hláška
+        send({ type: 'error', error: publicLlmError(err, t, 'Chat') });
       } finally {
         // Rezervace, kterou nic nevyúčtovalo (chyba před message_start, selhání
         // účtování), se uvolní – jinak by blokovala kredit až do vypršení.

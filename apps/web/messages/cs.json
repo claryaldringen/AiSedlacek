@@ -358,6 +358,8 @@
     "collectionHasNoContext": "Svazek nemá kontext",
     "aiNoResult": "AI nevrátila výsledek",
     "aiParseError": "Nepodařilo se parsovat odpověď AI",
+    "aiServiceErrorStatus": "Služba AI vrátila chybu ({status}) – zkuste to prosím znovu.",
+    "aiServiceUnavailable": "Služba AI je dočasně nedostupná – zkuste to prosím znovu.",
     "noRawResponse": "Dokument nemá uložený rawResponse",
     "mustProvideCollectionOrPage": "Musí být uvedeno collectionId nebo pageId",
     "cannotAddBoth": "Nelze přidat kolekci i stránku najednou",
