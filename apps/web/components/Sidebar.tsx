@@ -31,8 +31,10 @@ export interface Collection {
     outputTokens: number;
     /** Cena pro uživatele v Kč (náklad API × marže) – stejně jako u dokumentu. */
     chargeCzk: number;
-    /** Kredity odečtené za zpracování dokumentů svazku. */
+    /** Kredity odečtené za svazek (skutečné odečty + odhad u starších dokumentů). */
     chargeCredits: number;
+    /** Část `chargeCredits` odhadnutá z tokenů – dokumenty bez záznamu odečtu (BIL-11). */
+    chargeEstimatedCredits?: number;
   };
   title?: string | null;
   author?: string | null;

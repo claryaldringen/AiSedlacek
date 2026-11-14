@@ -42,11 +42,14 @@ interface DocApiResponse {
     model?: string;
     inputTokens?: number;
     outputTokens?: number;
+    chargedCredits?: number | null;
   }[];
   glossary: { term: string; definition: string }[];
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Skutečně odečtené kredity (BIL-11); null u starších dokumentů. */
+  chargedCredits?: number | null;
   processingTimeMs?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -90,6 +93,7 @@ function mapDocToResult(
     model: doc.model,
     inputTokens: doc.inputTokens,
     outputTokens: doc.outputTokens,
+    chargedCredits: doc.chargedCredits,
     processingTimeMs: doc.processingTimeMs,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -102,6 +106,7 @@ function mapDocToResult(
     translationModel: translation?.model,
     translationInputTokens: translation?.inputTokens,
     translationOutputTokens: translation?.outputTokens,
+    translationChargedCredits: translation?.chargedCredits,
   };
 }
 
@@ -1534,12 +1539,22 @@ function WorkspaceContent(): React.JSX.Element {
                           <span className="font-medium text-slate-600">{t('price')}</span>
                           {/* Částka odečtená z kreditů – stejný výpočet jako u dokumentu */}
                           <span className="font-semibold text-slate-800">
-                            {tDoc('chargeValue', {
-                              czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
-                              credits: (
-                                selectedCollection.stats?.chargeCredits ?? 0
-                              ).toLocaleString(locale),
-                            })}
+                            {/* Skutečné odečty; část za dokumenty zpracované před
+                                záznamem odečtu je odhad (BIL-11) */}
+                            {tDoc(
+                              (selectedCollection.stats?.chargeEstimatedCredits ?? 0) > 0
+                                ? 'chargeValuePartlyEstimated'
+                                : 'chargeValue',
+                              {
+                                czk: formatCzk(selectedCollection.stats?.chargeCzk ?? 0, locale),
+                                credits: (
+                                  selectedCollection.stats?.chargeCredits ?? 0
+                                ).toLocaleString(locale),
+                                estimated: (
+                                  selectedCollection.stats?.chargeEstimatedCredits ?? 0
+                                ).toLocaleString(locale),
+                              },
+                            )}
                           </span>
                         </div>
                       </div>

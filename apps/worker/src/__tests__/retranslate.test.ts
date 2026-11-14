@@ -109,6 +109,8 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
         model: 'claude-sonnet-4-6',
         inputTokens: 100,
         outputTokens: 50,
+        // Skutečný odečet (BIL-11): 100 × $3 + 50 × $15 → × 23 × 2 / 50 = 966 kreditů
+        chargedCredits: 966,
       },
     });
     expect(mocks.prisma.document.update).toHaveBeenCalledWith({
@@ -140,6 +142,7 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
         model: 'claude-sonnet-4-6',
         inputTokens: 100,
         outputTokens: 50,
+        chargedCredits: 966,
       },
     });
     expect(mocks.prisma.documentVersion.create).not.toHaveBeenCalled();

@@ -98,11 +98,11 @@ PublicSlug (slug → collection | page)
 | Model | Poznámka |
 |-------|----------|
 | **Page** | `status`: pending, processing, done, error, blank, archived („smazaná" zpracovaná stránka). Klient smí nastavit jen pending/blank/archived. `hash` (SHA-256 obrázku), `thumbnailUrl`, `isPublic`, `slug`, `order` |
-| **Document** | unikátní je `pageId` (1:1 se stránkou), `hash` je jen index. `rawResponse` (u dávek výstup celé dávky – nevracet v API), `batchId`, tokeny, model |
+| **Document** | unikátní je `pageId` (1:1 se stránkou), `hash` je jen index. `rawResponse` (u dávek výstup celé dávky – nevracet v API), `batchId`, tokeny, model, `chargedCredits` (skutečný odečet za aktuální výsledek; null = starší dokument, UI cenu odhadne) |
 | **Translation** | unikátní `[documentId, language]`, volitelně vlastní `context` a `glossaryJson` |
 | **DocumentVersion** | `version` auto-increment per dokument (retry na kolizi), `source`: ai_initial, ai_retranslate, ai_regenerate, manual_edit |
 | **ProcessingJob** | `type`: ocr, retranslate, generate-context, fix-contexts, translate-context; `jobData` (JSON) |
-| **TokenTransaction** | idempotence přes `@@unique([userId, referenceId])` |
+| **TokenTransaction** | idempotence přes `@@unique([userId, referenceId])`; u spotřeby `model`, tokeny a `collectionId` – cena svazku = součet odečtů (+ odhad u dokumentů bez `chargedCredits`) |
 | **CreditHold** | `status`: active, settled, released. Volný kredit = zůstatek − aktivní rezervace. Osiřelé rezervace uvolňuje úklid přerušených jobů (`jobId`) a TTL (`expiresAt`) |
 
 ---

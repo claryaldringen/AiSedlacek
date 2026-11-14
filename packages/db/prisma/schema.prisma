@@ -162,6 +162,10 @@ model Document {
   outputTokens    Int?
   processingTimeMs Int?
   batchId         String?
+  // Kredity skutečně odečtené za aktuální výsledek OCR (podíl dávky včetně
+  // odmítnutých pokusů, u kopie cena deduplikace). Null = zpracováno před
+  // zavedením (BIL-11) nebo odečet selhal – UI pak cenu jen odhadne z tokenů.
+  chargedCredits  Int?
 
   @@index([hash])
 }
@@ -177,6 +181,9 @@ model Translation {
   model        String?
   inputTokens  Int?
   outputTokens Int?
+  // Kredity odečtené za samostatný překlad (retranslace, překlad do dalšího
+  // jazyka); null = součást OCR, nebo zpracováno před zavedením (BIL-11).
+  chargedCredits Int?
 
   // Per-language context and glossary (translated from document's original)
   context      String?
@@ -262,9 +269,17 @@ model TokenTransaction {
   description String
   referenceId String?              // Stripe payment ID, FIO transaction ID, document ID
   createdAt   DateTime             @default(now())
+  // Spotřeba LLM (BIL-11): model a tokeny, ze kterých se částka spočítala,
+  // a svazek, ke kterému patří (cena svazku = součet skutečných odečtů).
+  // U transakcí před zavedením jsou prázdné.
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  collectionId String?
 
   @@unique([userId, referenceId])
   @@index([userId, createdAt])
+  @@index([collectionId])
 }
 
 // Rezervace kreditu před placeným voláním LLM (BIL-1). Zůstatek v ledgeru

@@ -46,6 +46,7 @@ export async function handleTranslateContext(
       // Deterministický klíč z jobu (BIL-3, dřív Date.now())
       referenceId: `translate-context:${jobId}:${collectionId}:${targetLanguage}`,
       description: `Překlad kontextu svazku ${collection.name} do ${targetLang}`,
+      collectionId,
     },
     {
       model: TEXT_MODEL,

@@ -51,13 +51,23 @@ export async function getPreviousPageContext(
 
 // ── saveDocumentResult ────────────────────────────────────────
 
+/** Metadata zpracování ukládaná k dokumentu. */
+export interface DocumentMetadata {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  processingTimeMs: number;
+  /** Kredity skutečně odečtené za výsledek (BIL-11); null = odečet neznámý. */
+  chargedCredits?: number | null;
+}
+
 export async function saveDocumentResult(
   pageId: string,
   existingDoc: { id: string } | null,
   hash: string,
   result: StructuredOcrResult,
   rawResponseLine: string,
-  metadata: { model: string; inputTokens: number; outputTokens: number; processingTimeMs: number },
+  metadata: DocumentMetadata,
   targetLang: string,
   batchId?: string,
 ): Promise<{ id: string }> {
@@ -67,6 +77,8 @@ export async function saveDocumentResult(
         documentId: existingDoc.id,
         language: result.translationLanguage || targetLang,
         text: result.translation,
+        // Dokument už existoval – celé OCR volání zaplatil tento překlad
+        ...(metadata.chargedCredits != null ? { chargedCredits: metadata.chargedCredits } : {}),
       },
     });
     // Posunout Document.updatedAt – podle něj `ais push` detekuje, že se překlad
@@ -91,6 +103,7 @@ export async function saveDocumentResult(
       inputTokens: metadata.inputTokens,
       outputTokens: metadata.outputTokens,
       processingTimeMs: metadata.processingTimeMs,
+      chargedCredits: metadata.chargedCredits ?? null,
       ...(batchId ? { batchId } : {}),
       glossary: {
         create: result.glossary.map((g) => ({
@@ -151,7 +164,7 @@ export async function regenerateDocumentResult(
   documentId: string,
   result: StructuredOcrResult,
   rawResponse: string,
-  metadata: { model: string; inputTokens: number; outputTokens: number; processingTimeMs: number },
+  metadata: DocumentMetadata,
   targetLang: string,
   jobId: string,
 ): Promise<{ id: string }> {
@@ -208,6 +221,8 @@ export async function regenerateDocumentResult(
             inputTokens: metadata.inputTokens,
             outputTokens: metadata.outputTokens,
             processingTimeMs: metadata.processingTimeMs,
+            // Cena aktuálního výsledku – předchozí zpracování zůstává v ledgeru svazku
+            chargedCredits: metadata.chargedCredits ?? null,
             batchId: jobId,
             glossary: {
               create: result.glossary.map((g) => ({ term: g.term, definition: g.definition })),
@@ -311,6 +326,8 @@ export async function findDedupSourceDocument(
 export async function copyDocumentForPage(
   pageId: string,
   source: DedupSourceDocument,
+  /** Kredity odečtené za kopii (cena původního OCR); null = neúčtováno. */
+  chargedCredits: number | null = null,
 ): Promise<{ id: string }> {
   const doc = await prisma.document.create({
     data: {
@@ -324,6 +341,7 @@ export async function copyDocumentForPage(
       inputTokens: source.inputTokens,
       outputTokens: source.outputTokens,
       processingTimeMs: source.processingTimeMs,
+      chargedCredits,
       glossary: {
         create: source.glossary.map((g) => ({
           term: g.term,
@@ -337,6 +355,8 @@ export async function copyDocumentForPage(
           model: t.model,
           inputTokens: t.inputTokens,
           outputTokens: t.outputTokens,
+          // Kopie překladu se neúčtuje – cena kopie je jen cena původního OCR
+          chargedCredits: t.inputTokens || t.outputTokens ? 0 : null,
         })),
       },
     },

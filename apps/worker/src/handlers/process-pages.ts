@@ -8,7 +8,7 @@
 import crypto from 'crypto';
 import { LANGUAGE_NAMES } from '../lib/languages';
 import { isCliMode } from '../lib/llm';
-import { createBilledMessage } from '../lib/billed-message';
+import { chargedCreditsOf, createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
 import {
   consumeCredits,
@@ -16,6 +16,7 @@ import {
   releaseCreditHold,
   reserveCredits,
   settleCreditHold,
+  settledCredits,
   type CreditCharge,
 } from '@ai-sedlacek/db/billing';
 import {
@@ -227,6 +228,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
             sourceTranslation,
             language,
             collectionLabel,
+            page.collection?.id ?? collectionId ?? null,
           );
           await setPageStatus(pageId, 'done');
         } catch (err) {
@@ -278,6 +280,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       // kreditu (BIL-1: zůstatek nesmí do minusu a kopie nesmí být zadarmo).
       const origInput = existingByHash.inputTokens ?? 0;
       const origOutput = existingByHash.outputTokens ?? 0;
+      let copyCharged: number | null = null;
       if (origInput + origOutput > 0) {
         const charged = await consumeCredits(userId, {
           referenceId: dedupReferenceId(pageId, existingByHash.id),
@@ -285,7 +288,9 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           model: existingByHash.model ?? OCR_MODEL,
           inputTokens: origInput,
           outputTokens: origOutput,
+          collectionId: page.collection?.id ?? collectionId ?? null,
         });
+        if (charged.ok) copyCharged = settledCredits(charged.result);
         if (!charged.ok) {
           const message = insufficientCreditMessage(charged.required, charged.available);
           errors.push(`Stránka ${pageId}: ${message}`);
@@ -294,7 +299,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           continue;
         }
       }
-      const copiedDoc = await copyDocumentForPage(pageId, existingByHash);
+      const copiedDoc = await copyDocumentForPage(pageId, existingByHash, copyCharged);
 
       // Check if copied document has translation in target language
       const hasTargetTranslation = existingByHash.translations.some(
@@ -318,6 +323,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
               sourceTranslation,
               language,
               collectionLabel,
+              page.collection?.id ?? collectionId ?? null,
             );
           } catch (err) {
             const msg = err instanceof Error ? err.message : 'Chyba překladu';
@@ -585,10 +591,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         sentPages.map((p) => p.pageId),
       );
       const refusedDescription = `OCR dávka ${batchNo} – odmítnuto modelem${collectionLabel}`;
-      await settleCreditHold(hold, [
-        ...refusalCharges(err.usage, refusedReferenceId, refusedDescription),
-        ...declinedAttemptCharges(err.declinedAttempts, refusedDescription, refusedReferenceId),
-      ]).catch(async (billingErr: unknown) => {
+      await settleCreditHold(
+        hold,
+        withCollection(firstPage.collectionId, [
+          ...refusalCharges(err.usage, refusedReferenceId, refusedDescription),
+          ...declinedAttemptCharges(err.declinedAttempts, refusedDescription, refusedReferenceId),
+        ]),
+      ).catch(async (billingErr: unknown) => {
         console.error(`[Worker] Billing of refused batch failed for job ${jobId}:`, billingErr);
         await releaseCreditHold(hold).catch(() => false);
       });
@@ -625,17 +634,24 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     // Chyba billingu (DB) nesmí zahodit výstup dávky, který už je zaplacený
     // Anthropicu: výsledky se uloží a další dávky se zastaví.
     let billingFailed = false;
+    // Skutečný odečet za dávku (i s odmítnutými pokusy) se rozpočítá na stránky
+    // a uloží k dokumentům (BIL-11); při selhání vyúčtování zůstane neznámý.
+    let perPageCharged: number | null = null;
     try {
-      await settleCreditHold(hold, [
-        {
-          referenceId: batchReferenceId,
-          description: batchDescription,
-          model,
-          inputTokens,
-          outputTokens,
-        },
-        ...declinedAttemptCharges(declinedAttempts, batchDescription, batchReferenceId),
-      ]);
+      const settle = await settleCreditHold(
+        hold,
+        withCollection(firstPage.collectionId, [
+          {
+            referenceId: batchReferenceId,
+            description: batchDescription,
+            model,
+            inputTokens,
+            outputTokens,
+          },
+          ...declinedAttemptCharges(declinedAttempts, batchDescription, batchReferenceId),
+        ]),
+      );
+      perPageCharged = Math.round(settledCredits(settle) / sentPages.length);
     } catch (err) {
       console.error(`[Worker] Billing failed for job ${jobId}, batch ${batchNo}:`, err);
       billingFailed = true;
@@ -659,6 +675,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           inputTokens: perPageInputTokens,
           outputTokens: perPageOutputTokens,
           processingTimeMs: perPageProcessingTimeMs,
+          chargedCredits: perPageCharged,
         };
         const doc =
           regenerate && pageInfo.existingDocId
@@ -832,6 +849,11 @@ export function affordablePageCount(
   return 0;
 }
 
+/** Položkám vyúčtování doplní svazek (cena svazku z ledgeru, BIL-11). */
+function withCollection(collectionId: string | null, charges: CreditCharge[]): CreditCharge[] {
+  return charges.map((c) => ({ ...c, collectionId }));
+}
+
 /** `referenceId` odečtu za deduplikovanou kopii – stránka + zdrojový dokument. */
 export function dedupReferenceId(pageId: string, sourceDocumentId: string): string {
   return `dedup:${pageId}:${sourceDocumentId}`;
@@ -891,6 +913,7 @@ async function translateExistingDocument(
   sourceTranslation: { language: string; text: string },
   targetLanguage: string,
   collectionLabel: string,
+  collectionId: string | null,
 ): Promise<void> {
   const sourceLang = LANGUAGE_NAMES[sourceTranslation.language] ?? sourceTranslation.language;
   const targetLang = LANGUAGE_NAMES[targetLanguage] ?? targetLanguage;
@@ -930,12 +953,13 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
   // i když se výsledek neuloží. Deterministický referenceId (bez Date.now()) –
   // opakovaný běh neúčtuje dvakrát. Bez volného kreditu se volání nespustí
   // (InsufficientCreditError skončí jako chyba stránky).
-  const { response } = await createBilledMessage(
+  const { response, billing } = await createBilledMessage(
     {
       userId,
       jobId,
       referenceId: `translate-doc-${jobId}-${doc.id}-${targetLanguage}`,
       description: `Překlad dokumentu ${doc.id}${collectionLabel}`,
+      collectionId,
     },
     {
       model: TEXT_MODEL,
@@ -986,6 +1010,7 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
       model: response.model,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
+      chargedCredits: chargedCreditsOf(billing),
     },
     create: {
       documentId: doc.id,
@@ -996,6 +1021,7 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
       model: response.model,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
+      chargedCredits: chargedCreditsOf(billing),
     },
   });
 

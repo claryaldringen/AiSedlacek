@@ -11,6 +11,7 @@
  * Logika rezervací a stropů samotná je testovaná v packages/db.
  */
 import { vi } from 'vitest';
+import { creditsForUsage } from '@ai-sedlacek/shared';
 import type * as Billing from '@ai-sedlacek/db/billing';
 
 type CreditCharge = Billing.CreditCharge;
@@ -26,7 +27,18 @@ class InsufficientCreditError extends Error {
   }
 }
 
-const emptySettle = { charged: 0, uncovered: 0, transactions: [] };
+/** Vyúčtování „naostro" podle ceníku – bez stropu, každá položka nová. */
+function settleOf(charges: CreditCharge[]): Billing.SettleResult {
+  const transactions = charges.map((c, i) => {
+    const credits = c.credits ?? creditsForUsage(c.model, c.inputTokens, c.outputTokens);
+    return { referenceId: c.referenceId, id: `tr-${i}`, amount: -credits, existing: false };
+  });
+  return {
+    charged: transactions.reduce((n, t) => n - t.amount, 0),
+    uncovered: 0,
+    transactions,
+  };
+}
 
 export const billing = {
   InsufficientCreditError,
@@ -38,6 +50,8 @@ export const billing = {
   releaseJobHolds: vi.fn(),
   releaseExpiredHolds: vi.fn(),
   runBilledCall: vi.fn(),
+  settledCredits: (result: Billing.SettleResult): number =>
+    result.transactions.reduce((sum, tr) => sum - tr.amount, 0),
 };
 
 /** Výchozí chování: dost kreditu, rezervace i vyúčtování projdou. */
@@ -54,9 +68,16 @@ export function resetBillingMock(available = 1_000_000_000): void {
       referenceId: p.referenceId,
     },
   }));
-  billing.settleCreditHold.mockReset().mockResolvedValue(emptySettle);
+  billing.settleCreditHold
+    .mockReset()
+    .mockImplementation(async (_hold: unknown, charges: CreditCharge[]) => settleOf(charges));
   billing.releaseCreditHold.mockReset().mockResolvedValue(true);
-  billing.consumeCredits.mockReset().mockResolvedValue({ ok: true, result: emptySettle });
+  billing.consumeCredits
+    .mockReset()
+    .mockImplementation(async (_userId: string, charge: CreditCharge) => ({
+      ok: true,
+      result: settleOf([charge]),
+    }));
   billing.releaseJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseExpiredHolds.mockReset().mockResolvedValue(0);
   // Stejný tok jako skutečné runBilledCall, nad mocky výše.

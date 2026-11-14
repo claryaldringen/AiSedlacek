@@ -121,6 +121,7 @@ import {
   reserveCreditsOrThrow,
   runBilledCall,
   settleCreditHold,
+  settledCredits,
   type CreditCharge,
 } from '../billing';
 import { prisma } from '../client';
@@ -232,6 +233,46 @@ describe('rezervace kreditu', () => {
     expect(settle).toMatchObject({ charged: 12_880, uncovered: 0 });
     expect(await getCreditState('u1')).toEqual({ balance: 87_120, reserved: 0, available: 87_120 });
     expect(db.holds[0]!.status).toBe('settled');
+  });
+
+  it('položka ledgeru nese model, tokeny a svazek (BIL-11)', async () => {
+    topUp('u1', 100_000);
+    const hold = await reserveCreditsOrThrow({
+      userId: 'u1',
+      amount: 50_000,
+      referenceId: 'ocr',
+      description: 't',
+    });
+    await settleCreditHold(hold, [
+      {
+        referenceId: 'ocr',
+        description: 'OCR',
+        model: 'claude-opus-5-5',
+        inputTokens: 1000,
+        outputTokens: 500,
+        collectionId: 'col-1',
+      },
+    ]);
+    expect(db.transactions.at(-1)).toMatchObject({
+      amount: -12_880,
+      model: 'claude-opus-5-5',
+      inputTokens: 1000,
+      outputTokens: 500,
+      collectionId: 'col-1',
+    });
+  });
+
+  it('settledCredits sečte i položky zapsané dřívějším během', async () => {
+    expect(
+      settledCredits({
+        charged: 0,
+        uncovered: 0,
+        transactions: [
+          { referenceId: 'a', id: '1', amount: -300, existing: true },
+          { referenceId: 'b', id: '2', amount: -200, existing: false },
+        ],
+      }),
+    ).toBe(500);
   });
 
   it('opakované vyúčtování (restart workeru) neodečte podruhé', async () => {

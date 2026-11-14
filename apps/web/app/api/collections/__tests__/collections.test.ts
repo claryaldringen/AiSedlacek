@@ -12,6 +12,7 @@ const mockPublicSlugDeleteMany = vi.fn();
 const mockPageGroupBy = vi.fn();
 const mockDocumentAggregate = vi.fn();
 const mockQueryRaw = vi.fn();
+const mockLedgerGroupBy = vi.fn();
 const mockWorkspaceItemFindFirst = vi.fn();
 const mockWorkspaceFindUnique = vi.fn();
 const mockWorkspaceMemberFindUnique = vi.fn();
@@ -51,6 +52,9 @@ vi.mock('@/lib/infrastructure/db', () => ({
       aggregate: (...args: unknown[]) => mockDocumentAggregate(...args),
     },
     $queryRaw: (...args: unknown[]) => mockQueryRaw(...args),
+    tokenTransaction: {
+      groupBy: (...args: unknown[]) => mockLedgerGroupBy(...args),
+    },
     workspace: {
       findUnique: (...args: unknown[]) => mockWorkspaceFindUnique(...args),
     },
@@ -173,19 +177,27 @@ describe('GET /api/collections', () => {
       { collectionId: 'col-1', status: 'pending', _count: 1 },
     ]);
     mockQueryRaw.mockResolvedValue([
+      // Starší dokument bez záznamu odečtu → cena odhadem z tokenů
       {
         collectionId: 'col-1',
         model: 'claude-opus-4-6',
         inputTokens: BigInt(600),
         outputTokens: BigInt(300),
+        legacyInputTokens: BigInt(600),
+        legacyOutputTokens: BigInt(300),
       },
+      // Nový dokument se záznamem odečtu → cena jen z ledgeru (ne podruhé z tokenů)
       {
         collectionId: 'col-1',
         model: 'claude-opus-5-5',
         inputTokens: BigInt(400),
         outputTokens: BigInt(200),
+        legacyInputTokens: null,
+        legacyOutputTokens: null,
       },
     ]);
+    // Skutečné odečty za svazek (OCR včetně odmítnutí a regenerací, kontexty, chat)
+    mockLedgerGroupBy.mockResolvedValue([{ collectionId: 'col-1', _sum: { amount: -6000 } }]);
 
     const res = await listCollections(
       new NextRequest('http://localhost/api/collections?workspaceId=ws-1'),
@@ -200,11 +212,17 @@ describe('GET /api/collections', () => {
     expect(json[0].processableCount).toBe(1);
     expect(json[0].stats.inputTokens).toBe(1000);
     expect(json[0].stats.outputTokens).toBe(500);
-    // Cena pro uživatele po modelech (náklad API × kurz 23 × marže 2), ne surové USD:
-    // Opus 4.6: 600 × $5 + 300 × $25 = $0.0105 → 0,483 Kč = 9 660 kreditů
-    // Opus 5.5: 400 × $4 + 200 × $20 = $0.0056 → 0,2576 Kč = 5 152 kreditů
-    expect(json[0].stats.chargeCzk).toBe(0.7406);
-    expect(json[0].stats.chargeCredits).toBe(14812);
+    // Cena svazku (BIL-11) = skutečné odečty z ledgeru + odhad u starších dokumentů:
+    // ledger 6 000 kreditů = 0,30 Kč; odhad Opus 4.6: 600 × $5 + 300 × $25 = $0.0105
+    // → 0,483 Kč = 9 660 kreditů
+    expect(json[0].stats.chargeCzk).toBe(0.783);
+    expect(json[0].stats.chargeCredits).toBe(15_660);
+    expect(json[0].stats.chargeEstimatedCredits).toBe(9660);
+    expect(mockLedgerGroupBy).toHaveBeenCalledWith({
+      by: ['collectionId'],
+      where: { collectionId: { in: ['col-1', 'col-2'] }, type: 'consumption' },
+      _sum: { amount: true },
+    });
     expect(json[0].stats).not.toHaveProperty('costUsd');
     expect(json[1].name).toBe('Druhy svazek');
     // Cizí svazek ve workspace je jen pro čtení

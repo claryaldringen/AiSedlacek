@@ -243,6 +243,8 @@ export interface CreditCharge {
   outputTokens: number;
   /** Pevná částka místo výpočtu z tokenů (např. deduplikovaná kopie OCR). */
   credits?: number;
+  /** Svazek, ke kterému spotřeba patří – z ledgeru se počítá cena svazku (BIL-11). */
+  collectionId?: string | null;
 }
 
 export interface SettleResult {
@@ -306,6 +308,11 @@ async function writeCharges(
         amount: -amount,
         description: charge.description,
         referenceId: charge.referenceId,
+        // Podklad částky a příslušnost ke svazku (BIL-11)
+        model: charge.model,
+        inputTokens: charge.inputTokens,
+        outputTokens: charge.outputTokens,
+        collectionId: charge.collectionId ?? null,
       },
       select: { id: true },
     });
@@ -483,6 +490,11 @@ export async function runBilledCall<T>(
     await releaseCreditHold(hold).catch(() => false);
     return { result, billing: { ok: false, error } };
   }
+}
+
+/** Kredity skutečně odečtené vyúčtováním (včetně položek zapsaných dřívějším během). */
+export function settledCredits(result: SettleResult): number {
+  return result.transactions.reduce((sum, tr) => sum - tr.amount, 0);
 }
 
 export function czkToTokens(amountHalire: number): number {

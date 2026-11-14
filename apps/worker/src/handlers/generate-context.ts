@@ -98,6 +98,7 @@ ${concatenated}`;
       // Deterministický klíč z jobu (BIL-3, dřív Date.now())
       referenceId: `generate-context:${jobId}:${collectionId}`,
       description: `Generování kontextu svazku ${collection.name} z ${pagesWithDocs.length} stránek`,
+      collectionId,
     },
     {
       model: TEXT_MODEL,
@@ -145,6 +146,7 @@ ${concatenated}`;
         // Deterministický klíč z jobu (BIL-3, dřív Date.now())
         referenceId: `generate-context-meta:${jobId}:${collectionId}`,
         description: `Metadata kontextu svazku ${collection.name}`,
+        collectionId,
       },
       {
         model: TEXT_MODEL,

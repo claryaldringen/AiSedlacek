@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
-import { chargeForUsage, formatCzk } from '@/lib/pricing';
+import { chargeForUsage, documentCharge, formatCzk } from '@/lib/pricing';
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
@@ -23,6 +23,8 @@ export interface DocumentResult {
   inputTokens?: number | null;
   outputTokens?: number | null;
   processingTimeMs?: number | null;
+  /** Skutečně odečtené kredity za OCR (BIL-11); null = starší dokument, cena odhadem. */
+  chargedCredits?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   // Page metadata (passed through)
@@ -36,6 +38,7 @@ export interface DocumentResult {
   translationModel?: string | null;
   translationInputTokens?: number | null;
   translationOutputTokens?: number | null;
+  translationChargedCredits?: number | null;
   // Chat accumulated cost
   chatInputTokens?: number;
   chatOutputTokens?: number;
@@ -213,15 +216,17 @@ export function ResultViewer({
   const t = useTranslations('document');
   const tc = useTranslations('common');
   const locale = useLocale();
-  // Cena pro uživatele – stejný výpočet jako účtování kreditů.
+  // Cena pro uživatele (BIL-11): skutečný odečet, u starších dokumentů odhad
+  // stejným výpočtem jako účtování kreditů – v UI označený.
   const formatCharge = (
+    chargedCredits: number | null | undefined,
     model: string | null | undefined,
     inputTokens: number | null | undefined,
     outputTokens: number | null | undefined,
   ): string | null => {
-    const charge = chargeForUsage(model, inputTokens, outputTokens);
+    const charge = documentCharge(chargedCredits, model, inputTokens, outputTokens);
     return charge
-      ? t('chargeValue', {
+      ? t(charge.estimated ? 'chargeValueEstimated' : 'chargeValue', {
           czk: formatCzk(charge.czk, locale),
           credits: charge.credits.toLocaleString(locale),
         })
@@ -391,6 +396,7 @@ export function ResultViewer({
                       model?: string;
                       inputTokens?: number;
                       outputTokens?: number;
+                      chargedCredits?: number | null;
                     }[];
                   };
                   const translation = doc.translations.find(
@@ -404,6 +410,7 @@ export function ResultViewer({
                       translationModel: translation.model,
                       translationInputTokens: translation.inputTokens,
                       translationOutputTokens: translation.outputTokens,
+                      translationChargedCredits: translation.chargedCredits,
                     });
                   }
                 }
@@ -559,7 +566,12 @@ export function ResultViewer({
                 />
                 <MetadataRow
                   label={t('totalPrice')}
-                  value={formatCharge(result.model, result.inputTokens, result.outputTokens)}
+                  value={formatCharge(
+                    result.chargedCredits,
+                    result.model,
+                    result.inputTokens,
+                    result.outputTokens,
+                  )}
                 />
                 <MetadataRow
                   label={t('createdAt')}
@@ -589,6 +601,7 @@ export function ResultViewer({
                   <MetadataRow
                     label={t('totalPrice')}
                     value={formatCharge(
+                      result.translationChargedCredits,
                       result.translationModel,
                       result.translationInputTokens,
                       result.translationOutputTokens,
@@ -610,6 +623,7 @@ export function ResultViewer({
                   <MetadataRow
                     label={t('totalPrice')}
                     value={formatCharge(
+                      null,
                       result.chatModel,
                       result.chatInputTokens,
                       result.chatOutputTokens,
@@ -620,21 +634,31 @@ export function ResultViewer({
 
               {(() => {
                 const charges = [
-                  chargeForUsage(result.model, result.inputTokens, result.outputTokens),
-                  chargeForUsage(
+                  documentCharge(
+                    result.chargedCredits,
+                    result.model,
+                    result.inputTokens,
+                    result.outputTokens,
+                  ),
+                  documentCharge(
+                    result.translationChargedCredits,
                     result.translationModel,
                     result.translationInputTokens,
                     result.translationOutputTokens,
                   ),
+                  // Chat se účtuje přesně podle usage odpovědí v této relaci
                   chargeForUsage(result.chatModel, result.chatInputTokens, result.chatOutputTokens),
                 ];
                 const czk = charges.reduce((sum, c) => sum + (c?.czk ?? 0), 0);
                 const credits = charges.reduce((sum, c) => sum + (c?.credits ?? 0), 0);
+                const estimated = charges.some(
+                  (c) => c !== null && 'estimated' in c && c.estimated,
+                );
                 return credits > 0 ? (
                   <MetadataGroup title={t('grandTotal')}>
                     <MetadataRow
                       label={t('totalGrandPrice')}
-                      value={t('chargeValue', {
+                      value={t(estimated ? 'chargeValueEstimated' : 'chargeValue', {
                         czk: formatCzk(czk, locale),
                         credits: credits.toLocaleString(locale),
                       })}

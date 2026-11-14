@@ -113,8 +113,11 @@ beforeEach(() => {
     return pages.get(where.id) ?? null;
   });
   mocks.prisma.page.findMany.mockImplementation(
-    async ({ where }: { where: { id: { in: string[] } } }) =>
-      where.id.in.filter((id) => pages.has(id)).map((id) => ({ id, order: pages.get(id)!.order })),
+    async ({ where }: { where: { id: { in?: string[] } } }) =>
+      // Kontext předchozích stránek svazku (getPreviousPageContext) v testech prázdný
+      (where.id.in ?? [])
+        .filter((id) => pages.has(id))
+        .map((id) => ({ id, order: pages.get(id)!.order })),
   );
   mocks.prisma.page.update.mockResolvedValue({});
   mocks.prisma.page.updateMany.mockResolvedValue({ count: 0 });
@@ -436,7 +439,8 @@ describe('processPages – překlad k existujícímu dokumentu (S2-11)', () => {
 
     expect(mocks.prisma.document.create).not.toHaveBeenCalled();
     expect(mocks.prisma.translation.create).toHaveBeenCalledWith({
-      data: { documentId: 'legacy-doc', language: 'cs', text: 'překlad 0' },
+      // Celé OCR volání zaplatil nový překlad: Opus 4.6 1000 × $5 + 500 × $25 → 16 100 kreditů
+      data: { documentId: 'legacy-doc', language: 'cs', text: 'překlad 0', chargedCredits: 16_100 },
     });
     // Token detekce konfliktů pro `ais push` (Translation vlastní updatedAt nemá).
     expect(mocks.prisma.document.update).toHaveBeenCalledWith({
@@ -1193,5 +1197,69 @@ describe('processPages – rezervace kreditu (BIL-1)', () => {
 
     expect(billing.releaseCreditHold).toHaveBeenCalledTimes(1);
     expect(billing.settleCreditHold).not.toHaveBeenCalled();
+  });
+});
+
+// ── BIL-11: skutečný odečet u dokumentu a svazku ─────────────
+describe('processPages – skutečný odečet k dokumentu a svazku (BIL-11)', () => {
+  it('rozpočítá odečet dávky (i odmítnuté pokusy) na stránky a položky označí svazkem', async () => {
+    addPage('p1', { collection: { id: 'col-1', context: '' } });
+    addPage('p2', { collection: { id: 'col-1', context: '' } });
+    const ocrDefault = mocks.processWithClaudeBatch.getMockImplementation()!;
+    mocks.processWithClaudeBatch.mockImplementation(async (...args: unknown[]) => ({
+      ...(await ocrDefault(...args)),
+      model: 'claude-opus-5-5',
+      inputTokens: 2000,
+      outputTokens: 4000,
+      declinedAttempts: [
+        { model: 'claude-opus-5-5', inputTokens: 2000, outputTokens: 100, category: 'bio' },
+      ],
+    }));
+
+    await processPages({ ...baseJob, pageIds: ['p1', 'p2'], collectionId: 'col-1' });
+
+    // Každá položka ledgeru nese svazek → cena svazku = součet skutečných odečtů
+    expect(charges().map((c) => c.collectionId)).toEqual(['col-1', 'col-1']);
+    // Opus 5.5: (2000 × 4 + 4000 × 20) + (2000 × 4 + 100 × 20) = 98 000 → × 46 / 50 = 90 160
+    const perPage = Math.round(90_160 / 2);
+    const saved = mocks.prisma.document.create.mock.calls.map((c) => c[0].data.chargedCredits);
+    expect(saved).toEqual([perPage, perPage]);
+  });
+
+  it('při selhání vyúčtování zůstane odečet u dokumentu neznámý (null)', async () => {
+    addPage('p1');
+    billing.settleCreditHold.mockRejectedValue(new Error('DB down'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.document.create.mock.calls[0]![0].data.chargedCredits).toBeNull();
+  });
+
+  it('deduplikovaná kopie nese cenu kopie, kopie překladů se neúčtují', async () => {
+    addPage('p1');
+    mocks.prisma.document.findFirst.mockResolvedValue({
+      id: 'own-doc',
+      hash: 'h',
+      rawResponse: null,
+      transcription: 't',
+      detectedLanguage: 'la',
+      context: 'k',
+      model: 'claude-opus-5-5',
+      inputTokens: 1000,
+      outputTokens: 500,
+      processingTimeMs: 10,
+      translations: [
+        { language: 'cs', text: 'p', model: 'claude-sonnet-4-6', inputTokens: 10, outputTokens: 5 },
+      ],
+      glossary: [],
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    const data = mocks.prisma.document.create.mock.calls[0]![0].data;
+    // Opus 5.5: 1000 × $4 + 500 × $20 → 12 880 kreditů
+    expect(data.chargedCredits).toBe(12_880);
+    expect(data.translations.create[0].chargedCredits).toBe(0);
   });
 });

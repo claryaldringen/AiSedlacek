@@ -110,6 +110,7 @@ ${collection.context}`;
           model: r.model,
           inputTokens: r.usage.input_tokens,
           outputTokens: r.usage.output_tokens,
+          collectionId: id,
         },
       ],
     ));

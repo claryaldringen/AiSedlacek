@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/infrastructure/db';
 import { resolveUserId } from '@/lib/infrastructure/auth-utils';
 import { chargeForUsage } from '@/lib/pricing';
+import { creditsToCzk } from '@ai-sedlacek/shared';
 import { ensureWorkspaces } from '@/lib/infrastructure/workspace';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -63,33 +64,48 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Statistiky všech svazků dvěma dotazy místo dvou dotazů na každý svazek (N+1).
   const collectionIds = collections.map((c) => c.id);
-  const [statusCounts, tokenSums] = collectionIds.length
+  const [statusCounts, tokenSums, ledgerSums] = collectionIds.length
     ? await Promise.all([
         prisma.page.groupBy({
           by: ['collectionId', 'status'],
           where: { collectionId: { in: collectionIds } },
           _count: true,
         }),
-        // Po modelech – náklad se počítá sazbou modelu, který dokument zpracoval.
+        // Po modelech – tokeny všech dokumentů a zvlášť tokeny dokumentů bez
+        // záznamu skutečného odečtu (zpracované před BIL-11), jejichž cena se
+        // odhaduje sazbou modelu, který dokument zpracoval.
         prisma.$queryRaw<
           {
             collectionId: string;
             model: string | null;
             inputTokens: bigint | null;
             outputTokens: bigint | null;
+            legacyInputTokens: bigint | null;
+            legacyOutputTokens: bigint | null;
           }[]
         >(Prisma.sql`
           SELECT p."collectionId" AS "collectionId",
                  d."model" AS "model",
                  SUM(d."inputTokens") AS "inputTokens",
-                 SUM(d."outputTokens") AS "outputTokens"
+                 SUM(d."outputTokens") AS "outputTokens",
+                 SUM(CASE WHEN d."chargedCredits" IS NULL THEN d."inputTokens" END)
+                   AS "legacyInputTokens",
+                 SUM(CASE WHEN d."chargedCredits" IS NULL THEN d."outputTokens" END)
+                   AS "legacyOutputTokens"
           FROM "Document" d
           JOIN "Page" p ON p."id" = d."pageId"
           WHERE p."collectionId" IN (${Prisma.join(collectionIds)})
           GROUP BY p."collectionId", d."model"
         `),
+        // Skutečné odečty za svazek (BIL-11): OCR včetně odmítnutých pokusů
+        // a regenerací, kopie, retranslace, kontexty i chat.
+        prisma.tokenTransaction.groupBy({
+          by: ['collectionId'],
+          where: { collectionId: { in: collectionIds }, type: 'consumption' },
+          _sum: { amount: true },
+        }),
       ])
-    : [[], []];
+    : [[], [], []];
 
   const statusByCollection = new Map<string, Record<string, number>>();
   for (const s of statusCounts) {
@@ -98,27 +114,48 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     byStatus[s.status] = s._count;
     statusByCollection.set(s.collectionId, byStatus);
   }
-  // Cena pro uživatele (Kč + kredity) stejným výpočtem jako účtování a cena
-  // u dokumentu – ne surový náklad API v USD bez marže.
-  const tokensByCollection = new Map<
-    string,
-    { inputTokens: number; outputTokens: number; chargeCzk: number; chargeCredits: number }
-  >();
-  for (const row of tokenSums) {
-    const input = Number(row.inputTokens ?? 0);
-    const output = Number(row.outputTokens ?? 0);
-    const acc = tokensByCollection.get(row.collectionId) ?? {
+  // Cena svazku (BIL-11) = součet skutečných odečtů z ledgeru + odhad za dokumenty
+  // zpracované před zavedením záznamu odečtu (podle aktuálního ceníku, v UI
+  // označený jako odhad). Dokument po další regeneraci záznam dostane a z odhadu
+  // vypadne – nic se nezapočítá dvakrát.
+  interface CollectionCharge {
+    inputTokens: number;
+    outputTokens: number;
+    chargeCzk: number;
+    chargeCredits: number;
+    estimatedCredits: number;
+  }
+  const tokensByCollection = new Map<string, CollectionCharge>();
+  const accFor = (collectionId: string): CollectionCharge => {
+    const acc = tokensByCollection.get(collectionId) ?? {
       inputTokens: 0,
       outputTokens: 0,
       chargeCzk: 0,
       chargeCredits: 0,
+      estimatedCredits: 0,
     };
-    const charge = chargeForUsage(row.model, input, output);
-    acc.inputTokens += input;
-    acc.outputTokens += output;
-    acc.chargeCzk += charge?.czk ?? 0;
-    acc.chargeCredits += charge?.credits ?? 0;
-    tokensByCollection.set(row.collectionId, acc);
+    tokensByCollection.set(collectionId, acc);
+    return acc;
+  };
+  for (const row of tokenSums) {
+    const acc = accFor(row.collectionId);
+    acc.inputTokens += Number(row.inputTokens ?? 0);
+    acc.outputTokens += Number(row.outputTokens ?? 0);
+    const estimate = chargeForUsage(
+      row.model,
+      Number(row.legacyInputTokens ?? 0),
+      Number(row.legacyOutputTokens ?? 0),
+    );
+    acc.chargeCzk += estimate?.czk ?? 0;
+    acc.chargeCredits += estimate?.credits ?? 0;
+    acc.estimatedCredits += estimate?.credits ?? 0;
+  }
+  for (const row of ledgerSums) {
+    if (!row.collectionId) continue;
+    const acc = accFor(row.collectionId);
+    const credits = -(row._sum.amount ?? 0);
+    acc.chargeCzk += creditsToCzk(credits);
+    acc.chargeCredits += credits;
   }
 
   const collectionsWithStats = collections.map((c) => {
@@ -143,6 +180,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         // Na 4 desetinná místa – formatCzk u haléřových částek ukazuje víc míst.
         chargeCzk: Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000,
         chargeCredits: tokens?.chargeCredits ?? 0,
+        // Část ceny odhadnutá z tokenů (dokumenty bez záznamu odečtu); 0 = vše skutečné
+        chargeEstimatedCredits: tokens?.estimatedCredits ?? 0,
       },
     };
   });

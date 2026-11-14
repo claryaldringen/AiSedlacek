@@ -81,6 +81,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
           jobId,
           referenceId: `fix-context:${jobId}:${doc.id}`,
           description: `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
+          collectionId,
         },
         {
           model: TEXT_MODEL,

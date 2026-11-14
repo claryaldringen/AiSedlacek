@@ -110,7 +110,7 @@ export async function POST(request: NextRequest, { params }: RouteContext): Prom
     include: {
       translations: true,
       glossary: true,
-      page: { select: { imageUrl: true, mimeType: true, userId: true } },
+      page: { select: { imageUrl: true, mimeType: true, userId: true, collectionId: true } },
     },
   });
 
@@ -240,7 +240,14 @@ ${glossaryText}`;
         charged = true;
         try {
           await settleCreditHold(hold, [
-            { referenceId, description, model, inputTokens, outputTokens },
+            {
+              referenceId,
+              description,
+              model,
+              inputTokens,
+              outputTokens,
+              collectionId: doc.page.collectionId,
+            },
           ]);
         } catch (billingErr) {
           await releaseCreditHold(hold).catch(() => false);

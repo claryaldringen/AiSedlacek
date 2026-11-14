@@ -53,6 +53,7 @@ const mockDocumentFindUnique = vi.fn();
 const mockDeduct = vi.fn();
 const mockReserve = vi.fn();
 const mockRelease = vi.fn();
+const mockChargeCollections = vi.fn();
 const mockPrepareImage = vi.fn();
 const mockWithSharpLimit = vi.fn();
 
@@ -75,8 +76,10 @@ vi.mock('@/lib/infrastructure/billing', () => ({
       description: string;
       referenceId: string;
       model: string;
+      collectionId?: string | null;
     }[],
   ) => {
+    mockChargeCollections(charges.map((c) => c.collectionId));
     for (const c of charges) {
       await mockDeduct(
         hold.userId,
@@ -158,7 +161,12 @@ beforeEach(() => {
     context: '',
     translations: [{ language: 'cs', text: 'Vyznávám' }],
     glossary: [],
-    page: { imageUrl: '/uploads/scan.jpg', mimeType: 'image/jpeg', userId: 'user-1' },
+    page: {
+      imageUrl: '/uploads/scan.jpg',
+      mimeType: 'image/jpeg',
+      userId: 'user-1',
+      collectionId: 'col-1',
+    },
   });
   mockDeduct.mockResolvedValue(undefined);
   mockReserve.mockImplementation(
@@ -308,6 +316,8 @@ describe('POST /api/documents/[id]/chat – streaming', () => {
     expect(reserve.amount).toBeGreaterThan(113_000);
     // Vyúčtování proběhne s klíčem rezervace
     expect(mockDeduct.mock.calls[0]![4]).toBe(reserve.referenceId);
+    // Spotřeba chatu se počítá do ceny svazku dokumentu (BIL-11)
+    expect(mockChargeCollections).toHaveBeenCalledWith(['col-1']);
   });
 
   it('returns 402 without calling the model when the reservation is refused', async () => {
