@@ -23,7 +23,7 @@ import {
   batchMaxTokens,
   ocrBatchReservationCredits,
 } from '../process';
-import { MAX_IMAGE_INPUT_TOKENS, creditsForUsage } from '@ai-sedlacek/shared';
+import { MAX_IMAGE_INPUT_TOKENS, OCR_MODEL, creditsForUsage } from '@ai-sedlacek/shared';
 
 const OCR_JSON = JSON.stringify({
   transcription: 'Text',
@@ -301,16 +301,29 @@ describe('server-side fallback – usage of declined attempts', () => {
 });
 
 describe('rezervace kreditu před OCR dávkou (BIL-1)', () => {
-  it('pokryje celý max_tokens dávky a obrázky sazbou nejdražšího modelu řetězce fallbacku', () => {
+  it('pokryje celý max_tokens dávky a obrázky sazbou primárního modelu', () => {
     for (const pages of [1, 3, 6]) {
       const hold = ocrBatchReservationCredits(pages, 'Přepiš text z tohoto rukopisu.');
-      // Opus 5 / 4.8 ($5/$25) jsou dražší než Opus 5.5 – rezervace s nimi počítá
-      const worstCase = creditsForUsage(
+      const primary = creditsForUsage(
+        OCR_MODEL,
+        pages * MAX_IMAGE_INPUT_TOKENS,
+        batchMaxTokens(pages),
+      );
+      expect(hold).toBeGreaterThanOrEqual(primary);
+    }
+  });
+
+  it('nerezervuje sazbou dražšího fallbacku, který nastává jen při odmítnutí', () => {
+    // Rozhodnutí 2026-11-14: vzácný přesah při fallbacku (Opus 5 / 4.8, $5/$25)
+    // pokryje volný kredit, jinak ho nese provozovatel – kredit nejde do minusu.
+    for (const pages of [1, 3, 6]) {
+      const hold = ocrBatchReservationCredits(pages, 'Přepiš text z tohoto rukopisu.');
+      const fallbackWorstCase = creditsForUsage(
         'claude-opus-5',
         pages * MAX_IMAGE_INPUT_TOKENS,
         batchMaxTokens(pages),
       );
-      expect(hold).toBeGreaterThanOrEqual(worstCase);
+      expect(hold).toBeLessThan(fallbackWorstCase);
     }
   });
 

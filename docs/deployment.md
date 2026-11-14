@@ -126,9 +126,27 @@ Běžný `deploy.sh`, ruční kroky jen tyto:
 - Až potom vydat CLI 0.3.0 (viz [CLI 0.3.0](#cli-030--přihlášení-bez-tokenu-v-url)).
 
 Změna chování pro uživatele: před každým voláním modelu se rezervuje **maximální** možná
-cena (celý `max_tokens`), nevyužitá část se po dokončení vrací. Zpracování jedné stránky
-OCR tak potřebuje volných zhruba 30 Kč kreditu (skutečná cena ~3,60 Kč); při nižším
-zůstatku se dávky zmenší, případně zpracování nezačne s hláškou, kolik kreditu chybí.
+cena (celý `max_tokens` sazbou primárního modelu), nevyužitá část se po dokončení vrací.
+OCR potřebuje volných zhruba 24 Kč kreditu na jednu stránku, 43 Kč na 3 a 70 Kč na dávku
+6 stránek (skutečná cena ~3,60 Kč za stránku); při nižším zůstatku se dávky zmenší,
+případně zpracování nezačne s hláškou, kolik kreditu chybí.
+
+**Po nasazení změřit skutečnou spotřebu a stropy zmenšit.** Rezervace = `max_tokens`
+(`THINKING_TOKENS_RESERVE` + `BATCH_OUTPUT_TOKENS_PER_PAGE` × stránky v `packages/ocr`),
+takže menší rezervace znamená menší `max_tokens` – ten nesmí odpověď oříznout. K 2026-11-14
+neexistují data pro Opus 5.5 s adaptivním thinkingem (od 2026-10 neproběhl žádný job);
+Opus 4.6 měl výstup na stránku p99 ≈ 3 000, max 3 415 tokenů. Po prvních desítkách dávek:
+
+```sql
+WITH b AS (
+  SELECT "batchId", min(model) AS model, count(*) AS pages, sum("outputTokens") AS out
+  FROM "Document" WHERE "batchId" IS NOT NULL AND "outputTokens" > 0 GROUP BY "batchId")
+SELECT model, pages, count(*) AS batches,
+  percentile_cont(0.99) WITHIN GROUP (ORDER BY out) AS p99_out, max(out) AS max_out
+FROM b GROUP BY model, pages ORDER BY model, pages;
+```
+
+`out` dávky zahrnuje i thinking. Strop `max_tokens` nastavit s rezervou nad maximum.
 
 ## Vydání CLI
 

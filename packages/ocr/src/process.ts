@@ -10,7 +10,6 @@ import {
   BATCH_OCR_INSTRUCTION,
   TRANSLATE_ONLY_SYSTEM_PROMPT,
   OCR_EFFORT,
-  OCR_FALLBACK_MODELS,
   OCR_MODEL,
   MAX_IMAGE_INPUT_TOKENS,
   estimateInputTokens,
@@ -81,7 +80,11 @@ function batchSystemPrompt(mode: ProcessingMode | undefined): string {
  *   požadavku (kontext svazku a předchozích stránek), dvakrát – odmítnutý pokus
  *   serverového fallbacku se účtuje zvlášť a může zaplatit vstup ještě jednou;
  * - výstup: celý `max_tokens` dávky (včetně rezervy na thinking);
- * - sazba nejdražšího z modelů, které můžou odpovědět (OCR_MODEL + fallbacky).
+ * - sazba primárního modelu (OCR_MODEL). Dražší serverový fallback
+ *   (Opus 5 / 4.8) nastává jen při odmítnutí – rezervovat jeho sazbou by
+ *   o čtvrtinu zvedlo rezervaci každé dávky. Vzácný přesah nad rezervaci pokryje
+ *   volný kredit, jinak ho nese provozovatel; kredit nejde do minusu
+ *   (rozhodnutí 2026-11-14).
  *
  * Po volání se účtuje skutečná spotřeba a zbytek rezervace se vrací.
  */
@@ -95,11 +98,7 @@ export function ocrBatchReservationCredits(
     pages * (MAX_IMAGE_INPUT_TOKENS + estimateInputTokens('imageIndex 00:')) +
     estimateInputTokens(batchSystemPrompt(mode)) +
     estimateInputTokens(promptText);
-  return reservationCredits(
-    [OCR_MODEL, ...OCR_FALLBACK_MODELS],
-    2 * inputTokens,
-    batchMaxTokens(pages),
-  );
+  return reservationCredits([OCR_MODEL], 2 * inputTokens, batchMaxTokens(pages));
 }
 
 /** Spotřeba jednoho odmítnutého pokusu volání (model, který ho skutečně zpracoval). */

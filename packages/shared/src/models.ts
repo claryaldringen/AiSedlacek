@@ -19,12 +19,3 @@ export const OCR_EFFORT = 'medium' as const;
 
 /** Textové úlohy: retranslace, chat, kontexty svazků, metadata. */
 export const TEXT_MODEL = 'claude-sonnet-4-6';
-
-/**
- * Modely, na které smí OCR požadavek přejít serverovým fallbackem
- * (`fallbacks: 'default'`) – povolené cíle pro Opus 5.5 jsou Opus 5 a Opus 4.8.
- * Fallback rozhoduje API, ale rezervace kreditu před OCR (BIL-1) musí počítat
- * s nejdražší sazbou ze všech modelů, které můžou odpovědět. Při změně
- * `OCR_MODEL` aktualizovat podle `allowed_fallback_models` z `/v1/models`.
- */
-export const OCR_FALLBACK_MODELS: readonly string[] = ['claude-opus-5', 'claude-opus-4-8'];

@@ -1133,9 +1133,9 @@ describe('processPages – rezervace kreditu (BIL-1)', () => {
       jobId: 'job-1',
       referenceId: ocrBatchReferenceId('job-1', ['p1']),
     });
-    // Rezervace = horní odhad: celý max_tokens dávky nejdražší sazbou chain fallbacku
-    // (16k + 8k výstupních tokenů × $25 za 1M → ≥ 552 000 kreditů)
-    expect(reserve.amount).toBeGreaterThanOrEqual(552_000);
+    // Rezervace = horní odhad: celý max_tokens dávky sazbou primárního modelu
+    // (16k + 8k výstupních tokenů × $20 za 1M u Opus 5.5 → ≥ 441 600 kreditů)
+    expect(reserve.amount).toBeGreaterThanOrEqual(441_600);
     const reserveOrder = billing.reserveCredits.mock.invocationCallOrder[0]!;
     const ocrOrder = mocks.processWithClaudeBatch.mock.invocationCallOrder[0]!;
     expect(reserveOrder).toBeLessThan(ocrOrder);

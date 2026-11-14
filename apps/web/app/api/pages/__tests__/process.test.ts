@@ -249,6 +249,7 @@ describe('POST /api/pages/process', () => {
       /^Nedostatečný kredit – akce potřebuje volných alespoň 600\s000 tokenů/,
     );
     // Předběžná kontrola počítá s rezervací maximální ceny aspoň jedné stránky
-    expect(vi.mocked(checkBalance).mock.calls[0]![1]).toBeGreaterThan(500_000);
+    // (16k + 8k výstupních tokenů × $20 za 1M u Opus 5.5 → ≥ 441 600 kreditů)
+    expect(vi.mocked(checkBalance).mock.calls[0]![1]).toBeGreaterThanOrEqual(441_600);
   });
 });

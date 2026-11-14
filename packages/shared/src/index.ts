@@ -32,7 +32,7 @@ export {
 
 export { TRANSLATION_LANGUAGES, isTranslationLanguage } from './languages';
 export type { TranslationLanguage } from './languages';
-export { OCR_MODEL, OCR_EFFORT, OCR_FALLBACK_MODELS, TEXT_MODEL } from './models';
+export { OCR_MODEL, OCR_EFFORT, TEXT_MODEL } from './models';
 export { LLM_MAX_TOKENS } from './llm-limits';
 export { JOB_ERROR_CODES, isJobErrorCode } from './job-errors';
 export type { JobErrorCode } from './job-errors';
