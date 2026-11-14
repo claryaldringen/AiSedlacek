@@ -1,6 +1,15 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
+/* Tailwind v4 už tlačítkům nedává `cursor: pointer` (preflight má `default`) –
+   vracíme chování v3 pro všechna klikatelná tlačítka v aplikaci. */
+@layer base {
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 @keyframes indeterminate {
   0% {
     transform: translateX(-100%);
