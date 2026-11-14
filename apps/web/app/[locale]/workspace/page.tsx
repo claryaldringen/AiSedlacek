@@ -29,6 +29,7 @@ import remarkGfm from 'remark-gfm';
 import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 import { formatCzk } from '@/lib/pricing';
+import { addChatUsageToDocument } from '@/lib/chat-usage';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -1784,6 +1785,9 @@ function WorkspaceContent(): React.JSX.Element {
           setPageInUrl(null);
         }}
         onResultUpdate={(updated) => setPanelResult(updated)}
+        onChatUsage={(documentId, usage) =>
+          setPanelResult((prev) => addChatUsageToDocument(prev, documentId, usage))
+        }
         onPageUpdate={(updated) => {
           setPanelPage(updated);
           setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));

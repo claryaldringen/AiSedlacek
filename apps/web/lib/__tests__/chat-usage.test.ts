@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { INCOMPLETE_CHAT_USAGE, addChatUsage, chatUsageFromEvent } from '../chat-usage';
+import {
+  INCOMPLETE_CHAT_USAGE,
+  addChatUsage,
+  addChatUsageToDocument,
+  chatUsageFromEvent,
+} from '../chat-usage';
 
 const USAGE = { inputTokens: 1200, outputTokens: 80, model: 'claude-sonnet-4-6' };
 
@@ -52,5 +57,34 @@ describe('addChatUsage – souhrn chatu dokumentu', () => {
       chatChargedCredits: 100,
       chatChargeIncomplete: true,
     });
+  });
+});
+
+// Uživatel během odpovědi chatu přepne na jinou stránku: spotřeba patří dokumentu,
+// ke kterému se odpověď psala, a nesmí panel přepnout zpět na jeho obsah.
+describe('addChatUsageToDocument – spotřeba jen k dokumentu, ke kterému odpověď patří', () => {
+  const docA = { id: 'doc-a', transcription: 'A' };
+  const docB = { id: 'doc-b', transcription: 'B' };
+
+  it('přičte spotřebu, když panel ukazuje stejný dokument', () => {
+    expect(addChatUsageToDocument(docA, 'doc-a', { ...USAGE, chargedCredits: 10 })).toEqual({
+      ...docA,
+      chatInputTokens: 1200,
+      chatOutputTokens: 80,
+      chatModel: 'claude-sonnet-4-6',
+      chatChargedCredits: 10,
+      chatChargeIncomplete: false,
+    });
+  });
+
+  it('nechá panel beze změny, když už ukazuje jiný dokument', () => {
+    const current = docB;
+    expect(addChatUsageToDocument(current, 'doc-a', { ...USAGE, chargedCredits: 10 })).toBe(
+      current,
+    );
+  });
+
+  it('nechá prázdný panel prázdný (stránka se ještě načítá)', () => {
+    expect(addChatUsageToDocument(null, 'doc-a', USAGE)).toBeNull();
   });
 });

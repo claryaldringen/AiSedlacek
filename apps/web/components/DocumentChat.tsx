@@ -169,11 +169,21 @@ export function DocumentChat({
   // Spotřebu hlásit přes poslední verzi callbacku (rodič v ní má aktuální
   // výsledek – ne ten z doby odeslání) a jen pro dokument, ke kterému patří.
   const onTokenUsageRef = useRef(onTokenUsage);
-  const documentIdRef = useRef(documentId);
+  const documentIdRef = useRef<string | null>(documentId);
   useEffect(() => {
     onTokenUsageRef.current = onTokenUsage;
     documentIdRef.current = documentId;
   });
+  // Odpojení (přepnutí stránky, zavření panelu): rozepsanou odpověď přerušit –
+  // server naúčtuje částečnou spotřebu – a spotřebu už nikam nehlásit. Jinak by
+  // dokončená odpověď zavolala callback s výsledkem původního dokumentu.
+  useEffect(
+    () => () => {
+      documentIdRef.current = null;
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

@@ -6,7 +6,7 @@ import { ResultViewer, type DocumentResult } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
 import type { PageItem } from './FileGrid';
 import { apiFetch } from '@/lib/infrastructure/api-client';
-import { addChatUsage } from '@/lib/chat-usage';
+import type { ChatTokenUsage } from '@/lib/chat-usage';
 
 interface DocumentPanelProps {
   page: PageItem | null;
@@ -14,6 +14,12 @@ interface DocumentPanelProps {
   isLoading: boolean;
   onClose: () => void;
   onResultUpdate?: (updated: DocumentResult) => void;
+  /**
+   * Spotřeba odpovědi chatu k dokumentu `documentId`. Rodič ji má přičíst
+   * funkčním updatem jen k panelu, který ten dokument pořád ukazuje
+   * (`addChatUsageToDocument`) – uživatel mohl mezitím přepnout stránku.
+   */
+  onChatUsage?: (documentId: string, usage: ChatTokenUsage) => void;
   onPageUpdate?: (updated: PageItem) => void;
   onRegenerate?: (pageId: string) => void;
   isRegenerating?: boolean;
@@ -46,6 +52,7 @@ export function DocumentPanel({
   isLoading,
   onClose,
   onResultUpdate,
+  onChatUsage,
   onPageUpdate,
   onRegenerate,
   isRegenerating,
@@ -402,8 +409,11 @@ export function DocumentPanel({
                       }}
                       onApplyUpdate={handleChatApplyUpdate}
                       onTokenUsage={(usage) => {
-                        // Skutečně odečtené kredity (a tokeny) odpovědi k souhrnu chatu
-                        onResultUpdate?.(addChatUsage(result, usage));
+                        // Skutečně odečtené kredity (a tokeny) odpovědi k souhrnu chatu –
+                        // ne přes `onResultUpdate(addChatUsage(result, …))`: `result` je
+                        // snímek z doby renderu a po přepnutí stránky by panel přepsal
+                        // obsahem tohoto dokumentu.
+                        onChatUsage?.(result.id, usage);
                       }}
                     />
                   </div>

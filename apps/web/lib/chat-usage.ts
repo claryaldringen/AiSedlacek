@@ -70,3 +70,19 @@ export function addChatUsage<T extends ChatUsageState>(state: T, usage: ChatToke
     chatChargeIncomplete: Boolean(state.chatChargeIncomplete || usage.incomplete),
   };
 }
+
+/**
+ * Přičte spotřebu odpovědi chatu k dokumentu v panelu – jen když panel pořád
+ * ukazuje dokument, ke kterému se odpověď psala. Uživatel mohl během odpovědi
+ * přepnout na jinou stránku; spotřeba se pak nesmí zapsat do jejího panelu
+ * (a už vůbec ne panel přepnout zpět na obsah původního dokumentu).
+ * Určeno pro funkční update stavu: `setResult((prev) => addChatUsageToDocument(prev, id, u))`.
+ */
+export function addChatUsageToDocument<T extends ChatUsageState & { id: string }>(
+  current: T | null,
+  documentId: string,
+  usage: ChatTokenUsage,
+): T | null {
+  if (!current || current.id !== documentId) return current;
+  return addChatUsage(current, usage);
+}
