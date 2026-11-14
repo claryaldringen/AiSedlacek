@@ -3,7 +3,7 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
-import { releaseExpiredHolds, releaseJobHolds } from '@ai-sedlacek/db/billing';
+import { releaseAllJobHolds, releaseExpiredHolds, releaseJobHolds } from '@ai-sedlacek/db/billing';
 import { resetUnfinishedPages } from './page-status';
 
 // A running job whose row hasn't been touched in this long is considered orphaned
@@ -68,6 +68,17 @@ export async function reclaimStuckJobs(onStartup: boolean): Promise<void> {
   await releaseExpiredHolds().catch((err: unknown) => {
     console.error('[Worker] releaseExpiredHolds failed:', err instanceof Error ? err.message : err);
   });
+  // Při startu žádný job legitimně neběží (jediná instance workeru) – uvolnit
+  // rezervace všech jobů, i zrušených a chybových, které by jinak držely kredit
+  // až do vypršení TTL.
+  if (onStartup) {
+    await releaseAllJobHolds().catch((err: unknown) => {
+      console.error(
+        '[Worker] releaseAllJobHolds failed:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
   try {
     const where = onStartup
       ? { status: 'running' }

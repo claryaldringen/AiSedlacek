@@ -53,6 +53,24 @@ describe('reclaimStuckJobs (PERF-1)', () => {
     // Rezervace kreditu přerušeného jobu se uvolní (BIL-1) – i prošlé rezervace webu
     expect(billing.releaseJobHolds).toHaveBeenCalledWith(['job-1']);
     expect(billing.releaseExpiredHolds).toHaveBeenCalled();
+    // Při startu se uvolní rezervace všech jobů (i zrušených a chybových)
+    expect(billing.releaseAllJobHolds).toHaveBeenCalledTimes(1);
+  });
+
+  it('periodický úklid rezervace ostatních jobů nechává', async () => {
+    mocks.prisma.processingJob.findMany.mockResolvedValue([]);
+
+    await reclaimStuckJobs(false);
+
+    expect(billing.releaseAllJobHolds).not.toHaveBeenCalled();
+  });
+
+  it('při startu uvolní rezervace jobů, i když žádný job neběží', async () => {
+    mocks.prisma.processingJob.findMany.mockResolvedValue([]);
+
+    await reclaimStuckJobs(true);
+
+    expect(billing.releaseAllJobHolds).toHaveBeenCalledTimes(1);
   });
 
   it('chyba úklidu rezervací obnovu jobů nezastaví', async () => {

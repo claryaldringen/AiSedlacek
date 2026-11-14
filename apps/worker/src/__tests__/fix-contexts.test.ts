@@ -19,7 +19,13 @@ vi.mock('@ai-sedlacek/db/versioning', () => ({ createVersion: mocks.createVersio
 vi.mock('../lib/llm', () => ({ createMessage: mocks.createMessage, isCliMode: () => false }));
 
 import { handleFixContexts } from '../handlers/fix-contexts';
-import { billing, charges, refuseReservations, resetBillingMock } from './billing-mock';
+import {
+  billing,
+  blockReservationsByOtherHolds,
+  charges,
+  refuseReservations,
+  resetBillingMock,
+} from './billing-mock';
 import { RECLAIM_MARKER } from '../lib/reclaim';
 
 function response(text: string, stopReason: string): Record<string, unknown> {
@@ -113,7 +119,41 @@ describe('fix-contexts – rezervace kreditu (BIL-1)', () => {
       status: 'error',
       currentStep: 'Nedostatečný kredit',
       errors: [expect.stringContaining('1 dokumentů nezpracováno')],
+      // Kód pro lokalizovanou hlášku s výzvou k dobití
+      errorCode: 'insufficient_credit',
     });
+  });
+
+  it('kredit blokovaný jiným jobem: job se odloží (chyba propadne do workeru), ne chyba', async () => {
+    blockReservationsByOtherHolds(50_000, 60_000);
+
+    const err: unknown = await handleFixContexts('job-f', {
+      collectionId: 'col-1',
+      userId: 'user-1',
+    }).catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ code: 'insufficient_credit', reserved: 60_000 });
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+    // Job se neukončil chybou – o odkladu rozhodne worker (handleJobFailure)
+    expect(
+      mocks.prisma.processingJob.update.mock.calls.some(
+        (c) => (c[0] as { data: { status?: string } }).data.status === 'error',
+      ),
+    ).toBe(false);
+  });
+
+  it('po odkladu přeskočí dokumenty, za které už tento job zaplatil', async () => {
+    mocks.createMessage.mockResolvedValue(response('Nový kontext', 'end_turn'));
+    billing.hasCharge.mockImplementation(
+      async (_userId: string, ref: string) => ref === 'fix-context:job-f:doc-1',
+    );
+
+    await handleFixContexts('job-f', { collectionId: 'col-1', userId: 'user-1' });
+
+    expect(mocks.createMessage).toHaveBeenCalledTimes(1);
+    expect(charges().map((c) => c.referenceId)).toEqual(['fix-context:job-f:doc-2']);
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data).toMatchObject({ status: 'completed', completedPages: 2 });
   });
 
   it('bez kreditu na první dokument model nezavolá', async () => {

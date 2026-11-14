@@ -242,6 +242,11 @@ model ProcessingJob {
   currentStep    String?  // Human-readable current step description
   errors         String[] // Array of error messages
   errorCode      String?  // kód chyby jobu pro lokalizaci v UI (JobErrorCode, packages/shared)
+  // Čekání na kredit blokovaný jinými běžícími akcemi uživatele (BIL-1): job se
+  // vrátí do fronty a worker ho nevezme dřív než `notBefore`; `creditWaits`
+  // omezuje počet takových odkladů.
+  notBefore      DateTime?
+  creditWaits    Int      @default(0)
   pageIds        String[] // Original page IDs for reference
   language       String   @default("cs")
   mode           String   @default("transcribe+translate")

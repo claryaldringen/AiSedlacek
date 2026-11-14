@@ -5,7 +5,8 @@
 import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import { InsufficientCreditError } from '@ai-sedlacek/db/billing';
+import { InsufficientCreditError, hasCharge } from '@ai-sedlacek/db/billing';
+import { isCreditBusy } from '../lib/credit-wait';
 import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 
@@ -64,6 +65,15 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
   const errors: string[] = [];
 
   for (const doc of documents) {
+    const referenceId = `fix-context:${jobId}:${doc.id}`;
+    // Opakovaný běh téhož jobu (odklad kvůli kreditu, pád workeru): dokument, za
+    // který už tento job zaplatil, se znovu neposílá – kontext je opravený.
+    if (await hasCharge(userId, referenceId)) {
+      completed++;
+      succeeded++;
+      continue;
+    }
+
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
@@ -79,7 +89,7 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
         {
           userId,
           jobId,
-          referenceId: `fix-context:${jobId}:${doc.id}`,
+          referenceId,
           description: `Oprava kontextu dokumentu ${doc.id} [${collection.name}]`,
           collectionId,
         },
@@ -134,6 +144,9 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       completed++;
       succeeded++;
     } catch (err) {
+      // Kredit blokuje jiná běžící akce uživatele – odložit job (credit-wait.ts);
+      // hotové dokumenty opakovaný běh přeskočí podle ledgeru.
+      if (isCreditBusy(err)) throw err;
       if (err instanceof InsufficientCreditError) {
         // Došel volný kredit – zbylé dokumenty se nezpracují (další volání by
         // stejně neprošla); hotové opravy zůstávají uložené.
@@ -174,6 +187,8 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       currentStep: outOfCredit ? 'Nedostatečný kredit' : 'Hotovo',
       completedPages: completed,
       errors: await errorsKeepingReclaimMarkers(jobId, errors),
+      // Kód pro lokalizovanou hlášku s výzvou k dobití v UI
+      ...(outOfCredit ? { errorCode: 'insufficient_credit' } : {}),
     },
   });
 }

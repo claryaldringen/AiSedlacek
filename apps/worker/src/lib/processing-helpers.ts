@@ -5,6 +5,7 @@
 import crypto from 'crypto';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
+import type { CreditTx } from '@ai-sedlacek/db/billing';
 import type { StructuredOcrResult } from '@ai-sedlacek/ocr';
 import { getStorage } from './storage';
 import { truncateContext } from './batch-utils';
@@ -325,14 +326,19 @@ export async function findDedupSourceDocument(
 /**
  * Copy an existing Document of the SAME user for a new page, including translations,
  * glossary, and versions. Source must come from `findDedupSourceDocument` (SEC-2).
+ *
+ * Běží v transakci `tx` – volající (deduplikace ve workeru) ji sdílí s odečtem
+ * kreditu, takže když kopie selže, odečet se vrátí a uživatel nezaplatí za nic.
+ * Nový dokument nemá žádné verze, proto se čísla verzí přidělují přímo (1…n).
  */
 export async function copyDocumentForPage(
+  tx: CreditTx,
   pageId: string,
   source: DedupSourceDocument,
   /** Kredity odečtené za kopii (cena původního OCR); null = neúčtováno. */
   chargedCredits: number | null = null,
 ): Promise<{ id: string }> {
-  const doc = await prisma.document.create({
+  const doc = await tx.document.create({
     data: {
       pageId,
       hash: source.hash,
@@ -363,26 +369,26 @@ export async function copyDocumentForPage(
         })),
       },
     },
+    select: { id: true },
   });
 
-  // Create initial version records
-  await createVersion(
-    doc.id,
-    'transcription',
-    source.transcription,
-    'ai_initial',
-    source.model ?? undefined,
-  );
-  for (const t of source.translations) {
-    await createVersion(
-      doc.id,
-      `translation:${t.language}`,
-      t.text,
-      'ai_initial',
-      source.model ?? undefined,
-    );
-  }
-  await createVersion(doc.id, 'context', source.context, 'ai_initial', source.model ?? undefined);
+  // Počáteční verze (transkripce, překlady, kontext)
+  const model = source.model ?? undefined;
+  const initial = [
+    { field: 'transcription', content: source.transcription },
+    ...source.translations.map((t) => ({ field: `translation:${t.language}`, content: t.text })),
+    { field: 'context', content: source.context },
+  ];
+  await tx.documentVersion.createMany({
+    data: initial.map((v, i) => ({
+      documentId: doc.id,
+      version: i + 1,
+      field: v.field,
+      content: v.content,
+      source: 'ai_initial',
+      model,
+    })),
+  });
 
   return doc;
 }

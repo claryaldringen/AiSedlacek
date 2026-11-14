@@ -19,9 +19,8 @@ import { handleFixContexts } from './handlers/fix-contexts';
 import { handleTranslateContext } from './handlers/translate-context';
 import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
 import { parseOcrJobOptions } from './lib/job-options';
-import { resetUnfinishedPages } from './lib/page-status';
 import { assertLlmProviderAllowed } from './lib/startup-checks';
-import { describeJobError } from './lib/job-error';
+import { handleJobFailure } from './lib/job-failure';
 
 // Fail-fast na nebezpečnou konfiguraci dřív, než worker začne brát joby (SEC-12)
 try {
@@ -89,32 +88,9 @@ async function executeJob(job: {
     }
     console.log(`[Worker] Job ${job.id} (${jobType}) completed`);
   } catch (err) {
-    // Surová chyba jen do logu; do jobu kód (UI podle něj ukáže lokalizovanou
-    // hlášku) a text bez interních detailů SDK.
-    const { code, message } = describeJobError(err);
-    console.error(
-      `[Worker] Job ${job.id} (${jobType}) failed [${code}]:`,
-      err instanceof Error ? err.message : err,
-    );
-    await prisma.processingJob
-      .update({
-        where: { id: job.id },
-        data: {
-          status: 'error',
-          currentStep: `Chyba: ${message}`,
-          errors: { push: message },
-          errorCode: code,
-        },
-      })
-      .catch(() => {});
-
-    // Reset stuck "processing" pages back to "pending" so they can be retried
-    if (jobType === 'ocr' && job.pageIds.length > 0) {
-      const resetCount = await resetUnfinishedPages(job.pageIds).catch(() => 0);
-      if (resetCount > 0) {
-        console.log(`[Worker] Reset ${resetCount} stuck pages for job ${job.id}`);
-      }
-    }
+    // Kredit blokovaný jinými běžícími akcemi → odklad ve frontě, jinak chyba
+    // s kódem pro UI (viz job-failure.ts).
+    await handleJobFailure({ id: job.id, type: jobType, pageIds: job.pageIds }, err);
   } finally {
     // Pojistka (BIL-1): rezervace, kterou job nevyúčtoval ani neuvolnil (chyba
     // mezi rezervací a voláním), nesmí blokovat kredit až do úklidu po TTL.
@@ -149,7 +125,11 @@ async function pollForJobs(): Promise<void> {
       }
 
       const jobs = await prisma.processingJob.findMany({
-        where: { status: 'queued' },
+        // Job odložený kvůli kreditu blokovanému jinou akcí se bere až po `notBefore`
+        where: {
+          status: 'queued',
+          OR: [{ notBefore: null }, { notBefore: { lte: new Date() } }],
+        },
         orderBy: { createdAt: 'asc' },
         take: 10,
       });

@@ -114,6 +114,7 @@ vi.mock('../client', () => {
 
 import {
   InsufficientCreditError,
+  hasCharge,
   isBlockedByOtherHolds,
   releaseAllJobHolds,
   checkBalance,
@@ -426,6 +427,14 @@ describe('rezervace kreditu', () => {
     expect(isBlockedByOtherHolds({ required: 600, balance: 500, reserved: 0 })).toBe(false);
     expect(isBlockedByOtherHolds({ required: 600, balance: 500, reserved: 400 })).toBe(false);
     expect(isBlockedByOtherHolds({ required: 600, balance: 900, reserved: 400 })).toBe(true);
+  });
+
+  it('hasCharge pozná práci, kterou job už zaplatil (opakovaný běh)', async () => {
+    topUp('u1', 1000);
+    await consumeCredits('u1', fixed('fix-context:job:doc-1', 10));
+    expect(await hasCharge('u1', 'fix-context:job:doc-1')).toBe(true);
+    expect(await hasCharge('u1', 'fix-context:job:doc-2')).toBe(false);
+    expect(await hasCharge('u2', 'fix-context:job:doc-1')).toBe(false);
   });
 
   it('při startu workeru uvolní rezervace všech jobů, rezervace webu nechá', async () => {

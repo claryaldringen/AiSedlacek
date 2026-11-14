@@ -21,6 +21,8 @@ class InsufficientCreditError extends Error {
   constructor(
     readonly required: number,
     readonly available: number,
+    readonly balance: number = available,
+    readonly reserved: number = 0,
   ) {
     super(`Nedostatečný kredit: akce potřebuje ${required} kreditů, volných je ${available}`);
     this.name = 'InsufficientCreditError';
@@ -40,8 +42,19 @@ function settleOf(charges: CreditCharge[]): Billing.SettleResult {
   };
 }
 
+/**
+ * Transakční klient, který dostane efekt `consumeCredits` (kopie dokumentu).
+ * Test ho nastaví na svůj mock Prismy.
+ */
+export const consumeTx: { current: unknown } = { current: undefined };
+
 export const billing = {
   InsufficientCreditError,
+  // Skutečná logika (čistá funkce)
+  isBlockedByOtherHolds: (s: { required: number; balance?: number; reserved?: number }): boolean =>
+    (s.reserved ?? 0) > 0 && (s.balance ?? 0) >= s.required,
+  hasCharge: vi.fn(),
+  releaseAllJobHolds: vi.fn(),
   getCreditState: vi.fn(),
   reserveCredits: vi.fn(),
   settleCreditHold: vi.fn(),
@@ -74,10 +87,19 @@ export function resetBillingMock(available = 1_000_000_000): void {
   billing.releaseCreditHold.mockReset().mockResolvedValue(true);
   billing.consumeCredits
     .mockReset()
-    .mockImplementation(async (_userId: string, charge: CreditCharge) => ({
-      ok: true,
-      result: settleOf([charge]),
-    }));
+    .mockImplementation(
+      async (
+        _userId: string,
+        charge: CreditCharge,
+        effect?: (tx: unknown, charged: Billing.SettleResult) => Promise<unknown>,
+      ) => {
+        const result = settleOf([charge]);
+        const value = effect ? await effect(consumeTx.current, result) : undefined;
+        return { ok: true, result, value };
+      },
+    );
+  billing.hasCharge.mockReset().mockResolvedValue(false);
+  billing.releaseAllJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseExpiredHolds.mockReset().mockResolvedValue(0);
   // Stejný tok jako skutečné runBilledCall, nad mocky výše.
@@ -91,7 +113,9 @@ export function resetBillingMock(available = 1_000_000_000): void {
         errorUsage?: (err: unknown) => CreditCharge[] | null,
       ) => {
         const r = (await billing.reserveCredits(reserve)) as Billing.ReserveResult;
-        if (!r.ok) throw new InsufficientCreditError(r.required, r.available);
+        if (!r.ok) {
+          throw new InsufficientCreditError(r.required, r.available, r.balance, r.reserved);
+        }
         let result: T;
         try {
           result = await call(r.hold);
@@ -128,9 +152,23 @@ export function charges(): CreditCharge[] {
   ];
 }
 
-/** Rezervace odmítnutá pro nedostatek kreditu. */
+/** Rezervace odmítnutá pro skutečný nedostatek kreditu (žádné cizí rezervace). */
 export function refuseReservations(available = 0, required = 500_000): void {
+  const shortage = { required, available, balance: available, reserved: 0 };
   billing.getCreditState.mockResolvedValue({ balance: available, reserved: 0, available });
-  billing.reserveCredits.mockResolvedValue({ ok: false, required, available });
-  billing.consumeCredits.mockResolvedValue({ ok: false, required, available });
+  billing.reserveCredits.mockResolvedValue({ ok: false, ...shortage });
+  billing.consumeCredits.mockResolvedValue({ ok: false, ...shortage });
+}
+
+/**
+ * Kredit blokovaný jinou běžící akcí: zůstatek by stačil, ale volné je málo,
+ * protože `reserved` drží rezervace jiného jobu.
+ */
+export function blockReservationsByOtherHolds(required = 500_000, reserved = 600_000): void {
+  const balance = required + 100;
+  const available = balance - reserved;
+  const shortage = { required, available, balance, reserved };
+  billing.getCreditState.mockResolvedValue({ balance, reserved, available });
+  billing.reserveCredits.mockResolvedValue({ ok: false, ...shortage });
+  billing.consumeCredits.mockResolvedValue({ ok: false, ...shortage });
 }

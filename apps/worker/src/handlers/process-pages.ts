@@ -14,11 +14,14 @@ import {
   consumeCredits,
   getCreditState,
   releaseCreditHold,
+  isBlockedByOtherHolds,
   reserveCredits,
   settleCreditHold,
   settledCredits,
   type CreditCharge,
+  type CreditShortage,
 } from '@ai-sedlacek/db/billing';
+import { CreditBusyError, isCreditBusy } from '../lib/credit-wait';
 import {
   OcrRefusalError,
   ocrBatchReservationCredits,
@@ -47,7 +50,28 @@ import { LLM_MAX_TOKENS, OCR_MODEL, TEXT_MODEL, isRefusalBilled } from '@ai-sedl
  */
 export const IMAGE_UNREADABLE_MESSAGE = 'Obrázek stránky nelze načíst';
 
-/** Volný kredit nestačí na rezervaci další dávky nebo kopie (BIL-1). */
+/**
+ * Hláška u stránky při nedostatku kreditu – bez částek: chybu stránky vidí
+ * i členové sdíleného a veřejného workspace, kterým kredit vlastníka nepatří.
+ * Čísla jdou jen do `errors` jobu (vidí ho jen vlastník).
+ */
+export const INSUFFICIENT_CREDIT_PAGE_MESSAGE = 'Nedostatečný kredit – stránka nebyla zpracována';
+
+/** Hláška kopie, kterou se nepodařilo uložit (odečet se vrátil s transakcí). */
+export const COPY_FAILED_MESSAGE = 'Kopii dokumentu se nepodařilo uložit – zkuste zpracování znovu';
+
+/** Chyba billingu „volný kredit nestačí“ (InsufficientCreditError). */
+function insufficientCredit(err: unknown): { required: number; available: number } | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const e = err as { code?: unknown; required?: unknown; available?: unknown };
+  return e.code === 'insufficient_credit' &&
+    typeof e.required === 'number' &&
+    typeof e.available === 'number'
+    ? { required: e.required, available: e.available }
+    : null;
+}
+
+/** Volný kredit nestačí na rezervaci další dávky nebo kopie (BIL-1) – text do `errors` jobu. */
 export function insufficientCreditMessage(required: number, available: number): string {
   return (
     'Nedostatečný kredit pro zpracování – další krok potřebuje rezervovat ' +
@@ -135,7 +159,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     notFound: 0,
     imageUnreadable: 0,
     insufficientCredit: 0,
+    copyFailed: 0,
   };
+  // Nedostatek kreditu u některé stránky → kód chyby jobu pro lokalizovanou hlášku v UI
+  let creditShort = false;
 
   for (let i = 0; i < pageIds.length; i++) {
     const pageId = pageIds[i]!;
@@ -232,9 +259,20 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           );
           await setPageStatus(pageId, 'done');
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Chyba překladu';
-          errors.push(msg);
-          await setPageStatus(pageId, 'done', msg);
+          // Kredit blokuje jiná běžící akce – odložit celý job (credit-wait.ts)
+          if (isCreditBusy(err)) throw err;
+          const shortage = insufficientCredit(err);
+          if (shortage) {
+            creditShort = true;
+            errors.push(
+              `Stránka ${pageId}: ${insufficientCreditMessage(shortage.required, shortage.available)}`,
+            );
+            await setPageStatus(pageId, 'done', INSUFFICIENT_CREDIT_PAGE_MESSAGE);
+          } else {
+            const msg = err instanceof Error ? err.message : 'Chyba překladu';
+            errors.push(msg);
+            await setPageStatus(pageId, 'done', msg);
+          }
         }
 
         completed++;
@@ -276,30 +314,45 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
     if (existingByHash !== null) {
       // Dedup: kopie existujícího dokumentu místo nového OCR. Účtuje se cena
-      // původního zpracování podle jeho modelu – PŘED kopií a jen z volného
-      // kreditu (BIL-1: zůstatek nesmí do minusu a kopie nesmí být zadarmo).
-      const origInput = existingByHash.inputTokens ?? 0;
-      const origOutput = existingByHash.outputTokens ?? 0;
-      let copyCharged: number | null = null;
-      if (origInput + origOutput > 0) {
-        const charged = await consumeCredits(userId, {
-          referenceId: dedupReferenceId(pageId, existingByHash.id),
-          description: `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
-          model: existingByHash.model ?? OCR_MODEL,
-          inputTokens: origInput,
-          outputTokens: origOutput,
-          collectionId: page.collection?.id ?? collectionId ?? null,
-        });
-        if (charged.ok) copyCharged = settledCredits(charged.result);
-        if (!charged.ok) {
-          const message = insufficientCreditMessage(charged.required, charged.available);
-          errors.push(`Stránka ${pageId}: ${message}`);
-          await setPageStatus(pageId, 'pending', message);
+      // původního zpracování podle jeho modelu, jen z volného kreditu (BIL-1)
+      // a v téže transakci jako zápis kopie – když kopie selže, odečet se vrátí
+      // a selže jen tato stránka (opakování neúčtuje díky deterministickému klíči).
+      let copiedDoc: { id: string };
+      try {
+        const copied = await consumeCredits(
+          userId,
+          {
+            referenceId: dedupReferenceId(pageId, existingByHash.id),
+            description: `OCR stránky ${pageId} (deduplikace)${collectionLabel}`,
+            model: existingByHash.model ?? OCR_MODEL,
+            inputTokens: existingByHash.inputTokens ?? 0,
+            outputTokens: existingByHash.outputTokens ?? 0,
+            collectionId: page.collection?.id ?? collectionId ?? null,
+          },
+          (tx, charged) => copyDocumentForPage(tx, pageId, existingByHash, settledCredits(charged)),
+        );
+        if (!copied.ok) {
+          if (isBlockedByOtherHolds(copied)) throw new CreditBusyError(copied);
+          creditShort = true;
+          errors.push(
+            `Stránka ${pageId}: ${insufficientCreditMessage(copied.required, copied.available)}`,
+          );
+          await setPageStatus(pageId, 'pending', INSUFFICIENT_CREDIT_PAGE_MESSAGE);
           skippedCount.insufficientCredit++;
           continue;
         }
+        copiedDoc = copied.value!;
+      } catch (err) {
+        if (isCreditBusy(err)) throw err;
+        console.error(
+          `[Worker] Dedup copy for page ${pageId} failed:`,
+          err instanceof Error ? err.message : err,
+        );
+        errors.push(`Stránka ${pageId}: ${COPY_FAILED_MESSAGE}`);
+        await markPageFailed(pageId, null, COPY_FAILED_MESSAGE);
+        skippedCount.copyFailed++;
+        continue;
       }
-      const copiedDoc = await copyDocumentForPage(pageId, existingByHash, copyCharged);
 
       // Check if copied document has translation in target language
       const hasTargetTranslation = existingByHash.translations.some(
@@ -326,7 +379,14 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
               page.collection?.id ?? collectionId ?? null,
             );
           } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Chyba překladu';
+            if (isCreditBusy(err)) throw err;
+            const shortage = insufficientCredit(err);
+            if (shortage) creditShort = true;
+            const msg = shortage
+              ? `Stránka ${pageId}: ${insufficientCreditMessage(shortage.required, shortage.available)}`
+              : err instanceof Error
+                ? err.message
+                : 'Chyba překladu';
             errors.push(msg);
           }
         }
@@ -362,7 +422,8 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
     skippedCount.deduped +
     skippedCount.notFound +
     skippedCount.imageUnreadable +
-    skippedCount.insufficientCredit;
+    skippedCount.insufficientCredit +
+    skippedCount.copyFailed;
 
   await prisma.processingJob.update({
     where: { id: jobId },
@@ -383,6 +444,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         currentStep: 'Hotovo',
         completedPages: total,
         errors: await errorsKeepingReclaimMarkers(jobId, errors),
+        ...(creditShort ? { errorCode: 'insufficient_credit' } : {}),
       },
     });
     return;
@@ -406,14 +468,19 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   const queue = [...batches];
   let batchNo = 0;
 
-  /** Zastaví job pro nedostatek kreditu – nezpracované stránky vrátí do fronty. */
+  /**
+   * Volný kredit nestačí na další dávku. Když ho blokují jen rezervace jiných
+   * běžících akcí uživatele, job se odloží (CreditBusyError → zpět do fronty,
+   * hotové stránky opakovaný běh přeskočí). Jinak se zastaví s chybou
+   * a nezpracované stránky se vrátí do výchozího stavu.
+   */
   const stopForCredit = async (
     pending: { pageId: string }[],
-    required: number,
-    available: number,
+    shortage: CreditShortage,
   ): Promise<void> => {
+    if (isBlockedByOtherHolds(shortage)) throw new CreditBusyError(shortage);
     await resetUnfinishedPages(pending.map((p) => p.pageId));
-    errors.push(insufficientCreditMessage(required, available));
+    errors.push(insufficientCreditMessage(shortage.required, shortage.available));
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
@@ -421,6 +488,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
         completedPages: completed,
         errors: await errorsKeepingReclaimMarkers(jobId, errors),
         currentStep: 'Nedostatečný kredit',
+        errorCode: 'insufficient_credit',
       },
     });
   };
@@ -453,10 +521,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
     // Dávka jen tak velká, na kolik stránek stačí volný kredit – rezervuje se
     // maximální cena (celý max_tokens), takže při nízkém zůstatku menší dávky.
-    const { available } = await getCreditState(userId);
-    const affordable = affordablePageCount(batch.length, available, holdFor);
+    const credit = await getCreditState(userId);
+    const affordable = affordablePageCount(batch.length, credit.available, holdFor);
     if (affordable === 0) {
-      await stopForCredit([...batch, ...queue.flat()], holdFor(1), available);
+      await stopForCredit([...batch, ...queue.flat()], { required: holdFor(1), ...credit });
       return;
     }
     if (affordable < batch.length) {
@@ -533,11 +601,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       amount: holdFor(sentPages.length),
     });
     if (!reservation.ok) {
-      await stopForCredit(
-        [...sentPages, ...queue.flat()],
-        reservation.required,
-        reservation.available,
-      );
+      await stopForCredit([...sentPages, ...queue.flat()], reservation);
       return;
     }
     const hold = reservation.hold;
@@ -785,6 +849,7 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
       currentStep: 'Hotovo',
       completedPages: total,
       errors: await errorsKeepingReclaimMarkers(jobId, errors),
+      ...(creditShort ? { errorCode: 'insufficient_credit' } : {}),
     },
   });
 }

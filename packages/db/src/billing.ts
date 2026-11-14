@@ -560,6 +560,19 @@ export async function runBilledCall<T>(
   }
 }
 
+/**
+ * Je v ledgeru odečet s tímto `referenceId`? Podle deterministických klíčů pozná
+ * job po opakovaném spuštění (odklad kvůli kreditu, pád workeru) práci, kterou
+ * už jednou zaplatil a udělal.
+ */
+export async function hasCharge(userId: string, referenceId: string): Promise<boolean> {
+  const row = await prisma.tokenTransaction.findFirst({
+    where: { userId, referenceId },
+    select: { id: true },
+  });
+  return row !== null;
+}
+
 /** Kredity skutečně odečtené vyúčtováním (včetně položek zapsaných dřívějším během). */
 export function settledCredits(result: SettleResult): number {
   return result.transactions.reduce((sum, tr) => sum - tr.amount, 0);

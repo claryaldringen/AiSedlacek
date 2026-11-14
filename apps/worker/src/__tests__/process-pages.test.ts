@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     collection: { findUnique: vi.fn() },
     page: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     document: { aggregate: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+    documentVersion: { createMany: vi.fn() },
     translation: { create: vi.fn(), upsert: vi.fn() },
     processingJob: { update: vi.fn(), findUnique: vi.fn() },
     $transaction: vi.fn(),
@@ -43,10 +44,20 @@ import {
   ocrBatchReferenceId,
   ocrBatchRefusedReferenceId,
   IMAGE_UNREADABLE_MESSAGE,
+  INSUFFICIENT_CREDIT_PAGE_MESSAGE,
+  COPY_FAILED_MESSAGE,
 } from '../handlers/process-pages';
 import { OcrRefusalError } from '@ai-sedlacek/ocr';
 import { RECLAIM_MARKER } from '../lib/reclaim';
-import { billing, charges, refuseReservations, resetBillingMock } from './billing-mock';
+import { CreditBusyError } from '../lib/credit-wait';
+import {
+  billing,
+  blockReservationsByOtherHolds,
+  charges,
+  consumeTx,
+  refuseReservations,
+  resetBillingMock,
+} from './billing-mock';
 
 /** Vyúčtované položky jako [vstup, výstup, referenceId, model]. */
 function chargeRows(): unknown[][] {
@@ -139,6 +150,9 @@ beforeEach(() => {
   mocks.tx.translation.upsert.mockResolvedValue({});
 
   resetBillingMock();
+  // Kopie dokumentu (deduplikace) běží v transakci odečtu – v testu nad mockem Prismy
+  consumeTx.current = mocks.prisma;
+  mocks.prisma.documentVersion.createMany.mockResolvedValue({ count: 0 });
   mocks.createVersion.mockResolvedValue(undefined);
   // Každá stránka má jiný obsah → jiný hash
   mocks.storageRead.mockImplementation(async (path: string) => Buffer.from(`image:${path}`));
@@ -232,10 +246,56 @@ describe('processPages – deduplikace (SEC-2)', () => {
     await processPages({ ...baseJob, pageIds: ['p1'] });
 
     expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+    // U stránky obecná hláška bez částek – vidí ji i členové sdíleného workspace
     expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
       where: { id: 'p1', status: { not: 'archived' } },
-      data: { status: 'pending', errorMessage: expect.stringContaining('Nedostatečný kredit') },
+      data: { status: 'pending', errorMessage: INSUFFICIENT_CREDIT_PAGE_MESSAGE },
     });
+    expect(INSUFFICIENT_CREDIT_PAGE_MESSAGE).not.toMatch(/\d/);
+    // Částky jen do errors jobu (vidí ho jen vlastník) a kód pro lokalizovanou hlášku
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.errors).toEqual([
+      expect.stringMatching(/Stránka p1: .*rezervovat 5\s000 tokenů, volných je 10/),
+    ]);
+    expect(lastJobUpdate.data.errorCode).toBe('insufficient_credit');
+  });
+
+  it('nepovedená kopie selže jen u své stránky a odečet se s ní vrátí', async () => {
+    addPage('p1');
+    addPage('p2');
+    mocks.prisma.document.findFirst
+      .mockResolvedValueOnce({
+        id: 'own-doc',
+        hash: 'h',
+        rawResponse: null,
+        transcription: 't',
+        detectedLanguage: 'la',
+        context: 'k',
+        model: 'claude-opus-4-6',
+        inputTokens: 100,
+        outputTokens: 50,
+        processingTimeMs: 10,
+        translations: [],
+        glossary: [],
+      })
+      .mockResolvedValue(null);
+    // Zápis kopie selže (v ostrém běhu se tím vrátí i odečet ve stejné transakci)
+    mocks.prisma.document.create.mockRejectedValueOnce(new Error('unique constraint'));
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1', 'p2'] })).resolves.toBeUndefined();
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: COPY_FAILED_MESSAGE },
+    });
+    // Odečet a kopie jdou jedním voláním (jedna transakce)
+    expect(billing.consumeCredits).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ referenceId: 'dedup:p1:own-doc' }),
+      expect.any(Function),
+    );
+    // Druhá stránka se normálně zpracuje OCR
+    expect(mocks.processWithClaudeBatch).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1114,8 +1174,11 @@ describe('processPages – překlad existujícího dokumentu do dalšího jazyka
     expect(mocks.createMessage).not.toHaveBeenCalled();
     expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
       where: { id: 'p1', status: { not: 'archived' } },
-      data: { status: 'done', errorMessage: expect.stringContaining('Nedostatečný kredit') },
+      data: { status: 'done', errorMessage: INSUFFICIENT_CREDIT_PAGE_MESSAGE },
     });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(lastJobUpdate.data.errors[0]).toMatch(/200\s000 tokenů, volných je 100/);
+    expect(lastJobUpdate.data.errorCode).toBe('insufficient_credit');
   });
 });
 
@@ -1180,6 +1243,7 @@ describe('processPages – rezervace kreditu (BIL-1)', () => {
     expect(lastJobUpdate.data).toMatchObject({
       status: 'error',
       currentStep: 'Nedostatečný kredit',
+      errorCode: 'insufficient_credit',
     });
     expect(lastJobUpdate.data.errors[0]).toMatch(/potřebuje rezervovat .* tokenů, volných je 1/);
   });
@@ -1269,5 +1333,62 @@ describe('processPages – skutečný odečet k dokumentu a svazku (BIL-11)', ()
     // Opus 5.5: 1000 × $4 + 500 × $20 → 12 880 kreditů
     expect(data.chargedCredits).toBe(12_880);
     expect(data.translations.create[0].chargedCredits).toBe(0);
+  });
+});
+
+// ── Souběh jobů téhož uživatele: kredit blokuje rezervace jiného jobu ──
+describe('processPages – kredit blokovaný jiným jobem (odklad místo chyby)', () => {
+  it('dávku nespustí a job odloží (CreditBusyError), stránky nechá ve zpracování', async () => {
+    addPage('p1');
+    blockReservationsByOtherHolds();
+
+    const err: unknown = await processPages({ ...baseJob, pageIds: ['p1'] }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(CreditBusyError);
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    // Žádná chyba jobu ani návrat stránek do pending – job jen počká ve frontě
+    expect(
+      mocks.prisma.processingJob.update.mock.calls.some(
+        (c) => (c[0] as { data: { status?: string } }).data.status === 'error',
+      ),
+    ).toBe(false);
+    expect(mocks.prisma.page.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'pending', errorMessage: null } }),
+    );
+  });
+
+  it('rezervace odmítnutá kvůli souběžnému jobu → odklad, ne chyba', async () => {
+    addPage('p1');
+    billing.reserveCredits.mockResolvedValue({
+      ok: false,
+      required: 500_000,
+      available: 100_000,
+      balance: 900_000,
+      reserved: 800_000,
+    });
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1'] })).rejects.toBeInstanceOf(
+      CreditBusyError,
+    );
+    expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+  });
+
+  it('kopii při kreditu blokovaném jiným jobem neudělá a job odloží', async () => {
+    addPage('p1');
+    mocks.prisma.document.findFirst.mockResolvedValue({
+      id: 'own-doc',
+      hash: 'h',
+      model: 'claude-opus-4-6',
+      inputTokens: 100,
+      outputTokens: 50,
+      translations: [],
+      glossary: [],
+    });
+    blockReservationsByOtherHolds(5000, 6000);
+
+    await expect(processPages({ ...baseJob, pageIds: ['p1'] })).rejects.toBeInstanceOf(
+      CreditBusyError,
+    );
+    expect(mocks.prisma.document.create).not.toHaveBeenCalled();
   });
 });
