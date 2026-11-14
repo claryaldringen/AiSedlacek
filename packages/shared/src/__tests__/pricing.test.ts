@@ -68,7 +68,7 @@ describe('rezervace kreditu (BIL-1)', () => {
     expect(estimateInputTokens('řík')).toBe(3);
   });
 
-  it('rezervuje celý max_tokens nejdražší sazbou z modelů, které můžou odpovědět', () => {
+  it('rezervuje celý max_tokens nejvyšší sazbou z předaných modelů', () => {
     const credits = reservationCredits(['claude-opus-5-5', 'claude-opus-5'], 1000, 24_000);
     // Opus 5 ($5/$25) je dražší než Opus 5.5 ($4/$20) – rozhoduje jeho sazba
     expect(credits).toBe(creditsForUsage('claude-opus-5', 1000 + MESSAGE_OVERHEAD_TOKENS, 24_000));

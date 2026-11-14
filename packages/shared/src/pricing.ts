@@ -139,9 +139,12 @@ export const MESSAGE_OVERHEAD_TOKENS = 200;
 
 /**
  * Kredity, které se před voláním LLM rezervují (BIL-1): nejvyšší možná cena
- * volání – vstup podle odhadu, výstup celý `max_tokens` – přes všechny modely,
- * které můžou odpovědět (primární i serverový fallback). Po volání se naúčtuje
- * skutečná spotřeba a zbytek rezervace se vrátí.
+ * volání – vstup podle odhadu, výstup celý `max_tokens` – nejvyšší sazbou
+ * z předaných modelů. Předává se primární model volání (u OCR `OCR_MODEL`), ne
+ * dražší serverový fallback: ten nastává jen při odmítnutí a vzácný přesah nad
+ * rezervaci pokryje volný kredit, jinak ho nese provozovatel – zůstatek do
+ * minusu nejde (rozhodnutí 2026-11-14). Po volání se naúčtuje skutečná spotřeba
+ * a zbytek rezervace se vrátí.
  */
 export function reservationCredits(
   models: readonly string[],

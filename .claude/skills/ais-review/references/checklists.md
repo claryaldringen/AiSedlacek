@@ -65,8 +65,10 @@ Formát nálezu:
   `settleCreditHold` / `releaseCreditHold`) s **modelem z odpovědi**
   (`response.model`, `finalMsg.model`), ne s konstantou. Rezervace = maximální
   cena (`reservationCredits` / `ocrBatchReservationCredits`: odhad vstupu + celý
-  `max_tokens`, sazba nejdražšího modelu včetně fallbacku) a musí odpovídat
-  skutečnému `max_tokens` volání (`LLM_MAX_TOKENS`).
+  `max_tokens` sazbou primárního modelu volání – u OCR `OCR_MODEL`, ne dražšího
+  serverového fallbacku; vzácný přesah při fallbacku kryje volný kredit, jinak ho
+  nese provozovatel, rozhodnutí 2026-11-14) a musí odpovídat skutečnému
+  `max_tokens` volání (`LLM_MAX_TOKENS`).
 - Zůstatek nikdy do minusu (rozhodnutí 2026-10-15): žádný odečet mimo
   rezervaci / `consumeCredits`, rezervace, které nic nevyúčtuje, se uvolní
   (chyba volání, konec jobu, `releaseJobHolds` při úklidu přerušených jobů).
