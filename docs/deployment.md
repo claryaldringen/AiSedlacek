@@ -215,9 +215,19 @@ systemctl daemon-reload && systemctl enable --now aisedlacek-backup.timer
 echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/default/aisedlacek-backup
 ```
 
-- Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní.
-- S `BACKUP_REMOTE` se dumpy i uploady synchronizují mimo VPS (uploady se na
-  cíli nemažou). Bez něj je záloha jen na stejném disku a uploady se nezálohují.
+- Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní. Dump se před
+  odesláním ověří (`pg_restore --list`).
+- Přihlašovací údaje k DB jdou do `pg_dump` přes `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`
+  a dočasný `.pgpass` (práva 600, po skončení se smaže) – heslo není v argumentech
+  procesu, takže ho ostatní uživatelé sdíleného VPS nevidí v `ps`.
+- S `BACKUP_REMOTE` se dumpy i uploady kopírují mimo VPS **jen přírůstkově**
+  (`rsync --ignore-existing`, bez `--delete`): na cíli se nic nemaže ani nepřepisuje,
+  takže smazání nebo poškození lokálních souborů se na off-site kopii nepropíše.
+  Starých dumpů na cíli proto přibývá – retenci je potřeba nastavit na cílovém úložišti
+  (např. snapshoty Storage Boxu nebo občasný ruční úklid). Bez `BACKUP_REMOTE` je záloha
+  jen na stejném disku a uploady se nezálohují.
+- **Po změně skriptu ho na serveru znovu nainstalovat** (deploy ho nekopíruje):
+  `install -m 700 ops/backup/aisedlacek-backup.sh /usr/local/bin/aisedlacek-backup`.
 - Obnova: `pg_restore --clean --if-exists -d "${DATABASE_URL%%\?*}" <soubor.dump>`
   (obnovu je dobré si jednou vyzkoušet na kopii DB).
 
