@@ -31,6 +31,7 @@ import { apiFetch, apiFetchOk } from '@/lib/infrastructure/api-client';
 import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 import { formatCzk } from '@/lib/pricing';
 import { addChatUsageToDocument } from '@/lib/chat-usage';
+import { PanelLoadGuard, applyResultUpdate } from '@/lib/panel-result';
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -203,6 +204,9 @@ function WorkspaceContent(): React.JSX.Element {
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
   const [panelResult, setPanelResult] = useState<DocumentResult | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+  // Naposledy otevíraná stránka panelu – pozdě doběhlé načtení (rychlé listování,
+  // regenerace po přepnutí) se do panelu nezapíše
+  const [panelLoad] = useState(() => new PanelLoadGuard());
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateStep, setRegenerateStep] = useState<string | undefined>(undefined);
   const [regenerateProgress, setRegenerateProgress] = useState<number | undefined>(undefined);
@@ -423,10 +427,11 @@ function WorkspaceContent(): React.JSX.Element {
   const handleWorkspaceSelect = useCallback(
     (id: string): void => {
       router.push(`/workspace?workspace=${id}`);
+      panelLoad.close();
       setPanelResult(null);
       setPages([]);
     },
-    [router],
+    [router, panelLoad],
   );
 
   // ---- Collection navigation (URL-based for browser back/forward) ----
@@ -516,10 +521,11 @@ function WorkspaceContent(): React.JSX.Element {
         const params = wsParam ? `${wsParam}&collection=${id}` : `collection=${id}`;
         router.push(`/workspace?${params}`);
       }
+      panelLoad.close();
       setPanelPage(null);
       setPanelResult(null);
     },
-    [router, selectedWorkspaceId],
+    [router, selectedWorkspaceId, panelLoad],
   );
 
   const selectedCollection =
@@ -796,11 +802,12 @@ function WorkspaceContent(): React.JSX.Element {
         return;
       }
       if (panelPage?.id === pageId) {
+        panelLoad.close();
         setPanelPage(null);
         setPanelResult(null);
       }
     },
-    [pages, panelPage, t],
+    [pages, panelPage, t, panelLoad],
   );
 
   const handleDeleteSelected = useCallback(async (): Promise<void> => {
@@ -822,30 +829,39 @@ function WorkspaceContent(): React.JSX.Element {
   }, []);
 
   // ---- Page double-click (open panel for any status) ----
+  // Všechny cesty otevření (dvojklik, předchozí/další, klávesnice, obnova z URL)
+  // vedou sem. Odpověď staršího otevření (A → B → C, GET pro B doběhne po C) se
+  // zahodí a její načtení se přeruší – panel nesmí ukázat B pod stránkou C.
   const handlePageDoubleClick = useCallback(
     async (page: PageItem): Promise<void> => {
+      const load = panelLoad.begin(page.id);
       setPanelPage(page);
       setPanelResult(null);
       setError(null);
       setPageInUrl(page.id);
+      setPanelLoading(Boolean(page.document));
 
       if (page.document) {
-        setPanelLoading(true);
         try {
-          const res = await apiFetch(`/api/documents/${page.document.id}`);
+          const res = await apiFetch(`/api/documents/${page.document.id}`, {
+            signal: load.signal,
+          });
+          if (!load.isCurrent()) return;
           if (!res.ok) throw new Error(t('failedToLoadDocument'));
           const doc = (await res.json()) as DocApiResponse;
+          if (!load.isCurrent()) return;
           setPanelAccess({ id: page.id, canEdit: readCanEdit(doc) });
           setPanelResult(mapDocToResult(doc, page, locale, true));
         } catch (err) {
+          if (!load.isCurrent()) return;
           setError(err instanceof Error ? err.message : t('error'));
         } finally {
-          setPanelLoading(false);
+          if (load.isCurrent()) setPanelLoading(false);
         }
       } else {
         // Fetch full page data for metadata (width, height, etc.)
         try {
-          const res = await apiFetch(`/api/pages/${page.id}`);
+          const res = await apiFetch(`/api/pages/${page.id}`, { signal: load.signal });
           if (res.ok) {
             const fullPage = (await res.json()) as PageItem & {
               width?: number;
@@ -853,6 +869,7 @@ function WorkspaceContent(): React.JSX.Element {
               fileSize?: number;
               errorMessage?: string;
             };
+            if (!load.isCurrent()) return;
             setPanelAccess({ id: page.id, canEdit: readCanEdit(fullPage) });
             setPanelPage(fullPage);
           }
@@ -861,7 +878,7 @@ function WorkspaceContent(): React.JSX.Element {
         }
       }
     },
-    [setError, setPageInUrl],
+    [setError, setPageInUrl, panelLoad],
   );
 
   // ---- Restore panel from URL ?page=ID on initial load ----
@@ -905,17 +922,22 @@ function WorkspaceContent(): React.JSX.Element {
   // ---- Regenerate document ----
   const handleRegenerate = useCallback(
     async (pageId: string): Promise<void> => {
+      // Panel se obnoví jen tehdy, když pořád ukazuje regenerovanou stránku –
+      // uživatel mohl během regenerace přejít jinam (seznam stránek se obnoví vždy).
       const reloadPanel = async (): Promise<PageItem | null> => {
         const pageRes = await apiFetch(`/api/pages/${pageId}`);
         if (!pageRes.ok) return null;
         const updatedPage = (await pageRes.json()) as PageItem;
-        setPanelPage(updatedPage);
         setPages((prev) => prev.map((p) => (p.id === pageId ? updatedPage : p)));
+        if (!panelLoad.isOpen(pageId)) return updatedPage;
+        setPanelPage(updatedPage);
         if (updatedPage.document) {
           const docRes = await apiFetch(`/api/documents/${updatedPage.document.id}`);
           if (docRes.ok) {
             const doc = (await docRes.json()) as DocApiResponse;
-            setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+            if (panelLoad.isOpen(pageId)) {
+              setPanelResult(mapDocToResult(doc, updatedPage, locale, false));
+            }
           }
         }
         return updatedPage;
@@ -1031,7 +1053,7 @@ function WorkspaceContent(): React.JSX.Element {
         setRegenerateProgress(undefined);
       }
     },
-    [pages, setError, pollJob],
+    [pages, setError, pollJob, panelLoad],
   );
 
   // ---- Derived values ----
@@ -1786,17 +1808,22 @@ function WorkspaceContent(): React.JSX.Element {
         result={panelResult}
         isLoading={panelLoading}
         onClose={() => {
+          panelLoad.close();
           setPanelPage(null);
           setPanelResult(null);
           setPanelLoading(false);
           setPageInUrl(null);
         }}
-        onResultUpdate={(updated) => setPanelResult(updated)}
+        // Jen pro dokument, který panel pořád ukazuje – zastaralý snímek (rollback
+        // z chatu, doběhlé uložení či retranslace po přepnutí stránky) se zahodí
+        onResultUpdate={(updated) => setPanelResult((prev) => applyResultUpdate(prev, updated))}
         onChatUsage={(documentId, usage) =>
           setPanelResult((prev) => addChatUsageToDocument(prev, documentId, usage))
         }
         onPageUpdate={(updated) => {
-          setPanelPage(updated);
+          // Rollback přejmenování může doběhnout po přepnutí stránky – panel jen
+          // pro stránku, kterou pořád ukazuje; seznam stránek se aktualizuje vždy
+          setPanelPage((prev) => applyResultUpdate(prev, updated));
           setPages((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
         }}
         onRegenerate={panelReadOnly ? undefined : (pageId) => void handleRegenerate(pageId)}
