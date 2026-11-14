@@ -3,6 +3,7 @@
  */
 
 import { chargedCreditsOf, createBilledMessage } from '../lib/billed-message';
+import { JobError } from '../lib/job-error';
 import { LANGUAGE_NAMES, LANGUAGE_NAMES_CS_GENITIVE } from '../lib/languages';
 import { prisma } from '@ai-sedlacek/db';
 import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
@@ -36,9 +37,9 @@ function isUniqueViolation(e: unknown): boolean {
 }
 
 /** Podmíněný zápis v transakci nenašel výchozí text – překlad se mezitím změnil. */
-class TranslationChangedError extends Error {
+class TranslationChangedError extends JobError {
   constructor() {
-    super(TRANSLATION_CHANGED_MESSAGE);
+    super('translation_changed', TRANSLATION_CHANGED_MESSAGE);
     this.name = 'TranslationChangedError';
   }
 }
@@ -69,11 +70,11 @@ export async function handleRetranslate(jobId: string, data: RetranslateJobData)
   });
 
   if (!doc) {
-    throw new Error(`Dokument ${documentId} nenalezen`);
+    throw new JobError('not_found', `Dokument ${documentId} nenalezen`);
   }
 
   if (doc.page.userId !== userId) {
-    throw new Error('Přístup zamítnut');
+    throw new JobError('not_found', 'Přístup zamítnut');
   }
 
   // Stav překladu v DB na začátku jobu – při ukládání se z něj ověřuje, že ho
@@ -153,7 +154,17 @@ Return ONLY the updated translation in markdown, nothing else.`;
       response.stopReason === 'end_turn'
         ? 'prázdný výstup'
         : (response.stopReason ?? 'neznámý důvod');
-    throw new Error(`Model nevrátil kompletní překlad (${reason}) – překlad zůstal beze změny`);
+    // Kód pro lokalizovanou hlášku v UI (worker píše česky, UI může být anglicky)
+    const code =
+      response.stopReason === 'end_turn'
+        ? 'empty_output'
+        : response.stopReason === 'refusal'
+          ? 'model_refused'
+          : 'output_truncated';
+    throw new JobError(
+      code,
+      `Model nevrátil kompletní překlad (${reason}) – překlad zůstal beze změny`,
+    );
   }
 
   await saveRetranslation({

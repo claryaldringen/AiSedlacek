@@ -49,6 +49,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     currentPageId: job.currentPageId,
     currentStep: job.currentStep,
     errors: job.errors,
+    // Kód chyby (JobErrorCode) – UI podle něj ukáže lokalizovanou hlášku
+    errorCode: job.errorCode,
     pageIds: job.pageIds,
     progress: job.totalPages > 0 ? Math.round((job.completedPages / job.totalPages) * 100) : 0,
     donePages,

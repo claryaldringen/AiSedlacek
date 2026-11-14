@@ -21,6 +21,7 @@ import { reclaimStuckJobs, STALE_JOB_MS } from './lib/reclaim';
 import { parseOcrJobOptions } from './lib/job-options';
 import { resetUnfinishedPages } from './lib/page-status';
 import { assertLlmProviderAllowed } from './lib/startup-checks';
+import { describeJobError } from './lib/job-error';
 
 // Fail-fast na nebezpečnou konfiguraci dřív, než worker začne brát joby (SEC-12)
 try {
@@ -88,8 +89,13 @@ async function executeJob(job: {
     }
     console.log(`[Worker] Job ${job.id} (${jobType}) completed`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Neznámá chyba';
-    console.error(`[Worker] Job ${job.id} (${jobType}) failed:`, message);
+    // Surová chyba jen do logu; do jobu kód (UI podle něj ukáže lokalizovanou
+    // hlášku) a text bez interních detailů SDK.
+    const { code, message } = describeJobError(err);
+    console.error(
+      `[Worker] Job ${job.id} (${jobType}) failed [${code}]:`,
+      err instanceof Error ? err.message : err,
+    );
     await prisma.processingJob
       .update({
         where: { id: job.id },
@@ -97,6 +103,7 @@ async function executeJob(job: {
           status: 'error',
           currentStep: `Chyba: ${message}`,
           errors: { push: message },
+          errorCode: code,
         },
       })
       .catch(() => {});

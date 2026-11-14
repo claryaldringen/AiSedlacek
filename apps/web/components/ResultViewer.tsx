@@ -7,6 +7,21 @@ import remarkGfm from 'remark-gfm';
 import { MarkdownEditor, type MarkdownEditorHandle } from './MarkdownEditor';
 import { VersionHistory } from './VersionHistory';
 import { chargeForUsage, documentCharge, formatCzk } from '@/lib/pricing';
+import { isJobErrorCode, type JobErrorCode } from '@ai-sedlacek/shared';
+
+/**
+ * Lokalizovaná hláška k chybě retranslace podle kódu z workeru – text chyby
+ * z workeru je česky a u chyb API by to byla surová zpráva SDK.
+ */
+const RETRANSLATE_ERROR_KEYS: Partial<Record<JobErrorCode, string>> = {
+  translation_changed: 'retranslationErrorChanged',
+  output_truncated: 'retranslationErrorTruncated',
+  model_refused: 'retranslationErrorRefused',
+  empty_output: 'retranslationErrorEmpty',
+  insufficient_credit: 'retranslationInsufficientCredit',
+  api_error: 'retranslationErrorApi',
+  not_found: 'retranslationErrorNotFound',
+};
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 
 export interface DocumentResult {
@@ -373,6 +388,7 @@ export function ResultViewer({
               status: string;
               currentStep?: string | null;
               errors?: string[];
+              errorCode?: string | null;
             };
             if (
               statusData.status === 'completed' ||
@@ -382,8 +398,12 @@ export function ResultViewer({
               stopRetranslatePoll();
               setRetranslating(false);
               if (statusData.status === 'error' && currentResultIdRef.current === docId) {
-                // Worker ukládá důvod do errors (poslední = tento běh), jinak obecná hláška.
-                setRetranslateError(statusData.errors?.at(-1) || t('retranslationFailed'));
+                // Hláška podle kódu chyby v jazyce UI; neznámý kód (nebo starší
+                // worker bez kódu) → obecná hláška, ne český text z workeru.
+                const key = isJobErrorCode(statusData.errorCode)
+                  ? RETRANSLATE_ERROR_KEYS[statusData.errorCode]
+                  : undefined;
+                setRetranslateError(t(key ?? 'retranslationFailed'));
               }
               if (statusData.status === 'completed') {
                 // Reload the document to get the new translation

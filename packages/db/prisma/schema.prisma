@@ -240,6 +240,7 @@ model ProcessingJob {
   currentPageId  String?
   currentStep    String?  // Human-readable current step description
   errors         String[] // Array of error messages
+  errorCode      String?  // kód chyby jobu pro lokalizaci v UI (JobErrorCode, packages/shared)
   pageIds        String[] // Original page IDs for reference
   language       String   @default("cs")
   mode           String   @default("transcribe+translate")

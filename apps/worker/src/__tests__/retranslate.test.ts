@@ -62,7 +62,10 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
   it('překlad mezitím ručně upravený: výsledek neuloží, job skončí chybou, spotřebu naúčtuje', async () => {
     setup({ atStart: 'starý překlad', atSave: 'ruční úprava uživatele' });
 
-    await expect(handleRetranslate('job-r', JOB)).rejects.toThrow(TRANSLATION_CHANGED_MESSAGE);
+    const err: unknown = await handleRetranslate('job-r', JOB).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(TRANSLATION_CHANGED_MESSAGE);
+    // Kód pro lokalizovanou hlášku v UI
+    expect(err).toMatchObject({ code: 'translation_changed' });
 
     expect(mocks.prisma.translation.updateMany).not.toHaveBeenCalled();
     expect(mocks.prisma.translation.create).not.toHaveBeenCalled();
@@ -171,25 +174,27 @@ describe('retranslate – souběžná ruční úprava překladu', () => {
 });
 
 describe('retranslate – neúplný výstup modelu', () => {
-  it.each(['max_tokens', 'refusal'])(
-    'stop_reason %s: překlad neuloží, spotřebu naúčtuje',
-    async (stopReason) => {
-      setup({ atStart: 'starý překlad', atSave: 'starý překlad' });
-      mocks.createMessage.mockResolvedValue({
-        text: 'useknutý překl',
-        model: 'claude-sonnet-4-6',
-        inputTokens: 100,
-        outputTokens: 8192,
-        stopReason,
-      });
+  it.each([
+    ['max_tokens', 'output_truncated'],
+    ['refusal', 'model_refused'],
+  ])('stop_reason %s: překlad neuloží, spotřebu naúčtuje (kód %s)', async (stopReason, code) => {
+    setup({ atStart: 'starý překlad', atSave: 'starý překlad' });
+    mocks.createMessage.mockResolvedValue({
+      text: 'useknutý překl',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 100,
+      outputTokens: 8192,
+      stopReason,
+    });
 
-      await expect(handleRetranslate('job-r', JOB)).rejects.toThrow(/beze změny/);
+    const err: unknown = await handleRetranslate('job-r', JOB).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/beze změny/);
+    expect(err).toMatchObject({ code });
 
-      expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
-      expect(mocks.prisma.translation.updateMany).not.toHaveBeenCalled();
-      expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
-    },
-  );
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.prisma.translation.updateMany).not.toHaveBeenCalled();
+    expect(billing.settleCreditHold).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('retranslate – rezervace kreditu (BIL-1)', () => {
