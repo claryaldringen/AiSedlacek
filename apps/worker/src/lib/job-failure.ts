@@ -3,27 +3,22 @@
  */
 
 import { prisma } from '@ai-sedlacek/db';
-import { CREDIT_WAIT_EXHAUSTED_MESSAGE, isCreditBusy, requeueForCredit } from './credit-wait';
-import { JobError, describeJobError } from './job-error';
+import { describeJobError } from './job-error';
 import { resetUnfinishedPages } from './page-status';
 
 /**
- * Job vyhodil chybu: buď ho vrátí do fronty (kredit blokují jiné běžící akce
- * uživatele – čekání s odkladem), nebo ho ukončí chybou s kódem pro UI.
+ * Job vyhodil chybu: ukončí ho chybou s kódem pro UI (`errorCode`) a nedokončené
+ * stránky OCR vrátí do výchozího stavu. Kredit blokovaný jinými běžícími akcemi
+ * uživatele je `credit_busy` (spustit znovu po jejich dokončení), skutečný
+ * nedostatek `insufficient_credit` – job se v žádném případě neodkládá.
  */
 export async function handleJobFailure(
   job: { id: string; type: string; pageIds: string[] },
   err: unknown,
-): Promise<'requeued' | 'failed'> {
-  let failure = err;
-  if (isCreditBusy(err)) {
-    if (await requeueForCredit(job.id).catch(() => false)) return 'requeued';
-    failure = new JobError('insufficient_credit', CREDIT_WAIT_EXHAUSTED_MESSAGE);
-  }
-
+): Promise<void> {
   // Surová chyba jen do logu; do jobu kód (UI podle něj ukáže lokalizovanou
   // hlášku) a text bez interních detailů SDK.
-  const { code, message } = describeJobError(failure);
+  const { code, message } = describeJobError(err);
   console.error(
     `[Worker] Job ${job.id} (${job.type}) failed [${code}]:`,
     err instanceof Error ? err.message : err,
@@ -47,5 +42,4 @@ export async function handleJobFailure(
       console.log(`[Worker] Reset ${resetCount} stuck pages for job ${job.id}`);
     }
   }
-  return 'failed';
 }

@@ -88,8 +88,7 @@ async function executeJob(job: {
     }
     console.log(`[Worker] Job ${job.id} (${jobType}) completed`);
   } catch (err) {
-    // Kredit blokovaný jinými běžícími akcemi → odklad ve frontě, jinak chyba
-    // s kódem pro UI (viz job-failure.ts).
+    // Chyba s kódem pro UI (kredit blokovaný jinou akcí = credit_busy), viz job-failure.ts
     await handleJobFailure({ id: job.id, type: jobType, pageIds: job.pageIds }, err);
   } finally {
     // Pojistka (BIL-1): rezervace, kterou job nevyúčtoval ani neuvolnil (chyba
@@ -125,11 +124,7 @@ async function pollForJobs(): Promise<void> {
       }
 
       const jobs = await prisma.processingJob.findMany({
-        // Job odložený kvůli kreditu blokovanému jinou akcí se bere až po `notBefore`
-        where: {
-          status: 'queued',
-          OR: [{ notBefore: null }, { notBefore: { lte: new Date() } }],
-        },
+        where: { status: 'queued' },
         orderBy: { createdAt: 'asc' },
         take: 10,
       });

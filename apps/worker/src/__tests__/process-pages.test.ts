@@ -46,10 +46,12 @@ import {
   IMAGE_UNREADABLE_MESSAGE,
   INSUFFICIENT_CREDIT_PAGE_MESSAGE,
   COPY_FAILED_MESSAGE,
+  RESULT_SAVE_FAILED_MESSAGE,
+  TRANSLATION_FAILED_MESSAGE,
 } from '../handlers/process-pages';
 import { OcrRefusalError } from '@ai-sedlacek/ocr';
 import { RECLAIM_MARKER } from '../lib/reclaim';
-import { CreditBusyError } from '../lib/credit-wait';
+import { JobError } from '../lib/job-error';
 import {
   billing,
   blockReservationsByOtherHolds,
@@ -1337,27 +1339,34 @@ describe('processPages – skutečný odečet k dokumentu a svazku (BIL-11)', ()
 });
 
 // ── Souběh jobů téhož uživatele: kredit blokuje rezervace jiného jobu ──
-describe('processPages – kredit blokovaný jiným jobem (odklad místo chyby)', () => {
-  it('dávku nespustí a job odloží (CreditBusyError), stránky nechá ve zpracování', async () => {
+describe('processPages – kredit blokovaný jiným jobem (credit_busy)', () => {
+  function lastJobData(): Record<string, unknown> {
+    return mocks.prisma.processingJob.update.mock.calls.at(-1)![0].data;
+  }
+
+  it('dávku nespustí, job skončí credit_busy a stránky se vrátí do pending', async () => {
     addPage('p1');
     blockReservationsByOtherHolds();
 
-    const err: unknown = await processPages({ ...baseJob, pageIds: ['p1'] }).catch((e) => e);
+    await processPages({ ...baseJob, pageIds: ['p1'] });
 
-    expect(err).toBeInstanceOf(CreditBusyError);
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
-    // Žádná chyba jobu ani návrat stránek do pending – job jen počká ve frontě
-    expect(
-      mocks.prisma.processingJob.update.mock.calls.some(
-        (c) => (c[0] as { data: { status?: string } }).data.status === 'error',
-      ),
-    ).toBe(false);
-    expect(mocks.prisma.page.updateMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'pending', errorMessage: null } }),
+    expect(lastJobData()).toMatchObject({
+      status: 'error',
+      errorCode: 'credit_busy',
+      currentStep: 'Kredit rezervovaný jiným zpracováním',
+    });
+    // Detail s částkami jen do errors jobu
+    expect((lastJobData().errors as string[])[0]).toMatch(
+      /dočasně rezervovaný jiným běžícím zpracováním.*zůstatek 500\s100, rezervováno 600\s000/,
     );
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1'] }, status: 'processing' },
+      data: { status: 'pending', errorMessage: null },
+    });
   });
 
-  it('rezervace odmítnutá kvůli souběžnému jobu → odklad, ne chyba', async () => {
+  it('rezervace odmítnutá kvůli souběžnému jobu → credit_busy, ne insufficient_credit', async () => {
     addPage('p1');
     billing.reserveCredits.mockResolvedValue({
       ok: false,
@@ -1367,13 +1376,22 @@ describe('processPages – kredit blokovaný jiným jobem (odklad místo chyby)'
       reserved: 800_000,
     });
 
-    await expect(processPages({ ...baseJob, pageIds: ['p1'] })).rejects.toBeInstanceOf(
-      CreditBusyError,
-    );
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
     expect(mocks.processWithClaudeBatch).not.toHaveBeenCalled();
+    expect(lastJobData()).toMatchObject({ status: 'error', errorCode: 'credit_busy' });
   });
 
-  it('kopii při kreditu blokovaném jiným jobem neudělá a job odloží', async () => {
+  it('skutečný nedostatek zůstává insufficient_credit', async () => {
+    addPage('p1');
+    refuseReservations(1000);
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(lastJobData()).toMatchObject({ status: 'error', errorCode: 'insufficient_credit' });
+  });
+
+  it('kopie při kreditu blokovaném jiným jobem: chyba credit_busy, nic se nezkopíruje', async () => {
     addPage('p1');
     mocks.prisma.document.findFirst.mockResolvedValue({
       id: 'own-doc',
@@ -1386,9 +1404,78 @@ describe('processPages – kredit blokovaný jiným jobem (odklad místo chyby)'
     });
     blockReservationsByOtherHolds(5000, 6000);
 
-    await expect(processPages({ ...baseJob, pageIds: ['p1'] })).rejects.toBeInstanceOf(
-      CreditBusyError,
-    );
+    const err: unknown = await processPages({ ...baseJob, pageIds: ['p1'] }).catch((e) => e);
+
+    // Job ukončí worker (handleJobFailure): error, credit_busy, stránky zpět do pending
+    expect(err).toBeInstanceOf(JobError);
+    expect(err).toMatchObject({ code: 'credit_busy' });
     expect(mocks.prisma.document.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── Surové chyby SDK/DB se do Page.errorMessage nedostanou (review 3. kolo) ──
+describe('processPages – hlášky stránek bez surových chyb', () => {
+  it('selhané uložení výsledku: obecná hláška, surová chyba DB jen do logu', async () => {
+    addPage('p1');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.prisma.document.create.mockRejectedValue(
+      new Error(
+        'Invalid `prisma.document.create()` invocation: Unique constraint failed on pageId',
+      ),
+    );
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'error', errorMessage: RESULT_SAVE_FAILED_MESSAGE },
+    });
+    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
+    expect(JSON.stringify(lastJobUpdate.data.errors)).not.toContain('prisma');
+  });
+
+  it('selhaný překlad existujícího dokumentu: obecná hláška místo surové chyby', async () => {
+    addPage('p1', {
+      document: {
+        id: 'doc-1',
+        context: 'k',
+        translations: [{ language: 'en', text: 'English' }],
+        glossary: [],
+      },
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.createMessage.mockRejectedValue(new Error('PrismaClientKnownRequestError: P1001'));
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'done', errorMessage: TRANSLATION_FAILED_MESSAGE },
+    });
+  });
+
+  it('useknutý překlad existujícího dokumentu: vlastní srozumitelná hláška zůstává', async () => {
+    addPage('p1', {
+      document: {
+        id: 'doc-1',
+        context: 'k',
+        translations: [{ language: 'en', text: 'English' }],
+        glossary: [],
+      },
+    });
+    mocks.createMessage.mockResolvedValue({
+      text: '{"translation": "useknut',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 10,
+      outputTokens: 8192,
+      stopReason: 'max_tokens',
+    });
+
+    await processPages({ ...baseJob, pageIds: ['p1'] });
+
+    expect(mocks.prisma.page.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p1', status: { not: 'archived' } },
+      data: { status: 'done', errorMessage: expect.stringContaining('nevrátil kompletní překlad') },
+    });
   });
 });

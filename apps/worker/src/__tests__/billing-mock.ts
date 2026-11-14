@@ -53,7 +53,6 @@ export const billing = {
   // Skutečná logika (čistá funkce)
   isBlockedByOtherHolds: (s: { required: number; balance?: number; reserved?: number }): boolean =>
     (s.reserved ?? 0) > 0 && (s.balance ?? 0) >= s.required,
-  hasCharge: vi.fn(),
   releaseAllJobHolds: vi.fn(),
   getCreditState: vi.fn(),
   reserveCredits: vi.fn(),
@@ -98,7 +97,6 @@ export function resetBillingMock(available = 1_000_000_000): void {
         return { ok: true, result, value };
       },
     );
-  billing.hasCharge.mockReset().mockResolvedValue(false);
   billing.releaseAllJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseExpiredHolds.mockReset().mockResolvedValue(0);

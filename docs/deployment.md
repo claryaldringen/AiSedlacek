@@ -117,10 +117,9 @@ pre-deploy dumpů.
 
 Běžný `deploy.sh`, ruční kroky jen tyto:
 
-- Migrace (všechny jen přidávají tabulky nebo sloupce – nullable, nebo s výchozí
-  hodnotou –, data se nemění): `20261114120000_add_credit_hold`,
-  `20261114130000_add_charge_records`, `20261114140000_add_job_error_code`,
-  `20261114150000_add_cli_auth_code`, `20261114160000_add_job_credit_wait`.
+- Migrace (všechny jen přidávají tabulky nebo nullable sloupce, data se nemění):
+  `20261114120000_add_credit_hold`, `20261114130000_add_charge_records`,
+  `20261114140000_add_job_error_code`, `20261114150000_add_cli_auth_code`.
 - Web a worker nasazovat spolu (deploy restartuje oba) – worker po startu uvolní
   rezervace kreditu jobů přerušených deployem.
 - Po deployi znovu nainstalovat zálohovací skript (viz [Zálohy](#zálohy)).

@@ -21,7 +21,13 @@ import {
   type CreditCharge,
   type CreditShortage,
 } from '@ai-sedlacek/db/billing';
-import { CreditBusyError, isCreditBusy } from '../lib/credit-wait';
+import {
+  JobError,
+  creditBusyError,
+  describeCreditShortage,
+  isCreditBusy,
+  pageErrorMessage,
+} from '../lib/job-error';
 import {
   OcrRefusalError,
   ocrBatchReservationCredits,
@@ -60,23 +66,41 @@ export const INSUFFICIENT_CREDIT_PAGE_MESSAGE = 'Nedostatečný kredit – strá
 /** Hláška kopie, kterou se nepodařilo uložit (odečet se vrátil s transakcí). */
 export const COPY_FAILED_MESSAGE = 'Kopii dokumentu se nepodařilo uložit – zkuste zpracování znovu';
 
+/** Hláška stránky, jejíž překlad do dalšího jazyka selhal z jiného než známého důvodu. */
+export const TRANSLATION_FAILED_MESSAGE =
+  'Překlad do dalšího jazyka se nepodařil – zkuste to znovu';
+
+/** Hláška stránky, jejíž výsledek se nepodařilo uložit (surová chyba DB jen do logu). */
+export const RESULT_SAVE_FAILED_MESSAGE =
+  'Výsledek stránky se nepodařilo uložit – zkuste zpracování znovu';
+
 /** Chyba billingu „volný kredit nestačí“ (InsufficientCreditError). */
-function insufficientCredit(err: unknown): { required: number; available: number } | null {
+function insufficientCredit(
+  err: unknown,
+): { required: number; available: number; balance?: number; reserved?: number } | null {
   if (typeof err !== 'object' || err === null) return null;
-  const e = err as { code?: unknown; required?: unknown; available?: unknown };
+  const e = err as {
+    code?: unknown;
+    required?: unknown;
+    available?: unknown;
+    balance?: unknown;
+    reserved?: unknown;
+  };
   return e.code === 'insufficient_credit' &&
     typeof e.required === 'number' &&
     typeof e.available === 'number'
-    ? { required: e.required, available: e.available }
+    ? {
+        required: e.required,
+        available: e.available,
+        balance: typeof e.balance === 'number' ? e.balance : undefined,
+        reserved: typeof e.reserved === 'number' ? e.reserved : undefined,
+      }
     : null;
 }
 
 /** Volný kredit nestačí na rezervaci další dávky nebo kopie (BIL-1) – text do `errors` jobu. */
 export function insufficientCreditMessage(required: number, available: number): string {
-  return (
-    'Nedostatečný kredit pro zpracování – další krok potřebuje rezervovat ' +
-    `${required.toLocaleString('cs')} tokenů, volných je ${Math.max(0, available).toLocaleString('cs')}`
-  );
+  return describeCreditShortage({ required, available }).message;
 }
 
 interface PreparedPage {
@@ -259,18 +283,22 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           );
           await setPageStatus(pageId, 'done');
         } catch (err) {
-          // Kredit blokuje jiná běžící akce – odložit celý job (credit-wait.ts)
+          // Kredit blokuje jiná běžící akce uživatele – celý job končí credit_busy
+          // (job-failure.ts), nedokončené stránky se vrátí do výchozího stavu.
           if (isCreditBusy(err)) throw err;
           const shortage = insufficientCredit(err);
           if (shortage) {
             creditShort = true;
-            errors.push(
-              `Stránka ${pageId}: ${insufficientCreditMessage(shortage.required, shortage.available)}`,
-            );
+            errors.push(`Stránka ${pageId}: ${describeCreditShortage(shortage).message}`);
             await setPageStatus(pageId, 'done', INSUFFICIENT_CREDIT_PAGE_MESSAGE);
           } else {
-            const msg = err instanceof Error ? err.message : 'Chyba překladu';
-            errors.push(msg);
+            // Surová chyba (SDK, DB) jen do logu; stránka i job dostanou čitelný text
+            console.error(
+              `[Worker] Translation of page ${pageId} failed:`,
+              err instanceof Error ? err.message : err,
+            );
+            const msg = pageErrorMessage(err, TRANSLATION_FAILED_MESSAGE);
+            errors.push(`Stránka ${pageId}: ${msg}`);
             await setPageStatus(pageId, 'done', msg);
           }
         }
@@ -332,11 +360,10 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           (tx, charged) => copyDocumentForPage(tx, pageId, existingByHash, settledCredits(charged)),
         );
         if (!copied.ok) {
-          if (isBlockedByOtherHolds(copied)) throw new CreditBusyError(copied);
+          // Kredit blokuje jiná běžící akce → job končí credit_busy (stránky zpět)
+          if (isBlockedByOtherHolds(copied)) throw creditBusyError(copied);
           creditShort = true;
-          errors.push(
-            `Stránka ${pageId}: ${insufficientCreditMessage(copied.required, copied.available)}`,
-          );
+          errors.push(`Stránka ${pageId}: ${describeCreditShortage(copied).message}`);
           await setPageStatus(pageId, 'pending', INSUFFICIENT_CREDIT_PAGE_MESSAGE);
           skippedCount.insufficientCredit++;
           continue;
@@ -381,13 +408,18 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
           } catch (err) {
             if (isCreditBusy(err)) throw err;
             const shortage = insufficientCredit(err);
-            if (shortage) creditShort = true;
-            const msg = shortage
-              ? `Stránka ${pageId}: ${insufficientCreditMessage(shortage.required, shortage.available)}`
-              : err instanceof Error
-                ? err.message
-                : 'Chyba překladu';
-            errors.push(msg);
+            if (shortage) {
+              creditShort = true;
+              errors.push(`Stránka ${pageId}: ${describeCreditShortage(shortage).message}`);
+            } else {
+              console.error(
+                `[Worker] Translation of copied page ${pageId} failed:`,
+                err instanceof Error ? err.message : err,
+              );
+              errors.push(
+                `Stránka ${pageId}: ${pageErrorMessage(err, TRANSLATION_FAILED_MESSAGE)}`,
+              );
+            }
           }
         }
       }
@@ -469,26 +501,27 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
   let batchNo = 0;
 
   /**
-   * Volný kredit nestačí na další dávku. Když ho blokují jen rezervace jiných
-   * běžících akcí uživatele, job se odloží (CreditBusyError → zpět do fronty,
-   * hotové stránky opakovaný běh přeskočí). Jinak se zastaví s chybou
-   * a nezpracované stránky se vrátí do výchozího stavu.
+   * Volný kredit nestačí na další dávku: job se zastaví s chybou a nezpracované
+   * stránky se vrátí do výchozího stavu. Když kredit blokují jen rezervace jiných
+   * běžících akcí uživatele (bez nich by zůstatek stačil), je to `credit_busy` –
+   * spustit znovu po jejich dokončení; jinak `insufficient_credit` – dobít.
    */
   const stopForCredit = async (
     pending: { pageId: string }[],
     shortage: CreditShortage,
   ): Promise<void> => {
-    if (isBlockedByOtherHolds(shortage)) throw new CreditBusyError(shortage);
+    const { code, message } = describeCreditShortage(shortage);
     await resetUnfinishedPages(pending.map((p) => p.pageId));
-    errors.push(insufficientCreditMessage(shortage.required, shortage.available));
+    errors.push(message);
     await prisma.processingJob.update({
       where: { id: jobId },
       data: {
         status: 'error',
         completedPages: completed,
         errors: await errorsKeepingReclaimMarkers(jobId, errors),
-        currentStep: 'Nedostatečný kredit',
-        errorCode: 'insufficient_credit',
+        currentStep:
+          code === 'credit_busy' ? 'Kredit rezervovaný jiným zpracováním' : 'Nedostatečný kredit',
+        errorCode: code,
       },
     });
   };
@@ -765,10 +798,13 @@ export async function processPages(data: ProcessPagesJobData): Promise<void> {
 
         await setPageStatus(pageInfo.pageId, 'done');
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Neznámá chyba';
-        console.error(`[Worker] Save failed for page ${pageInfo.pageId}:`, message);
-        errors.push(`Stránka ${pageInfo.pageId}: ${message}`);
-        await markPageFailed(pageInfo.pageId, pageInfo.existingDocId, message);
+        // Surová chyba DB jen do logu – hlášku stránky vidí i členové workspace
+        console.error(
+          `[Worker] Save failed for page ${pageInfo.pageId}:`,
+          err instanceof Error ? err.message : err,
+        );
+        errors.push(`Stránka ${pageInfo.pageId}: ${RESULT_SAVE_FAILED_MESSAGE}`);
+        await markPageFailed(pageInfo.pageId, pageInfo.existingDocId, RESULT_SAVE_FAILED_MESSAGE);
       }
     }
 
@@ -1037,7 +1073,8 @@ Return ONLY the JSON object, no markdown fences, no extra text.`;
   // Useknutý (max_tokens) nebo odmítnutý výstup se neukládá – jinak by se jako
   // překlad uložil i surový neúplný JSON (`{"translation": "…`).
   if (response.stopReason !== 'end_turn') {
-    throw new Error(
+    throw new JobError(
+      response.stopReason === 'refusal' ? 'model_refused' : 'output_truncated',
       `Model nevrátil kompletní překlad (${response.stopReason ?? 'neznámý důvod'}) – překlad se neuložil`,
     );
   }

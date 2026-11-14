@@ -124,7 +124,7 @@ describe('fix-contexts – rezervace kreditu (BIL-1)', () => {
     });
   });
 
-  it('kredit blokovaný jiným jobem: job se odloží (chyba propadne do workeru), ne chyba', async () => {
+  it('kredit blokovaný jiným jobem: chyba propadne do workeru (credit_busy), model nevolá', async () => {
     blockReservationsByOtherHolds(50_000, 60_000);
 
     const err: unknown = await handleFixContexts('job-f', {
@@ -134,26 +134,12 @@ describe('fix-contexts – rezervace kreditu (BIL-1)', () => {
 
     expect(err).toMatchObject({ code: 'insufficient_credit', reserved: 60_000 });
     expect(mocks.createMessage).not.toHaveBeenCalled();
-    // Job se neukončil chybou – o odkladu rozhodne worker (handleJobFailure)
+    // Stav a kód chyby (credit_busy) zapíše worker (handleJobFailure)
     expect(
       mocks.prisma.processingJob.update.mock.calls.some(
         (c) => (c[0] as { data: { status?: string } }).data.status === 'error',
       ),
     ).toBe(false);
-  });
-
-  it('po odkladu přeskočí dokumenty, za které už tento job zaplatil', async () => {
-    mocks.createMessage.mockResolvedValue(response('Nový kontext', 'end_turn'));
-    billing.hasCharge.mockImplementation(
-      async (_userId: string, ref: string) => ref === 'fix-context:job-f:doc-1',
-    );
-
-    await handleFixContexts('job-f', { collectionId: 'col-1', userId: 'user-1' });
-
-    expect(mocks.createMessage).toHaveBeenCalledTimes(1);
-    expect(charges().map((c) => c.referenceId)).toEqual(['fix-context:job-f:doc-2']);
-    const lastJobUpdate = mocks.prisma.processingJob.update.mock.calls.at(-1)![0];
-    expect(lastJobUpdate.data).toMatchObject({ status: 'completed', completedPages: 2 });
   });
 
   it('bez kreditu na první dokument model nezavolá', async () => {

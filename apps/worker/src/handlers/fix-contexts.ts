@@ -5,8 +5,8 @@
 import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import { InsufficientCreditError, hasCharge } from '@ai-sedlacek/db/billing';
-import { isCreditBusy } from '../lib/credit-wait';
+import { InsufficientCreditError } from '@ai-sedlacek/db/billing';
+import { isCreditBusy } from '../lib/job-error';
 import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
 
@@ -66,13 +66,6 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
 
   for (const doc of documents) {
     const referenceId = `fix-context:${jobId}:${doc.id}`;
-    // Opakovaný běh téhož jobu (odklad kvůli kreditu, pád workeru): dokument, za
-    // který už tento job zaplatil, se znovu neposílá – kontext je opravený.
-    if (await hasCharge(userId, referenceId)) {
-      completed++;
-      succeeded++;
-      continue;
-    }
 
     await prisma.processingJob.update({
       where: { id: jobId },
@@ -144,8 +137,8 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       completed++;
       succeeded++;
     } catch (err) {
-      // Kredit blokuje jiná běžící akce uživatele – odložit job (credit-wait.ts);
-      // hotové dokumenty opakovaný běh přeskočí podle ledgeru.
+      // Kredit blokuje jiná běžící akce uživatele – job končí credit_busy
+      // (job-failure.ts); hotové opravy zůstávají uložené.
       if (isCreditBusy(err)) throw err;
       if (err instanceof InsufficientCreditError) {
         // Došel volný kredit – zbylé dokumenty se nezpracují (další volání by

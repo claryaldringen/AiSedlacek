@@ -14,6 +14,11 @@ export const JOB_ERROR_CODES = [
   'empty_output',
   /** Volný kredit nestačil na rezervaci volání. */
   'insufficient_credit',
+  /**
+   * Kredit je dočasně rezervovaný jiným běžícím zpracováním uživatele – bez té
+   * rezervace by zůstatek stačil. Spustit znovu po jeho dokončení (nedobíjet).
+   */
+  'credit_busy',
   /** Chyba Claude API (přetížení, limit, výpadek sítě). */
   'api_error',
   /** Dokument nebo svazek už neexistuje (nebo nepatří uživateli). */
