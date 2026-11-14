@@ -579,6 +579,20 @@ export async function runBilledCall<T>(
   }
 }
 
+/**
+ * `referenceId` odečtů uživatele začínající `prefix` – jedním dotazem. Opakovaný
+ * běh jobu (reclaim po pádu workeru) podle nich přeskočí kroky, za které už
+ * zaplatil: vyúčtování by kvůli existujícímu `referenceId` nic neodečetlo
+ * a nové volání modelu by platil provozovatel.
+ */
+export async function chargedReferenceIds(userId: string, prefix: string): Promise<Set<string>> {
+  const rows = await prisma.tokenTransaction.findMany({
+    where: { userId, referenceId: { startsWith: prefix } },
+    select: { referenceId: true },
+  });
+  return new Set(rows.flatMap((r) => (r.referenceId ? [r.referenceId] : [])));
+}
+
 /** Kredity skutečně odečtené vyúčtováním (včetně položek zapsaných dřívějším během). */
 export function settledCredits(result: SettleResult): number {
   return result.transactions.reduce((sum, tr) => sum - tr.amount, 0);

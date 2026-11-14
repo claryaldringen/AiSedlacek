@@ -62,6 +62,7 @@ export const billing = {
   releaseJobHolds: vi.fn(),
   releaseExpiredHolds: vi.fn(),
   runBilledCall: vi.fn(),
+  chargedReferenceIds: vi.fn(),
   settledCredits: (result: Billing.SettleResult): number =>
     result.transactions.reduce((sum, tr) => sum - tr.amount, 0),
 };
@@ -100,6 +101,8 @@ export function resetBillingMock(available = 1_000_000_000): void {
   billing.releaseAllJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseJobHolds.mockReset().mockResolvedValue(0);
   billing.releaseExpiredHolds.mockReset().mockResolvedValue(0);
+  // Opakovaný běh jobu: žádný krok zatím zaplacený
+  billing.chargedReferenceIds.mockReset().mockResolvedValue(new Set<string>());
   // Stejný tok jako skutečné runBilledCall, nad mocky výše.
   billing.runBilledCall
     .mockReset()

@@ -5,10 +5,18 @@
 import { createBilledMessage } from '../lib/billed-message';
 import { prisma } from '@ai-sedlacek/db';
 import { createVersion } from '@ai-sedlacek/db/versioning';
-import { InsufficientCreditError } from '@ai-sedlacek/db/billing';
-import { isCreditBusy } from '../lib/job-error';
-import { LLM_MAX_TOKENS, TEXT_MODEL } from '@ai-sedlacek/shared';
+import { chargedReferenceIds } from '@ai-sedlacek/db/billing';
+import { describeJobError } from '../lib/job-error';
+import { LLM_MAX_TOKENS, TEXT_MODEL, type JobErrorCode } from '@ai-sedlacek/shared';
 import { errorsKeepingReclaimMarkers } from '../lib/reclaim';
+
+/**
+ * Poznámka k dokumentu, který opakovaný běh přeskočil – výsledek předchozího
+ * běhu (i případná chyba, např. useknutý výstup po vyúčtování) se tak neztratí.
+ */
+export const FIX_CONTEXT_SKIPPED_NOTE =
+  'přeskočen – oprava kontextu proběhla (a byla zaplacena) už v přerušeném běhu tohoto jobu; ' +
+  'pokud tehdy selhala, kontext zůstal beze změny – opravte ho novým spuštěním';
 
 export interface FixContextsJobData {
   collectionId: string;
@@ -59,13 +67,28 @@ export async function handleFixContexts(jobId: string, data: FixContextsJobData)
     },
   });
 
-  let completed = 0;
-  let succeeded = 0;
-  let outOfCredit = false;
+  // Opakovaný běh téhož jobu (reclaim po pádu workeru): dokumenty, za jejichž
+  // opravu job už zaplatil, se znovu nevolají – vyúčtování by kvůli existujícímu
+  // referenceId nic neodečetlo a nové volání by platil provozovatel.
+  const paid = await chargedReferenceIds(userId, `fix-context:${jobId}:`);
+
+  let completed = 0; // průběh: zpracované dokumenty (i chybné a přeskočené)
+  let succeeded = 0; // opravené v tomto běhu
+  let skipped = 0; // zaplacené už v přerušeném běhu
+  let failed = 0;
+  // Kredit nestačí (insufficient_credit) nebo ho blokuje jiná akce (credit_busy)
+  let creditStop: JobErrorCode | null = null;
   const errors: string[] = [];
 
   for (const doc of documents) {
     const referenceId = `fix-context:${jobId}:${doc.id}`;
+
+    if (paid.has(referenceId)) {
+      completed++;
+      skipped++;
+      errors.push(`Dokument ${doc.id}: ${FIX_CONTEXT_SKIPPED_NOTE}`);
+      continue;
+    }
 
     await prisma.processingJob.update({
       where: { id: jobId },
@@ -137,19 +160,20 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
       completed++;
       succeeded++;
     } catch (err) {
-      // Kredit blokuje jiná běžící akce uživatele – job končí credit_busy
-      // (job-failure.ts); hotové opravy zůstávají uložené.
-      if (isCreditBusy(err)) throw err;
-      if (err instanceof InsufficientCreditError) {
-        // Došel volný kredit – zbylé dokumenty se nezpracují (další volání by
-        // stejně neprošla); hotové opravy zůstávají uložené.
-        outOfCredit = true;
+      const described = describeJobError(err);
+      if (described.code === 'insufficient_credit' || described.code === 'credit_busy') {
+        // Volný kredit nestačí (nebo ho blokuje jiná běžící akce) – zbylé
+        // dokumenty se nezpracují. Hotové opravy zůstávají uložené; job se
+        // neobnovuje, nové spuštění opraví všechny dokumenty svazku znovu.
+        creditStop = described.code;
         errors.push(
-          `Nedostatečný kredit – oprava kontextu zastavena, ${documents.length - completed} dokumentů nezpracováno (potřeba ${err.required.toLocaleString('cs')} tokenů, volných ${Math.max(0, err.available).toLocaleString('cs')})`,
+          `${described.message} – oprava kontextů zastavena, opraveno ${succeeded + skipped} ` +
+            `z ${documents.length} dokumentů; nové spuštění opraví všechny dokumenty svazku znovu`,
         );
         break;
       }
       completed++;
+      failed++;
       const message = err instanceof Error ? err.message : 'Chyba';
       errors.push(`Dokument ${doc.id}: ${message}`);
     }
@@ -172,16 +196,26 @@ Vrať POUZE nový kontext dokumentu v markdown, bez komentáře.`,
     }
   }
 
-  // Mark job as completed
+  // Mark job as completed. Přeskočené dokumenty (zaplacené v přerušeném běhu)
+  // nejsou úspěch ani chyba: job, který jen dokončil přeskakování, neskončí
+  // chybou, ale chyba bez jediné opravy v tomto běhu ano.
+  const allFailed = failed > 0 && succeeded === 0;
   await prisma.processingJob.update({
     where: { id: jobId },
     data: {
-      status: outOfCredit || (errors.length > 0 && succeeded === 0) ? 'error' : 'completed',
-      currentStep: outOfCredit ? 'Nedostatečný kredit' : 'Hotovo',
-      completedPages: completed,
+      status: creditStop || allFailed ? 'error' : 'completed',
+      currentStep:
+        creditStop === 'credit_busy'
+          ? 'Kredit rezervovaný jiným zpracováním'
+          : creditStop
+            ? 'Nedostatečný kredit'
+            : 'Hotovo',
+      // Při zastavení kvůli kreditu počet opravených dokumentů (UI ho ukáže
+      // v hlášce), jinak průběh včetně chybných a přeskočených
+      completedPages: creditStop ? succeeded + skipped : completed,
       errors: await errorsKeepingReclaimMarkers(jobId, errors),
-      // Kód pro lokalizovanou hlášku s výzvou k dobití v UI
-      ...(outOfCredit ? { errorCode: 'insufficient_credit' } : {}),
+      // Kód pro lokalizovanou hlášku v UI (dobít kredit / spustit znovu později)
+      ...(creditStop ? { errorCode: creditStop } : {}),
     },
   });
 }

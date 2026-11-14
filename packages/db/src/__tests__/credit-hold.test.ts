@@ -56,6 +56,14 @@ vi.mock('../client', () => {
             .reduce((n, t) => n + t.amount, 0),
         },
       })),
+      findMany: vi.fn(
+        async ({ where }: { where: { userId: string; referenceId: { startsWith: string } } }) =>
+          db.transactions.filter(
+            (t) =>
+              t.userId === where.userId &&
+              (t.referenceId ?? '').startsWith(where.referenceId.startsWith),
+          ),
+      ),
       findFirst: vi.fn(
         async ({ where }: { where: { userId: string; referenceId: string } }) =>
           db.transactions.find(
@@ -137,6 +145,7 @@ vi.mock('../client', () => {
 
 import {
   InsufficientCreditError,
+  chargedReferenceIds,
   isBlockedByOtherHolds,
   releaseAllJobHolds,
   checkBalance,
@@ -594,5 +603,35 @@ describe('rezervace kreditu', () => {
       expect(billing.ok).toBe(false);
       expect(db.holds[0]!.status).toBe('released');
     });
+  });
+});
+
+describe('chargedReferenceIds – kroky, za které job už zaplatil', () => {
+  beforeEach(() => {
+    db.transactions = [];
+    db.holds = [];
+    db.seq = 0;
+  });
+
+  it('vrátí referenceId odečtů uživatele s daným prefixem', async () => {
+    const tr = (userId: string, referenceId: string | null): void => {
+      db.transactions.push({
+        id: `tr-${++db.seq}`,
+        userId,
+        amount: -10,
+        referenceId,
+        type: 'consumption',
+        description: 't',
+      });
+    };
+    tr('u1', 'fix-context:job-1:doc-1');
+    tr('u1', 'fix-context:job-1:doc-2');
+    tr('u1', 'fix-context:job-2:doc-3');
+    tr('u2', 'fix-context:job-1:doc-4');
+    tr('u1', null);
+
+    expect(await chargedReferenceIds('u1', 'fix-context:job-1:')).toEqual(
+      new Set(['fix-context:job-1:doc-1', 'fix-context:job-1:doc-2']),
+    );
   });
 });
