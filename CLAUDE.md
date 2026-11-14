@@ -115,7 +115,7 @@ v `lib/infrastructure/authz.ts`, u stránek/dokumentů přes `page.userId`).
 
 | Oblast | Routy |
 |--------|-------|
-| auth | `[...nextauth]`, `register`, `verify-email`, `send-verification`, `check-verification`, `forgot-password`, `reset-password`, `cli/token`, `cli/me` |
+| auth | `[...nextauth]`, `register`, `verify-email`, `send-verification`, `check-verification`, `forgot-password`, `reset-password`, `cli/token` (starší CLI), `cli/code` + `cli/exchange` (`ais login` ≥ 0.3.0 – jednorázový kód s PKCE, token není v URL), `cli/me` |
 | pages | `GET/upload`, `upload-url` (CLI), `import-url`, `prefetch`, `discover-urls`, `detect-blank`, `search`, `[id]` (GET/PATCH/DELETE), `[id]/result` (agentní OCR), `process` (POST/GET), `process/status`, `process/cancel`, `process/interrupted` |
 | documents | `[id]` (GET/PATCH/DELETE), `[id]/retranslate`, `[id]/reparse`, `[id]/versions`, `[id]/chat` (SSE) |
 | collections | `GET` (`?workspaceId=` povinné)/`POST`, `[id]`, `[id]/generate-context`, `[id]/fetch-context`, `[id]/translate-context`, `[id]/fix-document-contexts`, `[id]/extract-metadata` |

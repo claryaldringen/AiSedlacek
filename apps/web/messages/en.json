@@ -325,6 +325,7 @@
     "emailPasswordRequired": "Email and password are required",
     "userAlreadyExists": "A user with this email already exists",
     "missingToken": "Missing token",
+    "invalidCliCode": "Invalid or expired login code – run `ais login` again",
     "invalidOrExpiredLink": "Invalid or expired link",
     "passwordChangedSuccess": "Password changed successfully.",
     "verificationEmailSent": "Verification email sent",

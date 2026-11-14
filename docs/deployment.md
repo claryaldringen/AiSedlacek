@@ -143,6 +143,18 @@ Jednorázové nastavení (vlastník balíčku na npmjs.com):
 - GitHub prostředí `npm` je omezené jen na tagy `cli-v*` (Settings → Environments → `npm`
   → Deployment branches and tags); volitelně tam lze přidat povinné schválení před publikací.
 
+### CLI 0.3.0 – přihlášení bez tokenu v URL
+
+Verze 0.3.0 (připravená, zatím nevydaná) předává při `ais login` místo tokenu jen
+jednorázový kód s PKCE; token si vyzvedne `POST /api/auth/cli/exchange`. Pořadí:
+
+1. Nasadit server (migrace `…_add_cli_auth_code` přidá tabulku `CliAuthCode`).
+2. Teprve potom otagovat `cli-v0.3.0` podle postupu výše.
+
+Starší CLI (≤ 0.2.0) dál funguje – autorizační stránka mu bez PKCE výzvy předá token
+postaru a doporučí aktualizaci. CLI 0.3.0 proti ještě nenasazenému serveru také projde
+(přijme token postaru), jen bez ochrany.
+
 ## Databáze a migrace
 
 - Jediné schéma: `packages/db/prisma/schema.prisma`, migrace v `packages/db/prisma/migrations`.

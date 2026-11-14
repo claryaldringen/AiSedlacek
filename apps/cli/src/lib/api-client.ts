@@ -21,7 +21,7 @@ export type ApiClient = {
 };
 
 // Povolíme jen HTTPS; výjimka je localhost přes HTTP kvůli lokálnímu vývoji.
-function isSecureBaseUrl(serverUrl: string): boolean {
+export function isSecureBaseUrl(serverUrl: string): boolean {
   try {
     const u = new URL(serverUrl);
     if (u.protocol === 'https:') return true;

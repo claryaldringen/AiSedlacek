@@ -325,6 +325,7 @@
     "emailPasswordRequired": "Email a heslo jsou povinné",
     "userAlreadyExists": "Uživatel s tímto emailem již existuje",
     "missingToken": "Chybějící token",
+    "invalidCliCode": "Neplatný nebo prošlý přihlašovací kód – spusťte `ais login` znovu",
     "invalidOrExpiredLink": "Neplatný nebo expirovaný odkaz",
     "passwordChangedSuccess": "Heslo bylo úspěšně změněno.",
     "verificationEmailSent": "Ověřovací email odeslán",

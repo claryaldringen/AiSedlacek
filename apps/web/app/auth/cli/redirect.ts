@@ -35,10 +35,36 @@ export function parseCliRedirect(redirect: string | null | undefined): URL | nul
   return url;
 }
 
-/** Sestaví cílovou adresu callbacku s tokenem a state (hodnoty se URL-enkódují). */
-export function buildCliCallbackUrl(redirect: URL, token: string, state: string): string {
+/**
+ * PKCE výzva z `ais login` (CLI ≥ 0.3.0): `code_challenge` (base64url SHA-256,
+ * 43 znaků) s metodou S256. Bez výzvy jde o starší CLI (≤ 0.2.0), kterému se
+ * token předává postaru v URL. Výzva s jinou metodou nebo ve špatném tvaru je
+ * neplatný požadavek (`invalid`).
+ */
+export function parseCodeChallenge(
+  challenge: string | null | undefined,
+  method: string | null | undefined,
+): { kind: 'pkce'; challenge: string } | { kind: 'legacy' } | { kind: 'invalid' } {
+  if (!challenge) return method ? { kind: 'invalid' } : { kind: 'legacy' };
+  if (method !== 'S256' || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) return { kind: 'invalid' };
+  return { kind: 'pkce', challenge };
+}
+
+/**
+ * Sestaví cílovou adresu callbacku (hodnoty se URL-enkódují). Novému CLI se
+ * předává jen jednorázový kód (`code`), staršímu přímo token (`token`).
+ */
+export function buildCliCallbackUrl(
+  redirect: URL,
+  credential: { code: string } | { token: string },
+  state: string,
+): string {
   const url = new URL(redirect.href);
-  url.searchParams.set('token', token);
+  // Hodnoty podvržené v redirect URL nesmí přežít ani vedle sebe
+  url.searchParams.delete('code');
+  url.searchParams.delete('token');
+  if ('code' in credential) url.searchParams.set('code', credential.code);
+  else url.searchParams.set('token', credential.token);
   url.searchParams.set('state', state);
   return url.href;
 }

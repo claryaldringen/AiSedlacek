@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { useState, Suspense } from 'react';
-import { buildCliCallbackUrl, parseCliRedirect } from './redirect';
+import { buildCliCallbackUrl, parseCliRedirect, parseCodeChallenge } from './redirect';
 
 function CliAuthContent(): React.ReactElement {
   const searchParams = useSearchParams();
@@ -10,25 +10,46 @@ function CliAuthContent(): React.ReactElement {
   const redirect = searchParams.get('redirect');
   // Jen http: na loopback s explicitním portem a cestou /callback (SEC-5).
   const redirectUrl = parseCliRedirect(redirect);
+  // CLI ≥ 0.3.0 posílá PKCE výzvu – na loopback pak jde jen jednorázový kód, token
+  // si CLI vyzvedne POSTem a v URL ani v historii prohlížeče nikdy není. Starší CLI
+  // (bez výzvy) dostane token postaru v URL, aby dál fungovalo.
+  const pkce = parseCodeChallenge(
+    searchParams.get('code_challenge'),
+    searchParams.get('code_challenge_method'),
+  );
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
 
   async function handleAuthorize(): Promise<void> {
-    // Token se vydává až po validaci – na neověřenou adresu se nikdy nepřesměruje.
-    if (!state || !redirectUrl) return;
+    // Kód/token se vydává až po validaci – na neověřenou adresu se nikdy nepřesměruje.
+    if (!state || !redirectUrl || pkce.kind === 'invalid') return;
     setStatus('loading');
     try {
-      const res = await fetch('/api/auth/cli/token', { method: 'POST' });
-      if (!res.ok) throw new Error('Token creation failed');
-      const { token } = await res.json();
-
-      window.location.href = buildCliCallbackUrl(redirectUrl, token, state);
+      let target: string;
+      if (pkce.kind === 'pkce') {
+        const res = await fetch('/api/auth/cli/code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codeChallenge: pkce.challenge }),
+        });
+        if (!res.ok) throw new Error('Code creation failed');
+        const { code } = (await res.json()) as { code: string };
+        target = buildCliCallbackUrl(redirectUrl, { code }, state);
+      } else {
+        const res = await fetch('/api/auth/cli/token', { method: 'POST' });
+        if (!res.ok) throw new Error('Token creation failed');
+        const { token } = (await res.json()) as { token: string };
+        target = buildCliCallbackUrl(redirectUrl, { token }, state);
+      }
+      // U nového CLI je v adrese callbacku (a tedy i v historii prohlížeče) jen
+      // jednorázový, krátce platný kód, bez PKCE ověřovače z CLI nepoužitelný.
+      window.location.href = target;
       setStatus('done');
     } catch {
       setStatus('error');
     }
   }
 
-  if (!state || !redirect) {
+  if (!state || !redirect || pkce.kind === 'invalid') {
     return <div className="p-8 text-center">Neplatný požadavek.</div>;
   }
 
@@ -53,6 +74,13 @@ function CliAuthContent(): React.ReactElement {
           <strong>{redirectUrl.host}</strong>. Pokud jste právě nespustili <code>ais login</code>,
           přístup nepovolujte.
         </p>
+
+        {pkce.kind === 'legacy' && (
+          <p className="mb-4 rounded bg-amber-50 p-2 text-sm text-amber-800">
+            Používáte starší verzi CLI, která přebírá token přes adresu v prohlížeči. Po přihlášení
+            ji prosím aktualizujte: <code>npm i -g ai-sedlacek-cli</code>
+          </p>
+        )}
 
         {status === 'error' && (
           <p className="mb-4 text-red-600">Chyba při autorizaci. Zkuste to znovu.</p>

@@ -31,6 +31,7 @@ model User {
   workspaces           Workspace[]
   workspaceMemberships WorkspaceMember[]
   apiTokens            ApiToken[]
+  cliAuthCodes         CliAuthCode[]
 }
 
 model Account {
@@ -347,6 +348,22 @@ model ApiToken {
   createdAt  DateTime  @default(now())
 
   @@index([userId])
+}
+
+// Jednorázový autorizační kód pro `ais login` (CLI ≥ 0.3.0): prohlížeč předá na
+// loopback jen krátce platný kód, CLI ho vymění za API token přes POST s PKCE
+// ověřovačem – token se tak nikdy neocitne v URL ani v historii prohlížeče.
+model CliAuthCode {
+  id            String    @id @default(cuid())
+  codeHash      String    @unique // SHA-256 kódu, kód sám se neukládá
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeChallenge String    // base64url(SHA-256(code_verifier)) – PKCE S256
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([expiresAt])
 }
 
 model WorkspaceItem {
