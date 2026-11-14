@@ -163,6 +163,36 @@ describe('POST /api/auth/[...nextauth] – body size limit', () => {
     expect(forwarded.cookies.get('authjs.csrf-token')?.value).toBe('abc');
     expect(await forwarded.text()).toBe(form);
   });
+
+  // Next 15 předává route handleru Proxy nad NextRequest (proxyNextRequest –
+  // sledování dynamických API). Konstruktor Request z Proxy nepřečte interní
+  // stav (#state), takže `new NextRequest(request, …)` v produkci shodil každé
+  // přihlášení (Google, heslo) i odhlášení na 500.
+  it('works with the Proxy-wrapped request that Next passes to route handlers', async () => {
+    mockNextAuthPost.mockResolvedValue(new Response(null, { status: 302 }));
+    const form = 'csrfToken=abc&callbackUrl=%2Fcs%2Fworkspace';
+    const raw = new NextRequest('http://localhost/api/auth/signin/google', {
+      method: 'POST',
+      body: form,
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: 'authjs.csrf-token=abc',
+      },
+    });
+    const proxied = new Proxy(raw, {
+      get: (target, prop) => Reflect.get(target, prop, target) as unknown,
+    });
+
+    const res = await nextAuthPost(proxied);
+
+    expect(res.status).toBe(302);
+    const forwarded = mockNextAuthPost.mock.calls[0]![0] as NextRequest;
+    expect(forwarded.method).toBe('POST');
+    expect(forwarded.url).toBe('http://localhost/api/auth/signin/google');
+    expect(forwarded.headers.get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(forwarded.cookies.get('authjs.csrf-token')?.value).toBe('abc');
+    expect(await forwarded.text()).toBe(form);
+  });
 });
 
 describe('POST /api/billing/webhook – body size limit', () => {
