@@ -21,5 +21,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     const t = await getApiTranslations(request, 'api');
     return NextResponse.json({ error: t('requestTooLarge') }, { status: 413 });
   }
-  return handlers.POST(new NextRequest(request, { body: body as BodyInit }));
+  // Nový request skládáme z URL a metadat, ne z `request` samotného: Next 15
+  // handleru předává Proxy nad NextRequest a konstruktor Request z Proxy
+  // nepřečte interní stav (#state) – `new NextRequest(request, …)` pak padal
+  // na 500 u každého přihlášení i odhlášení.
+  return handlers.POST(
+    new NextRequest(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: body as BodyInit,
+    }),
+  );
 }
