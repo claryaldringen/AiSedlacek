@@ -254,8 +254,10 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
 ```
 
 - Denně v 03:30 `pg_dump` do `/var/backups/aisedlacek`, rotace 14 dní. Dump se píše do
-  `*.dump.partial` a na `*.dump` se přejmenuje až po ověření (`pg_restore --list`);
-  nepovedený dump se smaže, staré `.partial` po přerušeném běhu uklidí rotace.
+  `*.dump.partial` a na `*.dump` se přejmenuje až po ověření plným přečtením
+  (`pg_restore --file=/dev/null` – `--list` čte jen obsah a useknutý dump propustí);
+  nepovedený dump se smaže. Vlastní `.partial` po přerušeném běhu se smažou na začátku
+  dalšího běhu, staré pre-deploy `.partial` uklidí rotace.
 - Přihlašovací údaje k DB jdou do `pg_dump` přes `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`
   a dočasný `.pgpass` (práva 600, po skončení se smaže) – heslo není v argumentech
   procesu, takže ho ostatní uživatelé sdíleného VPS nevidí v `ps`. Zděděná `PGPASSWORD`
@@ -263,7 +265,7 @@ echo 'BACKUP_REMOTE=uXXXXXX@uXXXXXX.your-storagebox.de:aisedlacek' > /etc/defaul
 - S `BACKUP_REMOTE` se dumpy i uploady kopírují mimo VPS **jen přírůstkově**
   (`rsync --ignore-existing`, bez `--delete`): na cíli se nic nemaže ani nepřepisuje,
   takže smazání nebo poškození lokálních souborů se na off-site kopii nepropíše.
-  Off-site jdou jen `*.dump`, které projdou `pg_restore --list` (i pre-deploy dumpy).
+  Off-site jdou jen `*.dump`, které projdou plným přečtením (i pre-deploy dumpy).
   Starých dumpů na cíli proto přibývá – retenci je potřeba nastavit na cílovém úložišti
   (např. snapshoty Storage Boxu nebo občasný ruční úklid). Bez `BACKUP_REMOTE` je záloha
   jen na stejném disku a uploady se nezálohují.
