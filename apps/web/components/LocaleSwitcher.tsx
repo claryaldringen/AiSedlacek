@@ -10,10 +10,20 @@ const LOCALES: Record<string, { flag: string; label: string }> = {
   cs: { flag: '🇨🇿', label: 'Čeština' },
 };
 
+/**
+ * Vzhled podle okolí: `default` – pergamenový styl přihlášení, `dark` – tmavá
+ * hlavička veřejných stránek, `app` – šedá (slate) paleta aplikace (postranní panel).
+ */
+const VARIANT_CLASSES = {
+  default: 'rounded-lg bg-[#f5edd6] text-[#3d2b1f] border-[#d4c5a9] hover:bg-[#ebe0c8]',
+  dark: 'rounded-lg bg-white/10 text-white border-white/20 hover:bg-white/20',
+  app: 'rounded-md bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900 focus-visible:border-blue-400 focus-visible:ring-1 focus-visible:ring-blue-400',
+} as const;
+
 export default function LocaleSwitcher({
   variant = 'default',
 }: {
-  variant?: 'default' | 'dark';
+  variant?: keyof typeof VARIANT_CLASSES;
 }): React.JSX.Element {
   const locale = useLocale();
   const router = useRouter();
@@ -42,16 +52,11 @@ export default function LocaleSwitcher({
     router.replace(fullPath, { locale: newLocale });
   };
 
-  const selectClass =
-    variant === 'dark'
-      ? 'bg-white/10 text-white border-white/20 hover:bg-white/20'
-      : 'bg-[#f5edd6] text-[#3d2b1f] border-[#d4c5a9] hover:bg-[#ebe0c8]';
-
   return (
     <select
       value={locale}
       onChange={(e) => void handleChange(e.target.value)}
-      className={`cursor-pointer rounded-lg border px-2 py-1.5 text-xs font-medium outline-none transition-colors ${selectClass}`}
+      className={`cursor-pointer border px-2 py-1.5 text-xs font-medium outline-hidden transition-colors ${VARIANT_CLASSES[variant]}`}
     >
       {routing.locales.map((l) => {
         const info = LOCALES[l];
