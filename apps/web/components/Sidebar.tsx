@@ -349,7 +349,7 @@ export function Sidebar({
       {user && (
         <div ref={menuRef} className="relative border-t border-slate-200 p-2">
           <div className="mb-1 flex items-center justify-between px-2">
-            <LocaleSwitcher />
+            <LocaleSwitcher variant="app" />
           </div>
           <button
             onClick={() => setUserMenuOpen(!userMenuOpen)}
