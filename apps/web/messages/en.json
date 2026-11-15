@@ -97,6 +97,7 @@
     "errorPrefix": "Error:",
     "dropFilesHere": "Drop files to upload",
     "structuredData": "Structured data",
+    "backToCollections": "Back to collections",
     "collectionContextTitle": "Work context: {name}",
     "contextNotSet": "Context has not been set.",
     "contextInOtherLanguage": "Context is available in another language.",
