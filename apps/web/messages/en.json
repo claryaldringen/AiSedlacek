@@ -110,6 +110,7 @@
     "error": "Error",
     "blank": "Blank",
     "processingCost": "Processing cost",
+    "processingCostValue": "CZK {czk}",
     "failedToLoadDocument": "Failed to load document",
     "preparingRetranslation": "Preparing…",
     "tryingToFixParsing": "Trying to fix parsing…",

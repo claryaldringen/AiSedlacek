@@ -35,7 +35,7 @@ export interface Collection {
     chargeCzk: number | null;
     /** Kredity odečtené za svazek (skutečné odečty + odhad u starších dokumentů). */
     chargeCredits: number | null;
-    /** Část `chargeCredits` odhadnutá z tokenů – dokumenty bez záznamu odečtu (BIL-11). */
+    /** Část `chargeCredits` odhadnutá z tokenů – dokumenty bez záznamu odečtu (BIL-11); UI ji nezobrazuje. */
     chargeEstimatedCredits?: number | null;
   };
   title?: string | null;

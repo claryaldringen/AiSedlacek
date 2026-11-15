@@ -110,6 +110,7 @@
     "error": "Chyba",
     "blank": "Prázdné",
     "processingCost": "Cena zpracování",
+    "processingCostValue": "{czk} Kč",
     "failedToLoadDocument": "Nepodařilo se načíst dokument",
     "preparingRetranslation": "Připravuji…",
     "tryingToFixParsing": "Zkouším opravit parsování…",

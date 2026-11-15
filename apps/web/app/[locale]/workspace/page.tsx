@@ -1576,7 +1576,9 @@ function WorkspaceContent(): React.JSX.Element {
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-500">{t('processingCost')}</span>
                         <span className="font-semibold text-slate-800">
-                          {formatCzk(selectedCollection.stats.chargeCzk, locale)}
+                          {t('processingCostValue', {
+                            czk: formatCzk(selectedCollection.stats.chargeCzk, locale),
+                          })}
                         </span>
                       </div>
                     )}
