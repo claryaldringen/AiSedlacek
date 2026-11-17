@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { PageItem } from '@/components/FileGrid';
 import type { Collection } from '@/components/Sidebar';
+import { isControlActivationKey } from '@/lib/keyboard-target';
 
 interface UseWorkspaceKeyboardOptions {
   allItemIds: string[];
@@ -84,6 +85,8 @@ export function useWorkspaceKeyboard({
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.target as HTMLElement).isContentEditable) return;
+      // Enter/mezerník na tlačítku či odkazu (např. šipka zpět ve svazku) patří jemu
+      if (isControlActivationKey(e.key, e.target as HTMLElement)) return;
 
       // When document panel is open, let it handle arrows and Escape
       if (isPanelOpenRef.current) return;

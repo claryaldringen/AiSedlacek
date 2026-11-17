@@ -97,6 +97,7 @@
     "errorPrefix": "Chyba:",
     "dropFilesHere": "Pusťte soubory pro nahrání",
     "structuredData": "Strukturovaná data",
+    "backToCollections": "Zpět na přehled svazků",
     "collectionContextTitle": "Kontext díla: {name}",
     "contextNotSet": "Kontext nebyl nastaven.",
     "contextInOtherLanguage": "Kontext je dostupný v jiném jazyce.",

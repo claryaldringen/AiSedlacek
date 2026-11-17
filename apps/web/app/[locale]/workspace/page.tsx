@@ -1339,9 +1339,43 @@ function WorkspaceContent(): React.JSX.Element {
         onDragLeave={() => setContentDragOver(false)}
         onDrop={handleContentDrop}
       >
+        {/* Název svazku se šipkou zpět na přehled svazků workspace (o úroveň výš) */}
+        {selectedCollection && (
+          <div className="mx-4 mt-3 flex min-w-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleCollectionSelect(null)}
+              aria-label={t('backToCollections')}
+              title={t('backToCollections')}
+              className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-1 focus-visible:ring-blue-400"
+            >
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
+                />
+              </svg>
+            </button>
+            <h1
+              className="truncate text-lg font-semibold text-slate-800"
+              title={selectedCollection.name}
+            >
+              {selectedCollection.name}
+            </h1>
+          </div>
+        )}
+
         {/* Collection info cards: structured data + context + metadata (3-column) */}
         {selectedCollection && (
-          <div className="mx-4 mt-3 grid gap-3 lg:grid-cols-3">
+          <div className="mx-4 mt-2 grid gap-3 lg:grid-cols-3">
             {/* Strukturovaná data — 1/3 */}
             <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
               <details>
