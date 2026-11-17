@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { SEARCH_MAX_QUERY_LENGTH } from '@/lib/search-navigation';
 
 interface ToolbarProps {
   totalCount: number;
@@ -37,6 +38,12 @@ interface ToolbarProps {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   searchResultCount?: number;
+  /** API načetlo jen část kandidátů – počet výsledků se ukáže jako „300+“. */
+  searchTruncated?: boolean;
+  /** Hledání selhalo (síť, chyba serveru, rate limit). */
+  searchFailed?: boolean;
+  /** Fokus do pole při otevření hledání (ne, když se otevřelo psaním v panelu stránky). */
+  searchAutoFocus?: boolean;
   /** Cizí svazek – skryje import a akce nad výběrem (zpracování, přejmenování, mazání). */
   readOnly?: boolean;
 }
@@ -95,6 +102,9 @@ export function Toolbar({
   searchQuery,
   onSearchChange,
   searchResultCount,
+  searchTruncated = false,
+  searchFailed = false,
+  searchAutoFocus = true,
   readOnly = false,
 }: ToolbarProps): React.JSX.Element {
   const t = useTranslations('toolbar');
@@ -276,7 +286,8 @@ export function Toolbar({
                   value={searchQuery ?? ''}
                   onChange={(e) => onSearchChange?.(e.target.value)}
                   placeholder={t('searchPlaceholder')}
-                  autoFocus
+                  maxLength={SEARCH_MAX_QUERY_LENGTH}
+                  autoFocus={searchAutoFocus}
                   className="w-48 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
@@ -302,12 +313,22 @@ export function Toolbar({
                   </button>
                 )}
               </div>
-              {searchResultCount != null && (searchQuery?.length ?? 0) >= 2 && (
-                <span className="text-[10px] text-slate-400 whitespace-nowrap">
-                  {searchResultCount > 0
-                    ? t('searchResults', { count: searchResultCount })
-                    : t('searchNoResults')}
+              {searchFailed ? (
+                <span role="status" className="text-[10px] text-red-600 whitespace-nowrap">
+                  {t('searchFailed')}
                 </span>
+              ) : (
+                searchResultCount != null &&
+                (searchQuery?.length ?? 0) >= 2 && (
+                  <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                    {searchResultCount === 0
+                      ? // Oříznuté výsledky bez shody neznamenají „nic nenalezeno“
+                        t(searchTruncated ? 'searchTooMany' : 'searchNoResults')
+                      : searchTruncated
+                        ? t('searchResultsTruncated', { count: searchResultCount })
+                        : t('searchResults', { count: searchResultCount })}
+                  </span>
+                )
               )}
             </div>
           )}

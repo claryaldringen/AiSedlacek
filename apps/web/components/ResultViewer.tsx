@@ -26,6 +26,8 @@ const RETRANSLATE_ERROR_KEYS: Partial<Record<JobErrorCode, string>> = {
 import { apiFetch, apiFetchOk, ApiError } from '@/lib/infrastructure/api-client';
 import { runRetranslation, waitForJobEnd, type StartResponse } from '@/lib/job-follow';
 import type { ResultPatchOptions } from '@/lib/panel-result';
+import { OpenEditorTracker } from '@/lib/panel-guard';
+import { affectsSearch } from '@/lib/search-navigation';
 
 export interface DocumentResult {
   id: string;
@@ -82,6 +84,13 @@ interface ResultViewerProps {
   highlightQuery?: string;
   /** Cizí dokument – bez editace textů a obnovy verzí (historie zůstane k prohlížení). */
   readOnly?: boolean;
+  /**
+   * Je otevřený aspoň jeden editor textu – rozepsaný text by přepnutí stránky
+   * zahodilo, panel proto listování blokuje.
+   */
+  onEditingChange?: (open: boolean) => void;
+  /** Uložený přepis nebo překlad (i doběhlá retranslace) – mění počty shod hledání. */
+  onTextSaved?: () => void;
 }
 
 function processChildren(
@@ -152,6 +161,7 @@ function EditableSection({
   highlightQuery,
   readOnly = false,
   lockedReason,
+  onEditingChange,
 }: {
   title: string;
   subtitle?: string;
@@ -166,11 +176,22 @@ function EditableSection({
    * ukáže v tooltipu a u otevřeného editoru i textem. Rozepsaný text zůstane.
    */
   lockedReason?: string;
+  /** Otevření a zavření editoru (i odpojením sekce s otevřeným editorem). */
+  onEditingChange?: (editing: boolean) => void;
 }): React.JSX.Element {
   const tc = useTranslations('common');
   const [editing, setEditing] = useState(false);
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const [draft, setDraft] = useState('');
+
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
+  useEffect(() => {
+    if (!editing) return;
+    const report = onEditingChangeRef.current;
+    report?.(true);
+    return () => report?.(false);
+  }, [editing]);
 
   const handleEdit = useCallback((): void => {
     setDraft(content);
@@ -243,10 +264,18 @@ export function ResultViewer({
   onPatch,
   highlightQuery,
   readOnly = false,
+  onEditingChange,
+  onTextSaved,
 }: ResultViewerProps): React.JSX.Element {
   const t = useTranslations('document');
   const tc = useTranslations('common');
   const locale = useLocale();
+  // Otevřené editory (přepis, překlad, kontext) – rodič podle nich blokuje listování
+  const [openEditors] = useState(() => new OpenEditorTracker());
+  const reportEditing = useCallback(
+    (id: string, editing: boolean): void => onEditingChange?.(openEditors.set(id, editing)),
+    [onEditingChange, openEditors],
+  );
   // Ceny pro panel metadat (BIL-11): skutečný odečet, u starších dokumentů
   // označený odhad, chat přesně; u cizího dokumentu (readOnly) se nezobrazují.
   const charges = resultCharges(result, readOnly);
@@ -338,12 +367,13 @@ export function ResultViewer({
           { [field]: value },
           field === 'translation' ? { translationLanguage: result.translationLanguage } : {},
         );
+        if (affectsSearch(field)) onTextSaved?.();
         return { ...result, [field]: value };
       } finally {
         setSaving(false);
       }
     },
-    [result, onPatch, tc],
+    [result, onPatch, onTextSaved, tc],
   );
 
   const trySaveField = useCallback(
@@ -418,6 +448,7 @@ export function ResultViewer({
             },
             { translationLanguage: updated.translationLanguage },
           );
+          onTextSaved?.();
         }
       };
 
@@ -492,7 +523,7 @@ export function ResultViewer({
       }
       return true;
     },
-    [result, onPatch, saveField, stopRetranslatePoll, t],
+    [result, onPatch, onTextSaved, saveField, stopRetranslatePoll, t],
   );
 
   return (
@@ -549,6 +580,7 @@ export function ResultViewer({
             highlightQuery={highlightQuery}
             readOnly={readOnly}
             lockedReason={retranslateLock}
+            onEditingChange={(editing) => reportEditing('transcription', editing)}
           />
         </div>
         <div className="flex flex-col">
@@ -561,6 +593,7 @@ export function ResultViewer({
             highlightQuery={highlightQuery}
             readOnly={readOnly}
             lockedReason={retranslateLock}
+            onEditingChange={(editing) => reportEditing('translation', editing)}
           />
         </div>
       </div>
@@ -600,6 +633,7 @@ export function ResultViewer({
             onSave={(text) => trySaveField('context', text)}
             saving={saving}
             readOnly={readOnly}
+            onEditingChange={(editing) => reportEditing('context', editing)}
           />
         </div>
       </div>

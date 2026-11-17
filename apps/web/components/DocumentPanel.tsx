@@ -1,12 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useReducer, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { ResultViewer, type DocumentResult, type ResultPatchHandler } from './ResultViewer';
 import { DocumentChat } from './DocumentChat';
+import { PanelSearchBar, type PanelSearchProps } from './PanelSearchBar';
 import type { PageItem } from './FileGrid';
 import { apiFetch } from '@/lib/infrastructure/api-client';
 import type { ChatTokenUsage } from '@/lib/chat-usage';
+import { guardPanelNavigation, navNoticeReducer } from '@/lib/panel-guard';
+import { affectsSearch } from '@/lib/search-navigation';
 
 interface DocumentPanelProps {
   page: PageItem | null;
@@ -35,6 +38,14 @@ interface DocumentPanelProps {
   hasPrevious?: boolean;
   hasNext?: boolean;
   highlightQuery?: string;
+  /**
+   * Hledání v titulkovém pruhu – sdílený výraz s hledáním ve workspace a listování
+   * mezi stránkami se shodou. Zobrazí se i jen pro čtení: v cizím svazku, který
+   * uživatel smí číst (sdílený workspace, veřejný), API hledá v jeho stránkách.
+   */
+  search?: PanelSearchProps;
+  /** Uložený přepis/překlad (editor, chat, retranslace) – obnoví počty shod hledání. */
+  onTextSaved?: () => void;
   /**
    * Cizí dokument – jen čtení: bez přejmenování, přegenerování/zpracování,
    * editace textů, obnovy verzí a chatu (stojí kredity a navrhuje úpravy).
@@ -68,27 +79,75 @@ export function DocumentPanel({
   hasPrevious,
   hasNext,
   highlightQuery,
+  search,
+  onTextSaved,
   readOnly = false,
 }: DocumentPanelProps): React.JSX.Element | null {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // Otevřený editor textu – přepnutí stránky by rozepsaný text zahodilo
+  const [editorOpen, setEditorOpen] = useState(false);
+  // Hláška „nejdřív uložte nebo zrušte úpravu“ (počítadlo restartuje její časovač)
+  const [navBlockedNotice, dispatchNavNotice] = useReducer(navNoticeReducer, 0);
+  const t = useTranslations('document');
+  const tc = useTranslations('common');
 
   useEffect(() => {
     setEditingTitle(false);
+    dispatchNavNotice('page-changed');
   }, [page?.id]);
 
+  // Po zavření editoru už hláška neplatí
+  useEffect(() => {
+    if (!editorOpen) dispatchNavNotice('editor-closed');
+  }, [editorOpen]);
+
+  useEffect(() => {
+    if (navBlockedNotice === 0) return;
+    const timer = setTimeout(() => dispatchNavNotice('timeout'), 4000);
+    return () => clearTimeout(timer);
+  }, [navBlockedNotice]);
+
+  // Listování stránek z panelu (předchozí/další, shody hledání) s otevřeným
+  // editorem neproběhne – jen krátká hláška.
+  const guarded = useCallback(
+    (navigate: (() => void) | undefined) => (): void => {
+      guardPanelNavigation(
+        editorOpen,
+        () => navigate?.(),
+        () => dispatchNavNotice('blocked'),
+      );
+    },
+    [editorOpen],
+  );
+  const goPrevious = guarded(onPrevious);
+  const goNext = guarded(onNext);
+
+  // Zkratky panelu platí jen mimo pole – psaní do hledání (i šipky a Escape v něm)
+  // stránky nepřepíná ani panel nezavře.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement;
       const isInput =
         target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable;
 
+      // Ctrl/Cmd+F v panelu skočí do jeho hledání (ve workspace otevírá hledání
+      // v liště). Z pole hledání ani z editoru textu ho nepřebírá – druhé Ctrl+F
+      // otevře hledání prohlížeče.
+      const searchInput = searchInputRef.current;
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && searchInput && !isInput) {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+        return;
+      }
       if (e.key === 'Escape' && !isInput) onClose();
-      if (!isInput && e.key === 'ArrowLeft' && hasPrevious) onPrevious?.();
-      if (!isInput && e.key === 'ArrowRight' && hasNext) onNext?.();
+      if (!isInput && e.key === 'ArrowLeft' && hasPrevious) goPrevious();
+      if (!isInput && e.key === 'ArrowRight' && hasNext) goNext();
     },
-    [onClose, onPrevious, onNext, hasPrevious, hasNext],
+    [onClose, goPrevious, goNext, hasPrevious, hasNext],
   );
 
   useEffect(() => {
@@ -126,12 +185,13 @@ export function DocumentPanel({
             }),
           });
           if (!res.ok) rollback();
+          else if (affectsSearch(key)) onTextSaved?.();
         } catch {
           rollback();
         }
       })();
     },
-    [result, onResultPatch],
+    [result, onResultPatch, onTextSaved],
   );
 
   const handleTitleClick = useCallback((): void => {
@@ -164,9 +224,6 @@ export function DocumentPanel({
     })();
   }, [page, titleDraft, onPageUpdate]);
 
-  const t = useTranslations('document');
-  const tc = useTranslations('common');
-
   if (!page && !isLoading) return null;
 
   const status = page?.status ?? 'pending';
@@ -181,13 +238,13 @@ export function DocumentPanel({
 
       {/* Fullscreen panel */}
       <div className="fixed inset-4 z-40 flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        {/* Toolbar */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-800 px-4 py-2">
+        {/* Toolbar – pod md hledání na druhém řádku, akce vpravo se nepřekrývají */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-200 bg-slate-800 px-4 py-2 md:flex-nowrap">
           {/* Left: navigation + title */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-0.5">
+          <div className="flex min-w-0 flex-1 basis-0 items-center gap-2 md:flex-initial md:basis-auto">
+            <div className="flex shrink-0 items-center gap-0.5">
               <button
-                onClick={onPrevious}
+                onClick={goPrevious}
                 disabled={!hasPrevious}
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                 aria-label={tc('previous')}
@@ -207,7 +264,7 @@ export function DocumentPanel({
                 </svg>
               </button>
               <button
-                onClick={onNext}
+                onClick={goNext}
                 disabled={!hasNext}
                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                 aria-label={tc('next')}
@@ -227,7 +284,7 @@ export function DocumentPanel({
                 </svg>
               </button>
             </div>
-            <div className="ml-1">
+            <div className="ml-1 min-w-[6rem]">
               {editingTitle && !readOnly ? (
                 <input
                   ref={titleInputRef}
@@ -239,13 +296,15 @@ export function DocumentPanel({
                     if (e.key === 'Escape') setEditingTitle(false);
                     e.stopPropagation();
                   }}
-                  className="w-48 rounded bg-slate-700 px-1.5 py-0.5 text-sm font-semibold text-white outline-none ring-1 ring-slate-500 focus:ring-blue-400"
+                  className="w-48 max-w-full rounded bg-slate-700 px-1.5 py-0.5 text-sm font-semibold text-white outline-none ring-1 ring-slate-500 focus:ring-blue-400"
                 />
               ) : readOnly ? (
-                <h2 className="text-sm font-semibold text-white">{title}</h2>
+                <h2 className="truncate text-sm font-semibold text-white" title={title}>
+                  {title}
+                </h2>
               ) : (
                 <h2
-                  className="cursor-text text-sm font-semibold text-white hover:text-slate-200"
+                  className="cursor-text truncate text-sm font-semibold text-white hover:text-slate-200"
                   onClick={handleTitleClick}
                   title={t('clickToRename')}
                 >
@@ -266,8 +325,24 @@ export function DocumentPanel({
             </div>
           </div>
 
+          {/* Search – vedle názvu, pod md na vlastním řádku. Na md+ se nezmenšuje
+              (zmenšuje se jen titulek), jinak by se šipky dostaly pod akce vpravo
+              a klik by místo listování spustil placené přegenerování. */}
+          {search && (
+            <div className="order-last flex w-full min-w-0 md:order-none md:w-auto md:shrink-0 md:border-l md:border-slate-700 md:pl-3">
+              <PanelSearchBar
+                ref={searchInputRef}
+                {...search}
+                onPrevious={guarded(search.onPrevious)}
+                onNext={guarded(search.onNext)}
+                pageId={page?.id ?? null}
+                editorOpen={editorOpen}
+              />
+            </div>
+          )}
+
           {/* Right: actions */}
-          <div className="flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {showRegenerate && (
               <button
                 onClick={() => onRegenerate?.(page.id)}
@@ -324,6 +399,15 @@ export function DocumentPanel({
               </svg>
             </button>
           </div>
+        </div>
+
+        {/* Zablokované listování kvůli rozepsanému textu – oblast drží DOM pro čtečky */}
+        <div role="status" aria-live="polite" className="shrink-0">
+          {navBlockedNotice > 0 && (
+            <p className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+              {t('navigationBlockedByEdit')}
+            </p>
+          )}
         </div>
 
         {/* Content: image left (1/3), results + chat right (2/3) */}
@@ -412,6 +496,8 @@ export function DocumentPanel({
                   onPatch={onResultPatch}
                   highlightQuery={highlightQuery}
                   readOnly={readOnly}
+                  onEditingChange={setEditorOpen}
+                  onTextSaved={onTextSaved}
                 />
                 {/* Chat – stojí kredity a navrhuje úpravy; u cizího dokumentu ho API odmítne */}
                 {!readOnly && (

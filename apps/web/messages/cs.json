@@ -191,7 +191,26 @@
     "original": "Originál",
     "cancelSaving": "Zrušit",
     "savingInProgress": "Ukládám…",
-    "readOnly": "Jen pro čtení"
+    "readOnly": "Jen pro čtení",
+    "searchPlaceholder": "Hledat v textech…",
+    "searchLabel": "Hledat v transkripci a překladu",
+    "searchClear": "Zrušit hledání",
+    "searchNoMatch": "Žádná shoda",
+    "searchPosition": "{position} / {total}",
+    "searchPositionOutside": "– / {total}",
+    "searchPagesWithMatch": "{total, plural, one {# stránka} few {# stránky} other {# stránek}} se shodou",
+    "searchMatchesOnPageShort": "{count}×",
+    "searchMatchesOnPage": "{count, plural, one {# shoda} few {# shody} other {# shod}} na této stránce",
+    "searchPreviousMatch": "Předchozí stránka se shodou (Shift+Enter)",
+    "searchNextMatch": "Další stránka se shodou (Enter)",
+    "searchSearching": "Hledám…",
+    "searchFailed": "Hledání selhalo",
+    "searchStatusOnPage": "Stránka {position} z {total} se shodou, {count, plural, one {# shoda} few {# shody} other {# shod}} na této stránce",
+    "searchStatusOutside": "Tato stránka shodu nemá, {total, plural, one {# stránka} few {# stránky} other {# stránek}} se shodou",
+    "navigationBlockedByEdit": "Nejdřív uložte nebo zrušte rozepsanou úpravu textu – jinak by se při přepnutí stránky ztratila.",
+    "searchTruncatedNote": "Shod je víc, prohledaly se jen první stránky.",
+    "searchTooMany": "Příliš mnoho výsledků – upřesněte výraz",
+    "searchTooManyShort": "Upřesněte výraz"
   },
   "collection": {
     "newCollection": "Nový svazek",
@@ -314,6 +333,7 @@
     "pageNotFound": "Stránka nenalezena",
     "documentNotFound": "Dokument nenalezen",
     "collectionNotFound": "Svazek nenalezen",
+    "searchQueryTooLong": "Hledaný výraz je moc dlouhý (nejvýš {max} znaků)",
     "workspaceNotFound": "Workspace nenalezen",
     "slugTaken": "Tento slug je již obsazený",
     "unauthorized": "Neautorizováno",
@@ -507,7 +527,10 @@
     "searchAllCollections": "Hledat ve všech svazcích",
     "searchResults": "{count, plural, one {# výsledek} few {# výsledky} other {# výsledků}}",
     "searchNoResults": "Nic nenalezeno",
-    "searchMatches": "{count}×"
+    "searchMatches": "{count}×",
+    "searchResultsTruncated": "{count}+ výsledků (zobrazeny jen první)",
+    "searchFailed": "Hledání selhalo",
+    "searchTooMany": "Příliš mnoho výsledků – upřesněte výraz"
   },
   "sidebar": {
     "loading": "Načítám...",
