@@ -115,9 +115,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     statusByCollection.set(s.collectionId, byStatus);
   }
   // Cena svazku (BIL-11) = součet skutečných odečtů z ledgeru + odhad za dokumenty
-  // zpracované před zavedením záznamu odečtu (podle aktuálního ceníku, v UI
-  // označený jako odhad). Dokument po další regeneraci záznam dostane a z odhadu
-  // vypadne – nic se nezapočítá dvakrát.
+  // zpracované před zavedením záznamu odečtu (podle aktuálního ceníku; UI ukazuje
+  // jen celkovou částku a odhad nerozlišuje). Dokument po další regeneraci záznam
+  // dostane a z odhadu vypadne – nic se nezapočítá dvakrát.
   interface CollectionCharge {
     inputTokens: number;
     outputTokens: number;
@@ -184,7 +184,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         outputTokens: isOwner ? outputTokens : null,
         chargeCzk: isOwner ? Math.round((tokens?.chargeCzk ?? 0) * 10_000) / 10_000 : null,
         chargeCredits: isOwner ? (tokens?.chargeCredits ?? 0) : null,
-        // Část ceny odhadnutá z tokenů (dokumenty bez záznamu odečtu); 0 = vše skutečné
+        // Část ceny odhadnutá z tokenů (dokumenty bez záznamu odečtu); 0 = vše skutečné.
+        // UI ji nezobrazuje – diagnostický údaj.
         chargeEstimatedCredits: isOwner ? (tokens?.estimatedCredits ?? 0) : null,
       },
     };
