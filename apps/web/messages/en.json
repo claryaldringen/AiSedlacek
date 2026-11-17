@@ -193,7 +193,26 @@
     "original": "Original",
     "cancelSaving": "Cancel",
     "savingInProgress": "Saving…",
-    "readOnly": "Read-only"
+    "readOnly": "Read-only",
+    "searchPlaceholder": "Search in texts…",
+    "searchLabel": "Search transcription and translation",
+    "searchClear": "Clear search",
+    "searchNoMatch": "No match",
+    "searchPosition": "{position} / {total}",
+    "searchPositionOutside": "– / {total}",
+    "searchPagesWithMatch": "{total, plural, one {# page} other {# pages}} with a match",
+    "searchMatchesOnPageShort": "{count}×",
+    "searchMatchesOnPage": "{count, plural, one {# match} other {# matches}} on this page",
+    "searchPreviousMatch": "Previous page with a match (Shift+Enter)",
+    "searchNextMatch": "Next page with a match (Enter)",
+    "searchSearching": "Searching…",
+    "searchFailed": "Search failed",
+    "searchStatusOnPage": "Page {position} of {total} with a match, {count, plural, one {# match} other {# matches}} on this page",
+    "searchStatusOutside": "No match on this page, {total, plural, one {# page} other {# pages}} with a match",
+    "navigationBlockedByEdit": "Save or cancel the text you are editing first – switching pages would discard it.",
+    "searchTruncatedNote": "There are more matches; only the first pages were searched.",
+    "searchTooMany": "Too many results – refine your search",
+    "searchTooManyShort": "Refine search"
   },
   "collection": {
     "newCollection": "New volume",
@@ -316,6 +335,7 @@
     "pageNotFound": "Page not found",
     "documentNotFound": "Document not found",
     "collectionNotFound": "Collection not found",
+    "searchQueryTooLong": "Search query is too long (at most {max} characters)",
     "workspaceNotFound": "Workspace not found",
     "slugTaken": "This slug is already taken",
     "unauthorized": "Unauthorized",
@@ -509,7 +529,10 @@
     "searchAllCollections": "Search all volumes",
     "searchResults": "{count, plural, one {# result} other {# results}}",
     "searchNoResults": "No results found",
-    "searchMatches": "{count}×"
+    "searchMatches": "{count}×",
+    "searchResultsTruncated": "{count}+ results (only the first are shown)",
+    "searchFailed": "Search failed",
+    "searchTooMany": "Too many results – refine your search"
   },
   "sidebar": {
     "loading": "Loading...",

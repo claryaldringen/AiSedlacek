@@ -32,6 +32,22 @@ import { isReadOnly, readCanEdit, type EditAccess } from '@/lib/read-only';
 import { formatCzk } from '@/lib/pricing';
 import { addChatUsageToDocument } from '@/lib/chat-usage';
 import { PanelLoadGuard, applyResultPatch, applyResultUpdate } from '@/lib/panel-result';
+import {
+  getSearchNavigation,
+  gridSearchResults,
+  resultsForKey,
+  searchKey,
+  type SearchResultsState,
+} from '@/lib/search-navigation';
+import { visibleTranslation } from '@/lib/visible-translation';
+
+/** Výsledek hledání pro jednu stránku (`/api/pages/search`). */
+interface SearchHit {
+  matches: number;
+  snippet: string;
+  collectionId: string | null;
+  collectionName: string | null;
+}
 
 /** Shape of a document API response with translations */
 interface DocApiResponse {
@@ -78,10 +94,9 @@ function mapDocToResult(
   cached: boolean,
 ): DocumentResult | null {
   // Cizí dokument (canEdit false) si uživatel nemůže nechat přeložit do svého
-  // jazyka – ukázat aspoň existující překlad v jiném jazyce.
-  const translation =
-    doc.translations.find((tr) => tr.language === locale) ??
-    (doc.canEdit === false ? doc.translations[0] : undefined);
+  // jazyka – ukázat aspoň existující překlad v jiném jazyce (tentýž, ve kterém
+  // hledá /api/pages/search).
+  const translation = visibleTranslation(doc.translations, locale, doc.canEdit !== false);
   if (!translation) return null;
   const context = translation?.context || doc.context;
   const glossary: { term: string; definition: string }[] = translation?.glossaryJson
@@ -187,18 +202,16 @@ function WorkspaceContent(): React.JSX.Element {
   // Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<
-    Map<
-      string,
-      {
-        matches: number;
-        snippet: string;
-        collectionId: string | null;
-        collectionName: string | null;
-      }
-    >
-  >(new Map());
+  // Výsledky s klíčem výrazu, pro který přišly (searchKey) – během psaní se
+  // podle výsledků předchozího výrazu nezvýrazňuje ani nelistuje
+  const [searchResults, setSearchResults] = useState<SearchResultsState<SearchHit> | null>(null);
+  // Zvyšuje se po uložení přepisu/překladu – hledání se zopakuje (nové počty shod)
+  const [searchRevision, setSearchRevision] = useState(0);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Výraz bez okrajových mezer – pro hledání, klíč výsledků i zvýraznění (pole
+  // samo drží nezkrácený text, jinak by nešlo napsat mezeru mezi slovy)
+  const q = searchQuery.trim();
+  const currentSearchKey = isSearchOpen ? searchKey(q, selectedCollectionId, locale) : null;
 
   // Document panel
   const [panelPage, setPanelPage] = useState<PageItem | null>(null);
@@ -217,33 +230,33 @@ function WorkspaceContent(): React.JSX.Element {
   const [contentDragOver, setContentDragOver] = useState(false);
   const contentAreaRef = useRef<HTMLDivElement>(null);
 
-  // Search — debounced API call
+  // Search — debounced API call. Výsledky závisí i na jazyku UI (API hledá jen
+  // v překladu do něj). Odpověď na starší dotaz se zahodí; výsledky se uloží
+  // s klíčem výrazu, takže stav „Hledám…“ trvá, dokud nedorazí ty aktuální.
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    if (!isSearchOpen || searchQuery.length < 2) {
-      setSearchResults(new Map());
+    const key = currentSearchKey;
+    if (key === null) {
+      setSearchResults(null);
       return;
     }
 
+    const controller = new AbortController();
     searchTimeoutRef.current = setTimeout(async () => {
-      const params = new URLSearchParams({ q: searchQuery });
+      const params = new URLSearchParams({ q });
       if (selectedCollectionId) {
         params.set('collectionId', selectedCollectionId);
       }
       try {
-        const res = await apiFetch(`/api/pages/search?${params}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const map = new Map<
-          string,
-          {
-            matches: number;
-            snippet: string;
-            collectionId: string | null;
-            collectionName: string | null;
-          }
-        >();
+        const res = await apiFetch(`/api/pages/search?${params}`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          results: ({ pageId: string } & SearchHit)[];
+          truncated?: boolean;
+        };
+        if (controller.signal.aborted) return;
+        const map = new Map<string, SearchHit>();
         for (const r of data.results) {
           map.set(r.pageId, {
             matches: r.matches,
@@ -252,16 +265,23 @@ function WorkspaceContent(): React.JSX.Element {
             collectionName: r.collectionName,
           });
         }
-        setSearchResults(map);
+        setSearchResults({ key, results: map, truncated: data.truncated === true });
       } catch {
-        // ignore
+        // Chyba hledání se v panelu ukáže („Hledání selhalo“), ne jako „žádná shoda“
+        if (!controller.signal.aborted) setSearchResults({ key, results: new Map(), failed: true });
       }
     }, 300);
 
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      controller.abort();
     };
-  }, [searchQuery, isSearchOpen, selectedCollectionId]);
+    // currentSearchKey v sobě nese q, svazek i jazyk; searchRevision = nové počty po uložení
+  }, [currentSearchKey, q, selectedCollectionId, searchRevision]);
+
+  // Výsledky platné pro aktuální výraz (null = nehledá se, nebo se ještě hledá)
+  const activeSearch = resultsForKey(searchResults, currentSearchKey);
+  const searchPending = currentSearchKey !== null && activeSearch === null;
 
   // Collections visible only in "all" view (no specific collection selected)
   const visibleCollections = selectedCollectionId === null ? collections : [];
@@ -702,11 +722,29 @@ function WorkspaceContent(): React.JSX.Element {
     setIsSearchOpen((prev) => {
       if (prev) {
         setSearchQuery('');
-        setSearchResults(new Map());
+        setSearchResults(null);
       }
       return !prev;
     });
   }, []);
+
+  // Hledání z panelu stránky – tentýž výraz jako v liště; psaní do prázdného pole
+  // hledání zapne (lišta nad mřížkou se otevře s ním).
+  const handleSearchQueryChange = useCallback((query: string) => {
+    setSearchQuery(query);
+    if (query) setIsSearchOpen(true);
+  }, []);
+
+  const handleSearchClear = useCallback(() => {
+    setIsSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults(null);
+  }, []);
+
+  // Uložený přepis/překlad mění počty shod – při aktivním hledání ho zopakovat
+  const handleTextSaved = useCallback(() => {
+    if (currentSearchKey !== null) setSearchRevision((r) => r + 1);
+  }, [currentSearchKey]);
 
   // Ctrl+F shortcut to open search
   useEffect(() => {
@@ -1150,7 +1188,25 @@ function WorkspaceContent(): React.JSX.Element {
     [shareTarget],
   );
 
-  const searchMatchIds = isSearchOpen && searchQuery.length >= 2 ? searchResults : null;
+  // Mřížka: poslední platné výsledky, dokud nedorazí nové (při psaní nebliká);
+  // po chybě hledání nic
+  const searchMatchIds = gridSearchResults(searchResults, currentSearchKey);
+  const activeSearchResults = activeSearch?.results ?? null;
+
+  // Listování mezi stránkami se shodou v panelu – jen nad výsledky aktuálního
+  // výrazu, v pořadí mřížky, jen mezi zobrazenými stránkami (stejně jako
+  // předchozí/další stránka)
+  const panelSearchNavigation = useMemo(
+    () => getSearchNavigation(pages, panelPage?.id ?? null, activeSearchResults),
+    [pages, panelPage?.id, activeSearchResults],
+  );
+  const openPanelPageById = useCallback(
+    (pageId: string | null): void => {
+      const page = pageId ? pages.find((p) => p.id === pageId) : undefined;
+      if (page) void handlePageDoubleClick(page);
+    },
+    [pages, handlePageDoubleClick],
+  );
 
   // At root level, compute which collections have matching pages
   const searchMatchCollectionIds = useMemo(() => {
@@ -1254,7 +1310,13 @@ function WorkspaceContent(): React.JSX.Element {
         onSearchToggle={handleSearchToggle}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        searchResultCount={searchResults.size}
+        searchResultCount={
+          activeSearch && !activeSearch.failed ? activeSearch.results.size : undefined
+        }
+        searchTruncated={activeSearch?.truncated ?? false}
+        searchFailed={activeSearch?.failed ?? false}
+        // Hledání zapnuté psaním v panelu stránky nesmí panelu ukrást fokus
+        searchAutoFocus={panelPage === null}
       />
 
       {/* Cizí svazek (sdílený workspace, veřejný obsah) – jen pro čtení */}
@@ -1855,7 +1917,20 @@ function WorkspaceContent(): React.JSX.Element {
           const idx = pages.findIndex((p) => p.id === panelPage.id);
           if (idx >= 0 && idx < pages.length - 1) void handlePageDoubleClick(pages[idx + 1]!);
         }}
-        highlightQuery={isSearchOpen ? searchQuery : undefined}
+        highlightQuery={isSearchOpen ? q : undefined}
+        search={{
+          // Pole drží nezkrácený text (mezera mezi slovy); hledá se a zvýrazňuje `q`
+          query: isSearchOpen ? searchQuery : '',
+          onQueryChange: handleSearchQueryChange,
+          onClear: handleSearchClear,
+          navigation: panelSearchNavigation,
+          pending: searchPending,
+          failed: activeSearch?.failed ?? false,
+          truncated: activeSearch?.truncated ?? false,
+          onPrevious: () => openPanelPageById(panelSearchNavigation.previousId),
+          onNext: () => openPanelPageById(panelSearchNavigation.nextId),
+        }}
+        onTextSaved={handleTextSaved}
         readOnly={panelReadOnly}
       />
     </AppShell>
